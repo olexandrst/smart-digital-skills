@@ -1,0 +1,53 @@
+"""Фабрика застосунку Smart-ProfiHub."""
+import os
+from flask import Flask, jsonify, send_from_directory
+
+from app.config import get_config, INSTANCE_DIR
+from app.extensions import db, jwt, cors
+from app.core.errors import register_error_handlers
+
+
+def create_app(config_object=None):
+    app = Flask(__name__, static_folder="static", static_url_path="")
+    app.config.from_object(config_object or get_config())
+
+    os.makedirs(INSTANCE_DIR, exist_ok=True)
+
+    db.init_app(app)
+    jwt.init_app(app)
+    cors.init_app(app, resources={r"/api/*": {"origins": "*"}})
+
+    # Імпорт моделей реєструє таблиці в metadata.
+    from app import models  # noqa: F401
+
+    from app.api import register_blueprints
+    register_blueprints(app)
+    register_error_handlers(app)
+    _register_jwt_handlers()
+
+    @app.get("/api/health")
+    def health():
+        return jsonify({"status": "ok", "service": "smart-profihub"})
+
+    @app.get("/")
+    def index():
+        return send_from_directory(app.static_folder, "index.html")
+
+    return app
+
+
+def _register_jwt_handlers():
+    @jwt.expired_token_loader
+    def expired(_h, _p):
+        return jsonify({"error": "token_expired",
+                        "message": "Термін дії токена вичерпано"}), 401
+
+    @jwt.invalid_token_loader
+    def invalid(_e):
+        return jsonify({"error": "invalid_token",
+                        "message": "Недійсний токен"}), 401
+
+    @jwt.unauthorized_loader
+    def missing(_e):
+        return jsonify({"error": "authorization_required",
+                        "message": "Потрібна авторизація"}), 401
