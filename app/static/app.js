@@ -96,6 +96,15 @@ $("#login-form").addEventListener("submit", async (e) => {
 });
 $("#logout-btn").addEventListener("click", logout);
 
+// Перемикач показу пароля.
+const pwToggle = $("#pw-toggle");
+if (pwToggle) pwToggle.addEventListener("click", () => {
+  const inp = $("#login-password");
+  const show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  pwToggle.classList.toggle("active", show);
+});
+
 function showLogin() {
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");

@@ -22,26 +22,146 @@ body {
 
 .hidden { display: none !important; }
 
-/* Логін */
-.login-screen {
+/* ===== Екран входу (лендинг) ===== */
+.auth {
   min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background:
+    radial-gradient(1100px 700px at 88% 30%, rgba(124, 92, 255, 0.22), transparent 60%),
+    radial-gradient(900px 600px at 70% 90%, rgba(227, 92, 200, 0.14), transparent 60%),
+    linear-gradient(160deg, #0a0e1f 0%, #0b1024 55%, #0a0e1f 100%);
 }
-.login-card {
-  background: var(--panel);
-  padding: 40px;
-  border-radius: 16px;
-  width: 340px;
+
+.auth-left {
+  padding: 56px clamp(32px, 6vw, 88px);
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  border: 1px solid var(--border);
+  justify-content: center;
+  max-width: 720px;
 }
-.login-card h1 { margin: 0; text-align: center; }
-.subtitle { margin: 0 0 10px; text-align: center; color: var(--muted); }
-.hint { text-align: center; color: var(--muted); font-size: 13px; }
+
+.auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 44px; }
+.brand-mark { width: 40px; height: 40px; }
+.brand-name { font-size: 22px; font-weight: 700; letter-spacing: 0.2px; }
+
+.auth-headline {
+  font-size: clamp(40px, 5.2vw, 68px);
+  line-height: 1.05;
+  font-weight: 800;
+  margin: 0 0 22px;
+  letter-spacing: -1px;
+}
+.auth-headline .grad {
+  background: linear-gradient(90deg, #4f86ff 0%, #7c5cff 45%, #e35cc8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+.auth-sub {
+  color: var(--muted);
+  font-size: clamp(15px, 1.4vw, 18px);
+  line-height: 1.6;
+  margin: 0 0 36px;
+}
+
+.login-card {
+  background: rgba(18, 24, 44, 0.72);
+  backdrop-filter: blur(10px);
+  padding: 32px;
+  border-radius: 18px;
+  width: 100%;
+  max-width: 470px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.35);
+}
+.login-card h2 { margin: 0; font-size: 26px; }
+.card-sub { margin: -6px 0 8px; color: var(--muted); font-size: 14px; }
+.hint { color: var(--muted); font-size: 13px; }
+.hint b { color: var(--text); }
+
+/* Поля з іконками */
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap .input-icon {
+  position: absolute; left: 14px; width: 20px; height: 20px;
+  fill: var(--muted); pointer-events: none;
+}
+.input-wrap input {
+  padding: 14px 44px;
+  background: rgba(12, 17, 33, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 10px;
+}
+.input-wrap input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+}
+.pw-toggle {
+  position: absolute; right: 8px; background: transparent; border: none;
+  padding: 6px; cursor: pointer; display: flex;
+}
+.pw-toggle svg { width: 20px; height: 20px; fill: var(--muted); }
+.pw-toggle:hover svg { fill: var(--text); }
+
+.btn-primary {
+  margin-top: 4px;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #5b6cff, #6d5cff);
+  box-shadow: 0 10px 24px rgba(91, 108, 255, 0.35);
+}
+.btn-primary:hover { background: linear-gradient(90deg, #6675ff, #7a68ff); }
+
+/* Права панель з ілюстрацією та чипами */
+.auth-right { position: relative; overflow: hidden; }
+.auth-glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(60% 55% at 60% 35%, rgba(124, 92, 255, 0.30), transparent 70%);
+}
+.auth-hero {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center;
+}
+.feature-chips {
+  position: absolute; right: clamp(24px, 4vw, 70px); top: 50%;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 18px; z-index: 2;
+}
+.chip {
+  display: flex; align-items: center; gap: 14px;
+  background: rgba(16, 22, 42, 0.72);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  padding: 14px 18px;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.3);
+}
+.chip span:last-child { display: flex; flex-direction: column; line-height: 1.25; }
+.chip b { font-size: 15px; }
+.chip small { color: var(--muted); font-size: 12.5px; }
+.chip-ic {
+  width: 40px; height: 40px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
+}
+.chip-ic svg { width: 20px; height: 20px; fill: #fff; }
+.chip-ic.chat { background: linear-gradient(135deg, #3b82f6, #60a5fa); }
+.chip-ic.db   { background: linear-gradient(135deg, #7c5cff, #a78bfa); }
+.chip-ic.book { background: linear-gradient(135deg, #e35cc8, #f472b6); }
+
+@media (max-width: 900px) {
+  .auth { grid-template-columns: 1fr; }
+  .auth-right { display: none; }
+  .auth-left { max-width: none; align-items: center; text-align: center; }
+  .auth-headline, .auth-sub { text-align: center; }
+  .login-card { align-self: center; }
+}
 
 input, select, textarea {
   background: var(--panel-2);
