@@ -129,7 +129,7 @@ body {
 }
 .auth-hero {
   position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1;
-  object-fit: cover; object-position: center;
+  object-fit: cover; object-position: 60% center;
 }
 
 @media (max-width: 900px) {

@@ -7,6 +7,8 @@ INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 
 
 class BaseConfig:
+    # Не кешувати статику (щоб уникати застарілих CSS/JS у браузері).
+    SEND_FILE_MAX_AGE_DEFAULT = 0
     # Дефолти ≥32 байти (для dev). У production обов'язково задайте власні у .env.
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-me-in-production-0001")
     JWT_SECRET_KEY = os.getenv(
