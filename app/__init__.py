@@ -39,6 +39,17 @@ def create_app(config_object=None):
     def index():
         return send_from_directory(app.static_folder, "index.html")
 
+    @app.get("/files/<guid>/<path:filename>")
+    def public_user_file(guid, filename):
+        """Пряме клікабельне посилання на файл користувача: /files/<GUID>/<FILE>.
+
+        GUID (storage_uid) виступає як неперебірний капабіліті-токен. Каталог —
+        усередині застосунку (instance/user_files). send_from_directory захищає
+        від виходу за межі теки.
+        """
+        base = os.path.join(app.config["USER_FILES_DIR"], guid)
+        return send_from_directory(base, filename)
+
     return app
 
 

@@ -25,6 +25,17 @@ def _safe_basename(name):
     return base[:120] or "file"
 
 
+def _unique_name(directory, name):
+    """Унікальна назва у теці: report.txt → report_1.txt, report_2.txt, …"""
+    if not os.path.exists(os.path.join(directory, name)):
+        return name
+    stem, ext = os.path.splitext(name)
+    i = 1
+    while os.path.exists(os.path.join(directory, f"{stem}_{i}{ext}")):
+        i += 1
+    return f"{stem}_{i}{ext}"
+
+
 def ensure_storage_uid(user):
     if not user.storage_uid:
         user.storage_uid = uuid.uuid4().hex
@@ -47,22 +58,22 @@ def save_bytes(user, filename, data, source="upload", skill_id=None):
                        400, "file_too_large")
 
     directory = user_dir(user)
+    # Зберігаємо під оригінальною (очищеною) назвою, щоб публічний URL був
+    # виду /files/<GUID>/<FILENAME>; за потреби — дедуплікація назви.
+    stored = _unique_name(directory, _safe_basename(filename))
+    with open(os.path.join(directory, stored), "wb") as fh:
+        fh.write(data)
+
     uf = UserFile(
         user_id=user.id,
-        filename=filename or "file",
-        stored_name="",  # заповнимо після отримання id
-        content_type=(mimetypes.guess_type(filename or "")[0] or "application/octet-stream"),
+        filename=stored,
+        stored_name=stored,
+        content_type=(mimetypes.guess_type(stored)[0] or "application/octet-stream"),
         size=len(data),
         source=source,
         skill_id=skill_id,
     )
     db.session.add(uf)
-    db.session.flush()
-
-    stored = f"{uf.id}_{_safe_basename(filename)}"
-    with open(os.path.join(directory, stored), "wb") as fh:
-        fh.write(data)
-    uf.stored_name = stored
     db.session.commit()
     return uf
 

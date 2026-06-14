@@ -50,6 +50,11 @@ class BaseConfig:
         "USER_FILES_DIR", os.path.join(INSTANCE_DIR, "user_files"))
     # Максимальний розмір одного файлу користувача (байти).
     USER_FILE_MAX_BYTES = int(os.getenv("USER_FILE_MAX_BYTES", str(25 * 1024 * 1024)))
+    # Тимчасова тека для виконання скілів — усередині застосунку (не /tmp).
+    SKILL_RUN_DIR = os.getenv("SKILL_RUN_DIR", os.path.join(INSTANCE_DIR, "run_tmp"))
+
+    # Ліміт токенів за замовчуванням на користувача (Admin може змінити окремо).
+    DEFAULT_USER_TOKEN_LIMIT = int(os.getenv("DEFAULT_USER_TOKEN_LIMIT", "2000"))
     # Чи дозволено реально виконувати код зі скілів-пакетів.
     SKILL_EXEC_ENABLED = os.getenv("SKILL_EXEC_ENABLED", "1") == "1"
     # Таймаут одного виконання (секунди).

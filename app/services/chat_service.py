@@ -11,7 +11,7 @@ from app.models import (
     Skill, UserSkill, Model, ChatSession, ChatMessage, TokenUsageLog,
 )
 from app.integrations import get_client_for_model
-from app.services import package_service
+from app.services import package_service, quota_service
 
 # Скільки останніх повідомлень передавати моделі як контекст діалогу.
 HISTORY_LIMIT = 20
@@ -78,6 +78,7 @@ def _execute_skill(skill, inputs, user):
         result = package_service.run_package(skill, inputs, user=user)
         return result["output"], result["usage"], result.get("files", [])
 
+    quota_service.ensure_within_limit(user)
     prompt = _build_prompt(skill, inputs)
     client = get_client_for_model(skill.model)
     res = client.complete(skill.model.deployment_name, prompt, _skill_params(skill))
@@ -133,6 +134,7 @@ def send_message(user, session_id, content, skill_id=None):
         if not model.is_active:
             raise ApiError("Модель неактивна та недоступна для чату", 400, "model_inactive")
         model_id = model.id
+        quota_service.ensure_within_limit(user)
 
         if applied_skill is not None:
             prompt_content = _build_prompt(

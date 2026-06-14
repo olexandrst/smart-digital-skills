@@ -322,7 +322,10 @@ def run_package(skill, inputs, user=None):
     with open(skill.package_path, "rb") as fh:
         file_bytes = fh.read()
 
-    workdir = tempfile.mkdtemp(prefix="skillrun_")
+    # Робоча тека — усередині застосунку (instance/run_tmp), не у /tmp.
+    run_dir = cfg.get("SKILL_RUN_DIR") or os.path.join(os.getcwd(), "instance", "run_tmp")
+    os.makedirs(run_dir, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix="skillrun_", dir=run_dir)
     try:
         root = _safe_extract(file_bytes, workdir)
         rel_entry = skill.entrypoint or "main.py"

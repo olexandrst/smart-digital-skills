@@ -20,6 +20,7 @@ class TestConfig(BaseConfig):
     # Артефакти тестів — у тимчасову теку, не у instance/.
     SKILL_PACKAGES_DIR = os.path.join(_TMP, "skill_packages")
     USER_FILES_DIR = os.path.join(_TMP, "user_files")
+    SKILL_RUN_DIR = os.path.join(_TMP, "run_tmp")
 
 
 @pytest.fixture

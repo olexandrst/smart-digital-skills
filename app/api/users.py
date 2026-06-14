@@ -5,15 +5,34 @@ from app.core.permissions import require_global_role
 from app.core.security import hash_password
 from app.core.errors import ApiError
 from app.models import User, Role, UserRole
+from app.services import quota_service
 
 bp = Blueprint("users", __name__)
+
+
+def _with_quota(user):
+    d = user.to_dict()
+    d["token_limit"] = quota_service.get_limit(user.id)
+    d["token_used"] = quota_service.get_used(user.id)
+    return d
 
 
 @bp.get("")
 @require_global_role("admin")
 def list_users():
     users = User.query.order_by(User.id).all()
-    return jsonify([u.to_dict() for u in users])
+    return jsonify([_with_quota(u) for u in users])
+
+
+@bp.post("/<int:user_id>/token-limit")
+@require_global_role("admin")
+def set_token_limit(user_id):
+    user = User.query.get_or_404(user_id)
+    data = request.get_json(silent=True) or {}
+    if "limit" not in data:
+        raise ApiError("Вкажіть limit", 400, "validation_error")
+    limit = quota_service.set_limit(user.id, data["limit"])
+    return jsonify({"user_id": user.id, "token_limit": limit})
 
 
 @bp.post("")

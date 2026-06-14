@@ -21,6 +21,14 @@ class UserFile(db.Model):
     skill_id = db.Column(db.Integer, db.ForeignKey("skills.id"))     # якщо створено скілом
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
+    user = db.relationship("User", lazy="joined")
+
+    @property
+    def public_url(self):
+        """Публічне посилання /files/<GUID>/<FILENAME> (без /api, клікабельне)."""
+        guid = self.user.storage_uid if self.user else ""
+        return f"/files/{guid}/{self.stored_name}"
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -30,5 +38,6 @@ class UserFile(db.Model):
             "source": self.source,
             "skill_id": self.skill_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "url": self.public_url,
             "download_url": f"/api/files/{self.id}/download",
         }

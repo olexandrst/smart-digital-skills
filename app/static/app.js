@@ -49,14 +49,19 @@ async function downloadFile(id, name) {
   } catch (err) { toast(err.message, "err"); }
 }
 
-// Рендерить блок із кнопками завантаження створених файлів.
+// Повне клікабельне посилання на файл (хост — поточний).
+function fileUrl(f) { return location.origin + f.url; }
+
+// Рендерить блок із клікабельними посиланнями на створені файли.
 function renderFileLinks(files) {
   if (!files || !files.length) return null;
   const box = el(`<div class="file-links"><div class="muted">Створені файли:</div></div>`);
   files.forEach(f => {
-    const btn = el(`<button class="small">⬇ ${esc(f.filename)} (${fmtSize(f.size)})</button>`);
-    btn.addEventListener("click", () => downloadFile(f.id, f.filename));
-    box.appendChild(btn);
+    const url = fileUrl(f);
+    const a = el(`<a class="file-link" href="${url}" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2ZM12 4v9l3.5-3.5 1.4 1.4L12 16l-4.9-5.1 1.4-1.4L12 13V4h0Z"/></svg>
+      <span>${esc(url)}</span></a>`);
+    box.appendChild(a);
   });
   return box;
 }
@@ -118,13 +123,24 @@ async function showApp() {
   $("#user-roles").textContent = state.user.roles.length ? state.user.roles.join(", ") : "member";
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
-  refreshTokenBalance();
+  refreshQuota();
 }
 
-async function refreshTokenBalance() {
+async function refreshQuota() {
   try {
     const u = await api("/usage/me");
-    $("#token-balance-num").textContent = (u.total_tokens || 0).toLocaleString("uk-UA");
+    const q = u.quota || { used: u.total_tokens || 0, limit: 0, percent: 0 };
+    const fmt = (n) => (n || 0).toLocaleString("uk-UA");
+    $("#quota-used").textContent = fmt(q.used);
+    $("#quota-limit").textContent = q.limit ? fmt(q.limit) : "∞";
+    const pct = Math.max(0, Math.min(100, q.percent || 0));
+    const fill = $("#quota-fill");
+    fill.style.width = pct + "%";
+    // Колір: зелений → бурштиновий → червоний.
+    const color = pct >= 90 ? "var(--danger)" : pct >= 70 ? "#f59e0b" : "var(--ok)";
+    fill.style.background = color;
+    $("#quota").classList.toggle("quota-full", pct >= 100);
+    $("#quota").title = `Використано ${fmt(q.used)} з ${q.limit ? fmt(q.limit) : "∞"} токенів (${pct}%)`;
   } catch (e) { /* ignore */ }
 }
 
@@ -180,7 +196,7 @@ async function openTab(id) {
   $("#view").innerHTML = `<p class="muted">Завантаження…</p>`;
   try { await tab.view(); }
   catch (err) { $("#view").innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`; }
-  refreshTokenBalance();
+  refreshQuota();
 }
 
 // ---------- Чат з обраною моделлю ----------
@@ -335,6 +351,7 @@ async function openChatSession(sessionId) {
       $("#chat-header").innerHTML =
         `<strong>${esc(session.title || "Чат")}</strong> · модель: ${esc(session.model_name || "—")} · разом: ${res.session_total_tokens} тк`;
       refreshSessionList();
+      refreshQuota();
     } catch (err) { toast(err.message, "err"); }
     finally { sendBtn.disabled = false; }
   };
@@ -391,6 +408,7 @@ async function openRunner(skillId) {
       const fl = renderFileLinks(res.files);
       if (fl) log.appendChild(fl);
       log.scrollTop = log.scrollHeight;
+      refreshQuota();
       toast(`Токенів використано: ${res.usage.total_tokens}`);
     } catch (err) { toast(err.message, "err"); }
     finally { $("#run-btn").disabled = false; }
@@ -465,14 +483,13 @@ async function viewFiles() {
     const src = f.source === "skill_run" ? "скіл" : "завантажено";
     const date = f.created_at ? f.created_at.replace("T", " ").slice(0, 16) : "";
     const tr = el(`<tr>
-      <td>${esc(f.filename)}</td><td><span class="badge">${src}</span></td>
+      <td><a class="file-link inline" href="${fileUrl(f)}" target="_blank" rel="noopener">${esc(f.filename)}</a></td>
+      <td><span class="badge">${src}</span></td>
       <td>${fmtSize(f.size)}</td><td>${esc(date)}</td>
       <td class="actions">
-        <button class="small" data-act="dl">⬇ Завантажити</button>
         <button class="small danger" data-act="del">Видалити</button>
       </td>
     </tr>`);
-    tr.querySelector("[data-act='dl']").addEventListener("click", () => downloadFile(f.id, f.filename));
     tr.querySelector("[data-act='del']").addEventListener("click", async () => {
       if (!confirm(`Видалити файл «${f.filename}»?`)) return;
       try { await api(`/files/${f.id}`, { method: "DELETE" }); toast("Файл видалено"); openTab("files"); }
@@ -719,7 +736,7 @@ async function viewUsers() {
         <button id="u-add">Створити</button>
       </div>
     </div>
-    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Ролі</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
+    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Ролі</th><th>Ліміт токенів</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
   $("#u-add").addEventListener("click", async () => {
     const roles = $("#u-role").value ? [$("#u-role").value] : [];
     try { await api("/users", { method: "POST", body: {
@@ -729,12 +746,24 @@ async function viewUsers() {
   });
   const body = $("#u-body");
   users.forEach(u => {
+    const used = (u.token_used || 0).toLocaleString("uk-UA");
+    const limit = (u.token_limit || 0).toLocaleString("uk-UA");
     const tr = el(`<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.full_name || "")}</td>
-      <td>${u.roles.join(", ") || "member"}</td><td>${u.is_active ? "✓" : "—"}</td>
+      <td>${u.roles.join(", ") || "member"}</td>
+      <td><span class="muted">${used} /</span> ${limit}
+        <button class="small ghost" data-act="limit">Змінити</button></td>
+      <td>${u.is_active ? "✓" : "—"}</td>
       <td class="actions"><button class="small" data-act="reset" data-id="${u.id}">Скинути пароль</button>
       <button class="small ghost" data-act="toggle" data-id="${u.id}" data-active="${u.is_active}">${u.is_active ? "Деактивувати" : "Активувати"}</button></td>
     </tr>`);
+    tr.querySelector("[data-act='limit']").addEventListener("click", async () => {
+      const v = prompt(`Ліміт токенів для «${u.username}»:`, u.token_limit);
+      if (v === null) return;
+      try { await api(`/users/${u.id}/token-limit`, { method: "POST", body: { limit: Number(v) }});
+        toast("Ліміт оновлено"); openTab("users"); }
+      catch (err) { toast(err.message, "err"); }
+    });
     tr.querySelector("[data-act='reset']").addEventListener("click", async () => {
       const p = prompt("Новий пароль (мін. 6 символів):");
       if (!p) return;

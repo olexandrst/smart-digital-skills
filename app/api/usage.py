@@ -5,6 +5,7 @@ from app.extensions import db
 from app.core.permissions import require_auth, require_global_role, require_group_role
 from app.core.security import current_user
 from app.models import TokenUsageLog, User
+from app.services import quota_service
 
 bp = Blueprint("usage", __name__)
 
@@ -28,8 +29,9 @@ def _aggregate(query):
 @require_auth
 def my_usage():
     user = current_user()
-    q = TokenUsageLog.query.filter_by(user_id=user.id)
-    return jsonify(_aggregate(q))
+    data = _aggregate(TokenUsageLog.query.filter_by(user_id=user.id))
+    data["quota"] = quota_service.status(user.id)
+    return jsonify(data)
 
 
 @bp.get("/group/<int:group_id>")

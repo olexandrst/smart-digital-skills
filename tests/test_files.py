@@ -34,6 +34,20 @@ def test_upload_list_download_delete(client):
     assert client.get(f"/api/files/{fid}/download", headers=auth(token)).status_code == 404
 
 
+def test_public_url_download(client):
+    """Файл доступний за публічним посиланням /files/<GUID>/<FILENAME>."""
+    token = login(client, "u1", "pass")
+    res = client.post("/api/files", headers=auth(token),
+                      data={"file": (io.BytesIO(b"public content"), "doc.txt")},
+                      content_type="multipart/form-data").get_json()
+    url = res["url"]
+    assert url.startswith("/files/") and url.endswith("/doc.txt")
+    # Публічний маршрут віддає вміст (без заголовка авторизації).
+    dl = client.get(url)
+    assert dl.status_code == 200
+    assert dl.data == b"public content"
+
+
 def test_files_are_isolated_per_user(client):
     t1 = login(client, "u1", "pass")
     fid = client.post("/api/files", headers=auth(t1),
