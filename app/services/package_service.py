@@ -360,9 +360,34 @@ def run_package(skill, inputs, user=None):
         entry_abs = os.path.abspath(entry)
         root_abs = os.path.abspath(root)
         bootstrap = (
-            "import sys, runpy\n"
+            "import sys, os, io, builtins, runpy\n"
+            f"_ROOT = {root_abs!r}\n"
+            # Перенаправляємо записи у /tmp та /var/tmp у робочу теку додатка,
+            # щоб файли, які скіл пише в абсолютний /tmp, зберігались у застосунку
+            # і потрапляли у сховище користувача.
+            "def _remap(p):\n"
+            "    try: s = os.fspath(p)\n"
+            "    except Exception: return p\n"
+            "    if isinstance(s, str):\n"
+            "        for pref in ('/tmp/', '/var/tmp/', '/private/tmp/'):\n"
+            "            if s.startswith(pref):\n"
+            "                return os.path.join(_ROOT, os.path.basename(s) or 'output')\n"
+            "    return p\n"
+            "_ro = builtins.open\n"
+            "def _open(file, *a, **k): return _ro(_remap(file), *a, **k)\n"
+            "builtins.open = _open\n"
+            "io.open = _open\n"
+            "_oso = os.open\n"
+            "def _osopen(path, *a, **k): return _oso(_remap(path), *a, **k)\n"
+            "os.open = _osopen\n"
+            "for _fn in ('replace', 'rename'):\n"
+            "    _orig = getattr(os, _fn)\n"
+            "    def _mk(o):\n"
+            "        def _w(src, dst, *a, **k): return o(_remap(src), _remap(dst), *a, **k)\n"
+            "        return _w\n"
+            "    setattr(os, _fn, _mk(_orig))\n"
             f"sys.path.insert(0, {os.path.dirname(entry_abs)!r})\n"
-            f"sys.path.insert(0, {root_abs!r})\n"
+            f"sys.path.insert(0, _ROOT)\n"
             f"runpy.run_path({entry_abs!r}, run_name='__main__')\n"
         )
         timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 30))
