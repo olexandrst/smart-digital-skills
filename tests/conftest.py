@@ -11,6 +11,7 @@ class TestConfig(BaseConfig):
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     JWT_SECRET_KEY = "test"
     SECRET_KEY = "test"
+    AUTO_MIGRATE = False  # тести керують схемою самостійно
 
 
 @pytest.fixture

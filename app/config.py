@@ -7,8 +7,10 @@ INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 
 
 class BaseConfig:
-    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
-    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-key")
+    # Дефолти ≥32 байти (для dev). У production обов'язково задайте власні у .env.
+    SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-me-in-production-0001")
+    JWT_SECRET_KEY = os.getenv(
+        "JWT_SECRET_KEY", "dev-jwt-secret-key-change-me-in-production-0001")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=1)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
 
@@ -17,6 +19,9 @@ class BaseConfig:
         "DATABASE_URL",
         "sqlite:///" + os.path.join(INSTANCE_DIR, "profihub.db"),
     )
+
+    # Additive-автоміграція схеми при старті (SQLite, MVP без Alembic).
+    AUTO_MIGRATE = os.getenv("AUTO_MIGRATE", "1") == "1"
 
     # Глобальний перемикач моку для всіх LLM-провайдерів.
     # За замовчуванням увімкнено (MVP працює без зовнішніх ключів).

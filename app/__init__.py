@@ -25,6 +25,12 @@ def create_app(config_object=None):
     register_error_handlers(app)
     _register_jwt_handlers()
 
+    # Additive-автоміграція схеми (SQLite, MVP без Alembic).
+    if app.config.get("AUTO_MIGRATE", True):
+        from app.core.schema import sync_schema
+        with app.app_context():
+            sync_schema()
+
     @app.get("/api/health")
     def health():
         return jsonify({"status": "ok", "service": "smart-profihub"})
