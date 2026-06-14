@@ -45,6 +45,11 @@ class BaseConfig:
     # Каталог зі збереженими архівами скілів.
     SKILL_PACKAGES_DIR = os.getenv(
         "SKILL_PACKAGES_DIR", os.path.join(INSTANCE_DIR, "skill_packages"))
+    # Каталог файлів користувачів (по підкаталогу-GUID на користувача).
+    USER_FILES_DIR = os.getenv(
+        "USER_FILES_DIR", os.path.join(INSTANCE_DIR, "user_files"))
+    # Максимальний розмір одного файлу користувача (байти).
+    USER_FILE_MAX_BYTES = int(os.getenv("USER_FILE_MAX_BYTES", str(25 * 1024 * 1024)))
     # Чи дозволено реально виконувати код зі скілів-пакетів.
     SKILL_EXEC_ENABLED = os.getenv("SKILL_EXEC_ENABLED", "1") == "1"
     # Таймаут одного виконання (секунди).

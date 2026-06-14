@@ -6,6 +6,7 @@ from app.api.skills import bp as skills_bp
 from app.api.models import bp as models_bp
 from app.api.chat import bp as chat_bp
 from app.api.usage import bp as usage_bp
+from app.api.files import bp as files_bp
 
 
 def register_blueprints(app):
@@ -16,3 +17,4 @@ def register_blueprints(app):
     app.register_blueprint(models_bp, url_prefix="/api/models")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
     app.register_blueprint(usage_bp, url_prefix="/api/usage")
+    app.register_blueprint(files_bp, url_prefix="/api/files")

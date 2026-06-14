@@ -9,6 +9,7 @@ from app.models.chat import (
     TokenLimit,
     AuditLog,
 )
+from app.models.file import UserFile
 
 __all__ = [
     "User",
@@ -28,4 +29,5 @@ __all__ = [
     "TokenUsageLog",
     "TokenLimit",
     "AuditLog",
+    "UserFile",
 ]

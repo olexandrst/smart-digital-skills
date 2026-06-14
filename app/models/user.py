@@ -1,10 +1,15 @@
 """Користувачі, глобальні ролі та refresh-токени."""
+import uuid
 from datetime import datetime
 from app.extensions import db
 
 
 def _now():
     return datetime.utcnow()
+
+
+def _uid():
+    return uuid.uuid4().hex
 
 
 class Role(db.Model):
@@ -41,6 +46,8 @@ class User(db.Model):
     external_id = db.Column(db.String)  # Entra ID object id (Етап 2)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     is_system_admin = db.Column(db.Boolean, nullable=False, default=False)
+    # GUID-назва підкаталогу для файлів користувача (instance/user_files/<uid>).
+    storage_uid = db.Column(db.String, unique=True, default=_uid)
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)

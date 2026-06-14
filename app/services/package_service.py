@@ -232,8 +232,31 @@ def _resource_limits():
     return _apply
 
 
-def run_package(skill, inputs):
-    """Розпаковує пакет у тимчасову теку та виконує entrypoint у підпроцесі."""
+def _snapshot(directory):
+    """Множина відносних шляхів усіх файлів у теці."""
+    found = set()
+    for root, _dirs, files in os.walk(directory):
+        for f in files:
+            found.add(os.path.relpath(os.path.join(root, f), directory))
+    return found
+
+
+def _collect_new_files(directory, before):
+    """Файли, створені під час виконання (не входили в пакет, не кеш Python)."""
+    new = []
+    for rel in _snapshot(directory) - before:
+        if "__pycache__" in rel.split(os.sep) or rel.endswith(".pyc"):
+            continue
+        new.append(rel)
+    return sorted(new)
+
+
+def run_package(skill, inputs, user=None):
+    """Розпаковує пакет у тимчасову теку та виконує entrypoint у підпроцесі.
+
+    Файли, створені кодом під час виконання, зберігаються у сховище користувача
+    (якщо передано user) і повертаються у полі 'files'.
+    """
     cfg = current_app.config
     if not cfg.get("SKILL_EXEC_ENABLED", True):
         raise ApiError("Виконання скілів-пакетів вимкнено (SKILL_EXEC_ENABLED=0)",
@@ -252,6 +275,9 @@ def run_package(skill, inputs):
         entry = os.path.join(root, skill.entrypoint or "main.py")
         if not os.path.isfile(entry):
             raise ApiError("Entrypoint не знайдено у пакеті", 400, "missing_entrypoint")
+
+        # Знімок файлів у всій робочій теці ДО виконання (для виявлення нових).
+        before = _snapshot(workdir)
 
         payload = json.dumps({"inputs": inputs or {}}, ensure_ascii=False)
         env = {
@@ -285,9 +311,28 @@ def run_package(skill, inputs):
                 f"Код скіла завершився з помилкою (код {proc.returncode}).\n{stderr.strip()}",
                 400, "exec_error")
 
-        return _parse_exec_output(stdout, stderr)
+        result = _parse_exec_output(stdout, stderr)
+        result["files"] = _persist_outputs(workdir, before, user, skill.id)
+        return result
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
+
+
+def _persist_outputs(workdir, before, user, skill_id):
+    """Зберігає створені файли у сховище користувача; повертає їх метадані."""
+    if user is None:
+        return []
+    from app.services import file_service  # локальний імпорт уникає циклів
+    saved = []
+    for rel in _collect_new_files(workdir, before):
+        src = os.path.join(workdir, rel)
+        try:
+            uf = file_service.save_path(user, src, display_name=rel,
+                                        source="skill_run", skill_id=skill_id)
+            saved.append(uf.to_dict())
+        except Exception:  # один зіпсований файл не має зривати виконання
+            continue
+    return saved
 
 
 def _parse_exec_output(stdout, stderr):

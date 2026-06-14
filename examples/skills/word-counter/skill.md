@@ -14,6 +14,11 @@ inputs:
     required: false
     default: ""
     description: Будь-яке значення → додати версію тексту у ВЕРХНЬОМУ регістрі
+  - name: save_report
+    label: Зберегти звіт у файл
+    required: false
+    default: ""
+    description: Будь-яке значення → створити report.txt (зберігається у ваших файлах)
 ---
 
 # Word Counter

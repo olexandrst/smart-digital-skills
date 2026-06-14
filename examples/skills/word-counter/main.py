@@ -32,6 +32,13 @@ def main():
         lines.append(text.upper())
 
     output = "\n".join(lines)
+
+    # Якщо задано save_report — створюємо файл; система збереже його у сховище
+    # користувача й надасть посилання на завантаження.
+    if inputs.get("save_report"):
+        with open("report.txt", "w", encoding="utf-8") as fh:
+            fh.write(output + "\n")
+
     print(json.dumps({
         "output": output,
         "usage": {"prompt_tokens": stats["chars"], "completion_tokens": len(output)},

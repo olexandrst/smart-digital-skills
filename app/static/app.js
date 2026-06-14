@@ -31,6 +31,35 @@ function toast(msg, type = "ok") {
 }
 function hasRole(code) { return state.user && state.user.roles.includes(code); }
 function esc(s) { return (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function fmtSize(n) { if (n < 1024) return `${n} Б`; if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`; return `${(n / 1024 / 1024).toFixed(1)} МБ`; }
+
+// Завантаження файлу через fetch з JWT (звичайне посилання не передало б заголовок).
+async function downloadFile(id, name) {
+  try {
+    const res = await fetch(`${API}/files/${id}/download`, {
+      headers: { "Authorization": `Bearer ${state.token}` },
+    });
+    if (!res.ok) throw new Error("Не вдалося завантажити файл");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name || "file";
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) { toast(err.message, "err"); }
+}
+
+// Рендерить блок із кнопками завантаження створених файлів.
+function renderFileLinks(files) {
+  if (!files || !files.length) return null;
+  const box = el(`<div class="file-links"><div class="muted">Створені файли:</div></div>`);
+  files.forEach(f => {
+    const btn = el(`<button class="small">⬇ ${esc(f.filename)} (${fmtSize(f.size)})</button>`);
+    btn.addEventListener("click", () => downloadFile(f.id, f.filename));
+    box.appendChild(btn);
+  });
+  return box;
+}
 
 // ---------- Автентифікація ----------
 function saveSession() {
@@ -85,6 +114,7 @@ const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
   { id: "skills", label: "Мої скіли", view: viewMySkills },
   { id: "catalog", label: "Каталог", view: viewCatalog },
+  { id: "files", label: "Файли", view: viewFiles },
   { id: "manage-skills", label: "Управління скілами", view: viewManageSkills, roles: ["admin", "skill_manager"] },
   { id: "models", label: "Моделі", view: viewModels, roles: ["admin"] },
   { id: "groups", label: "Групи", view: viewGroups },
@@ -262,6 +292,8 @@ async function openChatSession(sessionId) {
         method: "POST", body: { content: text, skill_id: skillId } });
       renderChatMessage({ role: "assistant", content: res.content,
         completion_tokens: res.usage.completion_tokens });
+      const fl = renderFileLinks(res.files);
+      if (fl) { $("#chat-log").appendChild(fl); $("#chat-log").scrollTop = $("#chat-log").scrollHeight; }
       $("#chat-usage").textContent =
         `Останній обмін — вхідні: ${res.usage.prompt_tokens}, вихідні: ${res.usage.completion_tokens}, загальні: ${res.usage.total_tokens}. Разом у сесії: ${res.session_total_tokens} тк.`;
       $("#chat-header").innerHTML =
@@ -320,6 +352,8 @@ async function openRunner(skillId) {
       });
       sessionId = res.session_id;
       log.appendChild(el(`<div class="msg assistant">${esc(res.content)}</div>`));
+      const fl = renderFileLinks(res.files);
+      if (fl) log.appendChild(fl);
       log.scrollTop = log.scrollHeight;
       toast(`Токенів використано: ${res.usage.total_tokens}`);
     } catch (err) { toast(err.message, "err"); }
@@ -349,6 +383,66 @@ async function viewCatalog() {
       catch (err) { toast(err.message, "err"); }
     });
     grid.appendChild(c);
+  });
+}
+
+// ---------- Файли користувача ----------
+async function viewFiles() {
+  const files = await api("/files");
+  const view = $("#view");
+  view.innerHTML = `
+    <div class="card">
+      <h2>Завантажити файл</h2>
+      <div class="row">
+        <input type="file" id="f-file">
+        <button id="f-upload">Завантажити</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Ваші файли зберігаються в особистому захищеному сховищі та доступні лише вам.</p>
+    </div>
+    <div class="card">
+      <h2>Мої файли</h2>
+      <table><thead><tr><th>Назва</th><th>Джерело</th><th>Розмір</th><th>Створено</th><th>Дії</th></tr></thead><tbody id="f-body"></tbody></table>
+    </div>`;
+
+  $("#f-upload").addEventListener("click", async () => {
+    const file = $("#f-file").files[0];
+    if (!file) { toast("Оберіть файл", "err"); return; }
+    const form = new FormData();
+    form.append("file", file);
+    $("#f-upload").disabled = true;
+    try {
+      const res = await fetch(API + "/files", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${state.token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Помилка завантаження");
+      toast("Файл завантажено"); openTab("files");
+    } catch (err) { toast(err.message, "err"); }
+    finally { $("#f-upload").disabled = false; }
+  });
+
+  const body = $("#f-body");
+  if (!files.length) body.innerHTML = `<tr><td colspan="5" class="muted">Файлів ще немає.</td></tr>`;
+  files.forEach(f => {
+    const src = f.source === "skill_run" ? "скіл" : "завантажено";
+    const date = f.created_at ? f.created_at.replace("T", " ").slice(0, 16) : "";
+    const tr = el(`<tr>
+      <td>${esc(f.filename)}</td><td><span class="badge">${src}</span></td>
+      <td>${fmtSize(f.size)}</td><td>${esc(date)}</td>
+      <td class="actions">
+        <button class="small" data-act="dl">⬇ Завантажити</button>
+        <button class="small danger" data-act="del">Видалити</button>
+      </td>
+    </tr>`);
+    tr.querySelector("[data-act='dl']").addEventListener("click", () => downloadFile(f.id, f.filename));
+    tr.querySelector("[data-act='del']").addEventListener("click", async () => {
+      if (!confirm(`Видалити файл «${f.filename}»?`)) return;
+      try { await api(`/files/${f.id}`, { method: "DELETE" }); toast("Файл видалено"); openTab("files"); }
+      catch (err) { toast(err.message, "err"); }
+    });
+    body.appendChild(tr);
   });
 }
 

@@ -72,11 +72,11 @@ def _validate_runnable_skill(user, skill_id):
     return skill
 
 
-def _execute_skill(skill, inputs):
-    """Виконує скіл та повертає (content, usage). Працює для обох типів."""
+def _execute_skill(skill, inputs, user):
+    """Виконує скіл та повертає (content, usage, files). Працює для обох типів."""
     if skill.skill_kind == "package":
-        result = package_service.run_package(skill, inputs)
-        return result["output"], result["usage"]
+        result = package_service.run_package(skill, inputs, user=user)
+        return result["output"], result["usage"], result.get("files", [])
 
     prompt = _build_prompt(skill, inputs)
     client = get_client_for_model(skill.model)
@@ -85,7 +85,7 @@ def _execute_skill(skill, inputs):
         "prompt_tokens": res.prompt_tokens,
         "completion_tokens": res.completion_tokens,
         "total_tokens": res.total_tokens,
-    }
+    }, []
 
 
 def _get_owned_session(user, session_id):
@@ -120,10 +120,11 @@ def send_message(user, session_id, content, skill_id=None):
     if skill_id:
         applied_skill = _validate_runnable_skill(user, skill_id)
 
+    files = []
     # Скіл-пакет: виконуємо код, модель не викликаємо.
     if applied_skill is not None and applied_skill.skill_kind == "package":
         inputs = _inputs_for_message(applied_skill, content)
-        reply, usage = _execute_skill(applied_skill, inputs)
+        reply, usage, files = _execute_skill(applied_skill, inputs, user)
         model_id = session.model_id
     else:
         model = session.model
@@ -160,6 +161,7 @@ def send_message(user, session_id, content, skill_id=None):
         "content": reply,
         "skill_id": skill_id,
         "usage": usage,
+        "files": files,
         "session_total_tokens": session.total_tokens_sum,
     }
 
@@ -187,12 +189,11 @@ def run_skill(user, skill_id, inputs, session_id=None):
         db.session.flush()
 
     if skill.skill_kind == "package":
-        content, usage = _execute_skill(skill, inputs or {})
+        content, usage, files = _execute_skill(skill, inputs or {}, user)
         user_content = json.dumps(inputs or {}, ensure_ascii=False)
     else:
-        prompt = _build_prompt(skill, inputs or {})
-        content, usage = _execute_skill(skill, inputs or {})
-        user_content = prompt
+        content, usage, files = _execute_skill(skill, inputs or {}, user)
+        user_content = _build_prompt(skill, inputs or {})
 
     _store_exchange(session, user, skill.model_id, skill_id, user_content, content, usage)
 
@@ -200,6 +201,7 @@ def run_skill(user, skill_id, inputs, session_id=None):
         "session_id": session.id,
         "content": content,
         "usage": usage,
+        "files": files,
     }
 
 

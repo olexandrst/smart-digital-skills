@@ -1,3 +1,4 @@
+import os
 import pytest
 from app import create_app
 from app.config import BaseConfig
@@ -6,12 +7,19 @@ from app.core.security import hash_password
 from app.models import Role, User, UserRole, Model, Skill, SkillInput, Group, GroupMembership
 
 
+import tempfile
+_TMP = tempfile.mkdtemp(prefix="sph_tests_")
+
+
 class TestConfig(BaseConfig):
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     JWT_SECRET_KEY = "test"
     SECRET_KEY = "test"
     AUTO_MIGRATE = False  # тести керують схемою самостійно
+    # Артефакти тестів — у тимчасову теку, не у instance/.
+    SKILL_PACKAGES_DIR = os.path.join(_TMP, "skill_packages")
+    USER_FILES_DIR = os.path.join(_TMP, "user_files")
 
 
 @pytest.fixture
