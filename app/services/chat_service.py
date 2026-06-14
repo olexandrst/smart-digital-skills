@@ -5,7 +5,7 @@ from app.core.errors import ApiError
 from app.models import (
     Skill, UserSkill, ChatSession, ChatMessage, TokenUsageLog,
 )
-from app.integrations.azure_foundry import get_client
+from app.integrations import get_client_for_model
 
 
 def _user_has_skill(user_id, skill_id):
@@ -57,7 +57,7 @@ def run_skill(user, skill_id, inputs, session_id=None):
         except (ValueError, TypeError):
             params = {}
 
-    client = get_client()
+    client = get_client_for_model(skill.model)
     result = client.complete(skill.model.deployment_name, prompt, params)
 
     db.session.add(ChatMessage(

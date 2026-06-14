@@ -18,10 +18,23 @@ class BaseConfig:
         "sqlite:///" + os.path.join(INSTANCE_DIR, "profihub.db"),
     )
 
-    # Azure AI Foundry
+    # Глобальний перемикач моку для всіх LLM-провайдерів.
+    # За замовчуванням увімкнено (MVP працює без зовнішніх ключів).
+    # AZURE_FOUNDRY_MOCK лишено для зворотної сумісності.
+    LLM_MOCK = os.getenv("LLM_MOCK", os.getenv("AZURE_FOUNDRY_MOCK", "1")) == "1"
+
+    # Azure OpenAI / Azure AI Foundry
     AZURE_FOUNDRY_ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT", "")
     AZURE_FOUNDRY_API_KEY = os.getenv("AZURE_FOUNDRY_API_KEY", "")
-    AZURE_FOUNDRY_MOCK = os.getenv("AZURE_FOUNDRY_MOCK", "1") == "1"
+    AZURE_FOUNDRY_API_VERSION = os.getenv("AZURE_FOUNDRY_API_VERSION",
+                                          "2024-02-15-preview")
+
+    # OpenAI API
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+
+    # Google Gemini API
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 
 class DevelopmentConfig(BaseConfig):

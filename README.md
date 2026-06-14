@@ -21,7 +21,7 @@
 | ORM | Flask-SQLAlchemy (SQLite, сумісно з PostgreSQL) |
 | Авторизація | Flask-JWT-Extended (JWT access + refresh) |
 | Паролі | Werkzeug (PBKDF2) |
-| AI-інтеграція | Azure AI Foundry адаптер (у MVP — мок) |
+| AI-інтеграція | Azure OpenAI / OpenAI / Gemini (у MVP — мок) |
 | Frontend | Vanilla JS SPA (без збірки), сервиться Flask |
 
 ---
@@ -32,10 +32,11 @@
 - 👤 Менеджмент користувачів, ролей і скидання паролів (Admin)
 - 👥 Групи, членство, ролі в групі, правило «мінімум 1 менеджер»
 - 🧩 Каталог скілів із життєвим циклом `draft → testing → published → delisted`
-- 🔗 Підключення моделей Azure AI Foundry (тільки Admin)
+- 🔗 Підключення моделей кількох провайдерів — **Azure OpenAI, OpenAI, Gemini**
+  (тільки Admin); провайдер обирається для кожної моделі окремо
 - ⚡ Подвійне призначення скілів: групове + самостійна активація, з коректним
   лічильником унікальних активацій
-- 💬 Запуск скілів (чат із моделлю через мок Foundry)
+- 💬 Запуск скілів (чат із моделлю; у MVP — через мок будь-якого провайдера)
 - 📊 Базовий облік токенів: власний / по групі / глобальний
 
 ---
@@ -69,8 +70,8 @@ cp .env.example .env
 ```
 
 За потреби відредагуйте `.env` (секрети, початковий пароль адміна).
-Для MVP усе працює зі значеннями за замовчуванням, а Azure AI Foundry —
-у режимі моку (`AZURE_FOUNDRY_MOCK=1`).
+Для MVP усе працює зі значеннями за замовчуванням, а всі LLM-провайдери —
+у режимі моку (`LLM_MOCK=1`).
 
 ### 5. Ініціалізація бази та початкові дані
 
@@ -164,7 +165,8 @@ smart-digital-skills/
 | GET/POST | `/users` | Список / створення користувачів | Admin |
 | PATCH | `/users/{id}` | Оновлення | Admin |
 | POST | `/users/{id}/reset-password` | Скидання пароля | Admin |
-| GET/POST | `/models` | Реєстр / підключення моделей | GET: всі, POST: Admin |
+| GET/POST | `/models` | Реєстр / підключення моделей (з `provider`) | GET: всі, POST: Admin |
+| GET | `/models/providers` | Доступні LLM-провайдери | авторизовані |
 | GET/POST | `/skills` | Каталог / створення скілів | створення: Admin/Skill Manager |
 | GET | `/skills/mine` | Активні скіли користувача | авторизовані |
 | POST | `/skills/{id}/status` | Зміна статусу (життєвий цикл) | Admin/Skill Manager |
@@ -179,15 +181,30 @@ smart-digital-skills/
 
 ---
 
-## Підключення реального Azure AI Foundry
+## LLM-провайдери (Azure OpenAI · OpenAI · Gemini)
 
-У MVP працює мок (`app/integrations/azure_foundry.py`). Щоб увімкнути реальну
-інтеграцію:
+Кожна модель у реєстрі має поле `provider`. Під час запуску скіла фабрика
+(`app/integrations/__init__.py`) обирає відповідний клієнт за провайдером моделі:
 
-1. Встановіть SDK: `pip install openai`.
-2. У `.env` задайте `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` і
-   `AZURE_FOUNDRY_MOCK=0`.
-3. `deployment_name` у зареєстрованих моделях має відповідати деплойментам у Foundry.
+| `provider` | Синоніми | Клієнт | Ключі у `.env` |
+| --- | --- | --- | --- |
+| `azure_ai_foundry` | `azure_openai`, `azure` | Azure OpenAI | `AZURE_FOUNDRY_ENDPOINT`, `AZURE_FOUNDRY_API_KEY` |
+| `openai` | — | OpenAI API | `OPENAI_API_KEY` (опц. `OPENAI_BASE_URL`) |
+| `gemini` | `google` | Google Gemini | `GEMINI_API_KEY` |
+
+`deployment_name` моделі — це ідентифікатор моделі у провайдера
+(напр. `gpt-4o` для Azure/OpenAI, `gemini-1.5-pro` для Gemini).
+
+У MVP усі провайдери працюють **у режимі моку** (`LLM_MOCK=1`), тож застосунок
+запускається без жодних ключів. Щоб увімкнути реальні виклики:
+
+1. Встановіть потрібний SDK:
+   - OpenAI / Azure OpenAI: `pip install openai`
+   - Gemini: `pip install google-generativeai`
+2. У `.env` поставте `LLM_MOCK=0` і задайте ключі відповідного провайдера.
+3. Зареєструйте модель з потрібним `provider` (вкладка «Моделі» або `POST /api/models`).
+
+Доступні провайдери для UI повертає `GET /api/models/providers`.
 
 ---
 

@@ -246,30 +246,42 @@ async function viewManageSkills() {
 }
 
 // ---------- Моделі (Admin) ----------
+const PROVIDER_LABELS = {
+  azure_ai_foundry: "Azure OpenAI",
+  openai: "OpenAI",
+  gemini: "Gemini",
+};
+
 async function viewModels() {
-  const models = await api("/models");
+  const [models, providers] = await Promise.all([api("/models"), api("/models/providers")]);
   const view = $("#view");
+  const provOpts = providers.map(p =>
+    `<option value="${p}">${esc(PROVIDER_LABELS[p] || p)}</option>`).join("");
   view.innerHTML = `
     <div class="card">
       <h2>Підключити модель</h2>
       <div class="row">
         <input id="m-name" placeholder="Назва">
+        <select id="m-provider">${provOpts}</select>
         <select id="m-type"><option value="llm">llm</option><option value="cv">cv</option></select>
-        <input id="m-dep" placeholder="deployment_name">
+        <input id="m-dep" placeholder="deployment / model name">
         <button id="m-add">Додати</button>
       </div>
+      <p class="muted" style="margin:8px 0 0">deployment / model name — ідентифікатор моделі у провайдера
+      (напр. <code>gpt-4o</code> для OpenAI/Azure, <code>gemini-1.5-pro</code> для Gemini).</p>
     </div>
-    <div class="card"><h2>Реєстр моделей</h2><table><thead><tr><th>Назва</th><th>Тип</th><th>Деплоймент</th><th>Активна</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
+    <div class="card"><h2>Реєстр моделей</h2><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Тип</th><th>Деплоймент / модель</th><th>Активна</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
   $("#m-add").addEventListener("click", async () => {
     try {
       await api("/models", { method: "POST", body: {
-        name: $("#m-name").value, model_type: $("#m-type").value, deployment_name: $("#m-dep").value }});
+        name: $("#m-name").value, provider: $("#m-provider").value,
+        model_type: $("#m-type").value, deployment_name: $("#m-dep").value }});
       toast("Модель додано"); openTab("models");
     } catch (err) { toast(err.message, "err"); }
   });
   const body = $("#m-body");
   models.forEach(m => body.appendChild(el(
-    `<tr><td>${esc(m.name)}</td><td>${m.model_type}</td><td>${esc(m.deployment_name)}</td><td>${m.is_active ? "✓" : "—"}</td></tr>`)));
+    `<tr><td>${esc(m.name)}</td><td><span class="badge">${esc(PROVIDER_LABELS[m.provider] || m.provider)}</span></td><td>${m.model_type}</td><td>${esc(m.deployment_name)}</td><td>${m.is_active ? "✓" : "—"}</td></tr>`)));
 }
 
 // ---------- Групи ----------

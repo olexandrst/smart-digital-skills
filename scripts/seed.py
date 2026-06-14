@@ -83,16 +83,30 @@ def seed():
                       "password_hash": hash_password("User123!"),
                       "is_active": True})
 
-        # 5. Демо-моделі
+        # 5. Демо-моделі (різні провайдери)
         llm, _ = _get_or_create(
-            Model, name="gpt-4o",
-            defaults={"model_type": "llm", "deployment_name": "gpt-4o",
+            Model, name="gpt-4o (Azure)",
+            defaults={"model_type": "llm", "provider": "azure_ai_foundry",
+                      "deployment_name": "gpt-4o",
                       "api_version": "2024-02-15-preview",
                       "context_window": 128000,
                       "config": json.dumps({"temperature": 0.7})})
         _get_or_create(
+            Model, name="gpt-4o-mini (OpenAI)",
+            defaults={"model_type": "llm", "provider": "openai",
+                      "deployment_name": "gpt-4o-mini",
+                      "context_window": 128000,
+                      "config": json.dumps({"temperature": 0.7})})
+        _get_or_create(
+            Model, name="gemini-1.5-pro (Gemini)",
+            defaults={"model_type": "llm", "provider": "gemini",
+                      "deployment_name": "gemini-1.5-pro",
+                      "context_window": 1000000,
+                      "config": json.dumps({"temperature": 0.7})})
+        _get_or_create(
             Model, name="image-analyzer",
-            defaults={"model_type": "cv", "deployment_name": "image-analyzer",
+            defaults={"model_type": "cv", "provider": "azure_ai_foundry",
+                      "deployment_name": "image-analyzer",
                       "config": json.dumps({})})
 
         # 6. Демо-скіл Summarizer (published)
