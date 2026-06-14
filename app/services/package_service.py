@@ -351,10 +351,21 @@ def run_package(skill, inputs, user=None):
             "TMPDIR": workdir,
             "LANG": os.environ.get("LANG", "C.UTF-8"),
         }
+        # Запускаємо через runpy, додаючи у sys.path і корінь пакета, і теку
+        # скрипта — щоб працювали імпорти як від кореня, так і сусідніх модулів
+        # (навіть для вкладеного entrypoint на кшталт scripts/build_estimate.py).
+        entry_abs = os.path.abspath(entry)
+        root_abs = os.path.abspath(root)
+        bootstrap = (
+            "import sys, runpy\n"
+            f"sys.path.insert(0, {os.path.dirname(entry_abs)!r})\n"
+            f"sys.path.insert(0, {root_abs!r})\n"
+            f"runpy.run_path({entry_abs!r}, run_name='__main__')\n"
+        )
         timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 30))
         try:
             proc = subprocess.run(
-                [sys.executable, "-I", rel_entry],
+                [sys.executable, "-I", "-c", bootstrap],
                 input=payload,
                 capture_output=True,
                 text=True,
