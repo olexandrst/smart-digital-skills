@@ -113,12 +113,34 @@ function showLogin() {
 async function showApp() {
   $("#login-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  $("#user-name").textContent = state.user.full_name || state.user.username;
-  $("#user-roles").textContent = state.user.roles.length ? `[${state.user.roles.join(", ")}]` : "[member]";
+  const display = state.user.full_name || state.user.username;
+  $("#user-name").textContent = display;
+  $("#user-roles").textContent = state.user.roles.length ? state.user.roles.join(", ") : "member";
+  $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
+  refreshTokenBalance();
+}
+
+async function refreshTokenBalance() {
+  try {
+    const u = await api("/usage/me");
+    $("#token-balance-num").textContent = (u.total_tokens || 0).toLocaleString("uk-UA");
+  } catch (e) { /* ignore */ }
 }
 
 // ---------- Навігація (за ролями) ----------
+const NAV_ICONS = {
+  chat: '<path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4V6a2 2 0 0 1 2-2Z"/>',
+  skills: '<path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/>',
+  catalog: '<path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/>',
+  files: '<path d="M4 5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5Z"/>',
+  "manage-skills": '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 4-2-1 1-2-2-2-2 1-1-2h-2l-1 2-2-1-2 2 1 2-2 1v2l2 1-1 2 2 2 2-1 1 2h2l1-2 2 1 2-2-1-2 2-1v-2Z"/>',
+  models: '<path d="M9 3h6v2h3a1 1 0 0 1 1 1v3h2v6h-2v3a1 1 0 0 1-1 1h-3v2H9v-2H6a1 1 0 0 1-1-1v-3H3V9h2V6a1 1 0 0 1 1-1h3V3Zm0 6v6h6V9H9Z"/>',
+  groups: '<path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-8 2c-3 0-6 1.5-6 4v2h8v-2c0-1 .4-1.9 1-2.7A9 9 0 0 0 8 13Zm8 0c-.7 0-1.4.1-2 .3.6.8 1 1.7 1 2.7v2h7v-2c0-2.5-3-4-6-4Z"/>',
+  users: '<path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 5v1h14v-1c0-3-3-5-7-5Z"/>',
+  usage: '<path d="M5 13h3v7H5v-7Zm5.5-6h3v13h-3V7ZM16 10h3v10h-3V10Z"/>',
+};
+
 const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
   { id: "skills", label: "Мої скіли", view: viewMySkills },
@@ -139,7 +161,10 @@ function buildNav() {
   const nav = $("#nav");
   nav.innerHTML = "";
   visibleTabs().forEach(tab => {
-    const b = el(`<button>${tab.label}</button>`);
+    const b = el(`<button class="nav-item">
+      <svg viewBox="0 0 24 24" aria-hidden="true">${NAV_ICONS[tab.id] || ""}</svg>
+      <span>${esc(tab.label)}</span>
+    </button>`);
     b.dataset.tab = tab.id;
     b.addEventListener("click", () => openTab(tab.id));
     nav.appendChild(b);
@@ -148,12 +173,14 @@ function buildNav() {
 }
 
 async function openTab(id) {
-  document.querySelectorAll("#nav button").forEach(b =>
+  document.querySelectorAll("#nav .nav-item").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === id));
   const tab = TABS.find(t => t.id === id);
+  $("#page-title").textContent = tab ? tab.label : "";
   $("#view").innerHTML = `<p class="muted">Завантаження…</p>`;
   try { await tab.view(); }
   catch (err) { $("#view").innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`; }
+  refreshTokenBalance();
 }
 
 // ---------- Чат з обраною моделлю ----------
