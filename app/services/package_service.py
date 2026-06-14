@@ -63,6 +63,64 @@ def _find_skill_md(zf):
     return md_path, root
 
 
+def _norm(p):
+    return (p or "").replace("\\", "/").lstrip("./")
+
+
+def _files_under_root(zf, root):
+    """Список (оригінальна_назва, шлях_відносно_кореня) для файлів (без тек)."""
+    out = []
+    prefix = _norm(root + "/") if root else ""
+    for n in zf.namelist():
+        if n.endswith("/"):
+            continue
+        nn = _norm(n)
+        if prefix:
+            if not nn.startswith(prefix):
+                continue
+            rel = nn[len(prefix):]
+        else:
+            rel = nn
+        if rel:
+            out.append((n, rel))
+    return out
+
+
+def _resolve_entrypoint(zf, root, declared):
+    """Знаходить файл запуску якомога гнучкіше; повертає шлях відносно кореня пакета."""
+    files = _files_under_root(zf, root)
+    rels = {rel for _o, rel in files}
+    declared_clean = _norm(declared).lstrip("/") if declared else ""
+
+    # 1) Точний збіг шляху (відносно кореня) або повного шляху в архіві.
+    if declared_clean and declared_clean in rels:
+        return declared_clean
+    if declared:
+        dn = _norm(declared)
+        for orig, rel in files:
+            if _norm(orig) == dn:
+                return rel
+
+    # 2) Збіг за базовою назвою (declared або main.py) будь-де у пакеті.
+    target_base = os.path.basename(declared_clean) if declared_clean else "main.py"
+    for base in [target_base, "main.py"]:
+        matches = [rel for _o, rel in files if os.path.basename(rel) == base]
+        if matches:
+            matches.sort(key=lambda r: r.count("/"))
+            return matches[0]
+
+    # 3) Якщо у пакеті лише один .py — використовуємо його.
+    py_files = [rel for _o, rel in files if rel.endswith(".py")]
+    if len(py_files) == 1:
+        return py_files[0]
+
+    listing = ", ".join(sorted(py_files)) or "(немає .py файлів)"
+    raise ApiError(
+        f"Не вдалося визначити entrypoint. Вкажіть 'entrypoint' у skill.md. "
+        f"Python-файли в пакеті: {listing}",
+        400, "missing_entrypoint")
+
+
 def _parse_frontmatter(text):
     """Витягує YAML-фронтматер між рядками '---'. Повертає (meta, body)."""
     meta, body = {}, text
@@ -109,12 +167,7 @@ def parse_package(file_bytes):
     if runtime != "python":
         raise ApiError("Підтримується лише runtime: python", 400, "unsupported_runtime")
 
-    entrypoint = (meta.get("entrypoint") or "main.py").strip()
-    # Перевіряємо, що entrypoint існує в архіві.
-    entry_in_zip = f"{root}/{entrypoint}" if root else entrypoint
-    if entry_in_zip not in zf.namelist():
-        raise ApiError(f"Entrypoint '{entrypoint}' не знайдено в архіві",
-                       400, "missing_entrypoint")
+    entrypoint = _resolve_entrypoint(zf, root, meta.get("entrypoint"))
 
     inputs = _normalize_inputs(meta.get("inputs", []))
 
@@ -272,9 +325,20 @@ def run_package(skill, inputs, user=None):
     workdir = tempfile.mkdtemp(prefix="skillrun_")
     try:
         root = _safe_extract(file_bytes, workdir)
-        entry = os.path.join(root, skill.entrypoint or "main.py")
+        rel_entry = skill.entrypoint or "main.py"
+        entry = os.path.join(root, rel_entry)
         if not os.path.isfile(entry):
-            raise ApiError("Entrypoint не знайдено у пакеті", 400, "missing_entrypoint")
+            # Резервний пошук за базовою назвою у розпакованому дереві.
+            base = os.path.basename(rel_entry)
+            found = None
+            for r, _d, files in os.walk(root):
+                if base in files:
+                    found = os.path.join(r, base)
+                    break
+            if found is None:
+                raise ApiError("Entrypoint не знайдено у пакеті", 400, "missing_entrypoint")
+            entry = found
+        rel_entry = os.path.relpath(entry, root)
 
         # Знімок файлів у всій робочій теці ДО виконання (для виявлення нових).
         before = _snapshot(workdir)
@@ -290,7 +354,7 @@ def run_package(skill, inputs, user=None):
         timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 30))
         try:
             proc = subprocess.run(
-                [sys.executable, "-I", os.path.basename(entry)],
+                [sys.executable, "-I", rel_entry],
                 input=payload,
                 capture_output=True,
                 text=True,

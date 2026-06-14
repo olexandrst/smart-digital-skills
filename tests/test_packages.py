@@ -141,3 +141,52 @@ def test_package_skill_in_chat(client):
     assert res.status_code == 200
     # У чаті застосовано код-пакет → відповідь = вивід коду (верхній регістр).
     assert res.get_json()["content"] == "ПРИВІТ"
+
+
+# ---------- Гнучке визначення entrypoint ----------
+
+SKILL_MD_NO_EP = """---
+name: No Entry
+description: Без явного entrypoint.
+version: 1.0.0
+runtime: python
+inputs:
+  - name: text
+    required: true
+---
+# No Entry
+"""
+
+
+def test_entrypoint_in_top_level_folder(client):
+    """Архів з однією верхньою текою (pkg/skill.md, pkg/main.py) має працювати."""
+    sm = login(client, "sm", "pass")
+    z = make_zip({"pkg/skill.md": SKILL_MD, "pkg/main.py": MAIN_PY})
+    res = upload(client, sm, z, filename="pkg.skill")
+    assert res.status_code == 201
+    sid = res.get_json()["id"]
+    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
+    u1 = login(client, "u1", "pass")
+    client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
+    res = client.post(f"/api/skills/{sid}/run", headers=auth(u1),
+                      json={"inputs": {"text": "hi"}})
+    assert res.status_code == 200
+    assert res.get_json()["content"] == "HI"
+
+
+def test_entrypoint_auto_detected_single_py(client):
+    """Без entrypoint у skill.md і з єдиним .py — він визначається автоматично."""
+    sm = login(client, "sm", "pass")
+    z = make_zip({"skill.md": SKILL_MD_NO_EP, "estimate.py": MAIN_PY})
+    res = upload(client, sm, z)
+    assert res.status_code == 201
+    assert res.get_json()["entrypoint"] == "estimate.py"
+
+
+def test_entrypoint_unresolvable_lists_py_files(app):
+    """Кілька .py без entrypoint і без main.py → зрозуміла помилка."""
+    import pytest
+    with pytest.raises(ApiError) as exc:
+        package_service.parse_package(make_zip({
+            "skill.md": SKILL_MD_NO_EP, "a.py": "x=1", "b.py": "y=2"}))
+    assert "entrypoint" in str(exc.value).lower()
