@@ -41,6 +41,22 @@ class BaseConfig:
     # Google Gemini API
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+    # --- Скіли-пакети (виконання коду) ---
+    # Каталог зі збереженими архівами скілів.
+    SKILL_PACKAGES_DIR = os.getenv(
+        "SKILL_PACKAGES_DIR", os.path.join(INSTANCE_DIR, "skill_packages"))
+    # Чи дозволено реально виконувати код зі скілів-пакетів.
+    SKILL_EXEC_ENABLED = os.getenv("SKILL_EXEC_ENABLED", "1") == "1"
+    # Таймаут одного виконання (секунди).
+    SKILL_EXEC_TIMEOUT = int(os.getenv("SKILL_EXEC_TIMEOUT", "30"))
+    # Ліміт пам'яті процесу (МБ; 0 = без ліміту). За замовчуванням вимкнено,
+    # бо RLIMIT_AS на деяких системах заважає старту Python.
+    SKILL_EXEC_MEMORY_MB = int(os.getenv("SKILL_EXEC_MEMORY_MB", "0"))
+    # Обмеження розміру виводу (символи) та розміру розпакованого архіву (байти).
+    SKILL_EXEC_MAX_OUTPUT = int(os.getenv("SKILL_EXEC_MAX_OUTPUT", "100000"))
+    SKILL_PACKAGE_MAX_UNZIPPED = int(
+        os.getenv("SKILL_PACKAGE_MAX_UNZIPPED", str(50 * 1024 * 1024)))
+
 
 class DevelopmentConfig(BaseConfig):
     DEBUG = True

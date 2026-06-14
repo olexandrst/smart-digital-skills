@@ -7,11 +7,12 @@ from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import Skill, SkillInput, UserSkill, Model
-from app.services import skill_service, chat_service
+from app.services import skill_service, chat_service, package_service
 
 bp = Blueprint("skills", __name__)
 
 VALID_STATUS = {"draft", "testing", "published", "delisted"}
+ALLOWED_PACKAGE_EXT = (".zip", ".skill")
 
 
 @bp.get("")
@@ -124,6 +125,61 @@ def run(skill_id):
         session_id=data.get("session_id"),
     )
     return jsonify(result)
+
+
+@bp.post("/upload")
+@require_global_role("admin", "skill_manager")
+def upload_package():
+    """Завантаження скіла-пакета (архів .zip або .skill зі skill.md та кодом)."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
+    if not file.filename.lower().endswith(ALLOWED_PACKAGE_EXT):
+        raise ApiError("Дозволені лише архіви .zip або .skill", 400, "validation_error")
+
+    file_bytes = file.read()
+    meta = package_service.parse_package(file_bytes)
+
+    skill = Skill(
+        name=meta["name"],
+        description=meta["description"],
+        skill_kind="package",
+        runtime=meta["runtime"],
+        entrypoint=meta["entrypoint"],
+        version=meta["version"],
+        prompt_template=meta.get("instructions"),
+        status="draft",
+        package_filename=file.filename,
+        created_by=current_user().id,
+    )
+    db.session.add(skill)
+    db.session.flush()
+
+    skill.package_path = package_service.store_package(skill.id, file_bytes, file.filename)
+    _replace_inputs(skill.id, meta["inputs"])
+    db.session.commit()
+    return jsonify(skill.to_dict()), 201
+
+
+@bp.get("/<int:skill_id>/files")
+@require_auth
+def list_files(skill_id):
+    """Перелік файлів у пакеті скіла."""
+    skill = Skill.query.get_or_404(skill_id)
+    if skill.skill_kind != "package":
+        raise ApiError("Скіл не є пакетом", 400, "not_a_package")
+    return jsonify(package_service.list_package_files(skill))
+
+
+@bp.delete("/<int:skill_id>")
+@require_global_role("admin", "skill_manager")
+def delete_skill(skill_id):
+    skill = Skill.query.get_or_404(skill_id)
+    if skill.skill_kind == "package":
+        package_service.delete_package_file(skill)
+    db.session.delete(skill)
+    db.session.commit()
+    return jsonify({"message": "Скіл видалено"})
 
 
 def _replace_inputs(skill_id, inputs):

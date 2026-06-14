@@ -359,7 +359,15 @@ async function viewManageSkills() {
   const modelOpts = models.map(m => `<option value="${m.id}">${esc(m.name)} (${m.model_type})</option>`).join("");
   view.innerHTML = `
     <div class="card">
-      <h2>Новий скіл</h2>
+      <h2>Завантажити скіл-пакет</h2>
+      <p class="muted">Архів <code>.zip</code> або <code>.skill</code> зі <code>skill.md</code>, кодом та файлами/папками. Python-код виконується системою.</p>
+      <div class="row">
+        <input type="file" id="sk-file" accept=".zip,.skill">
+        <button id="sk-upload">Завантажити</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Новий LLM-скіл</h2>
       <div class="field"><label>Назва</label><input id="sk-name"></div>
       <div class="field"><label>Опис</label><input id="sk-desc"></div>
       <div class="field"><label>Модель</label><select id="sk-model">${modelOpts}</select></div>
@@ -367,7 +375,26 @@ async function viewManageSkills() {
       <div class="field"><label>Вхідні параметри (по одному в рядку: ім'я|обов'язковий 1/0)</label><textarea id="sk-inputs">text|1</textarea></div>
       <button id="sk-create">Створити</button>
     </div>
-    <div class="card"><h2>Усі скіли</h2><table><thead><tr><th>Назва</th><th>Версія</th><th>Статус</th><th>Активацій</th><th>Дії</th></tr></thead><tbody id="sk-body"></tbody></table></div>`;
+    <div class="card"><h2>Усі скіли</h2><table><thead><tr><th>Назва</th><th>Тип</th><th>Версія</th><th>Статус</th><th>Активацій</th><th>Дії</th></tr></thead><tbody id="sk-body"></tbody></table></div>`;
+
+  $("#sk-upload").addEventListener("click", async () => {
+    const file = $("#sk-file").files[0];
+    if (!file) { toast("Оберіть файл архіву", "err"); return; }
+    const form = new FormData();
+    form.append("file", file);
+    $("#sk-upload").disabled = true;
+    try {
+      const res = await fetch(API + "/skills/upload", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${state.token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Помилка завантаження");
+      toast(`Пакет «${data.name}» завантажено (чернетка)`); openTab("manage-skills");
+    } catch (err) { toast(err.message, "err"); }
+    finally { $("#sk-upload").disabled = false; }
+  });
 
   $("#sk-create").addEventListener("click", async () => {
     const inputs = $("#sk-inputs").value.split("\n").map(l => l.trim()).filter(Boolean).map((l, i) => {
@@ -386,15 +413,34 @@ async function viewManageSkills() {
   const body = $("#sk-body");
   skills.forEach(s => {
     const next = { draft: "testing", testing: "published", published: "delisted", delisted: "published" };
+    const kind = s.skill_kind === "package"
+      ? `<span class="badge" title="${esc(s.package_filename || "")}">📦 пакет</span>`
+      : `<span class="badge">💬 LLM</span>`;
     const tr = el(`<tr>
-      <td>${esc(s.name)}</td><td>${esc(s.version)}</td>
+      <td>${esc(s.name)}</td><td>${kind}</td><td>${esc(s.version)}</td>
       <td><span class="badge ${s.status}">${s.status}</span></td>
       <td>${s.activations_count}</td>
-      <td class="actions"><button class="small" data-id="${s.id}" data-next="${next[s.status]}">→ ${next[s.status]}</button></td>
+      <td class="actions">
+        <button class="small" data-act="status" data-next="${next[s.status]}">→ ${next[s.status]}</button>
+        ${s.skill_kind === "package" ? `<button class="small ghost" data-act="files">Файли</button>` : ""}
+        <button class="small danger" data-act="del">Видалити</button>
+      </td>
     </tr>`);
-    tr.querySelector("button").addEventListener("click", async (e) => {
+    tr.querySelector("[data-act='status']").addEventListener("click", async (e) => {
       try { await api(`/skills/${s.id}/status`, { method: "POST", body: { status: e.target.dataset.next } });
         toast("Статус оновлено"); openTab("manage-skills"); }
+      catch (err) { toast(err.message, "err"); }
+    });
+    const filesBtn = tr.querySelector("[data-act='files']");
+    if (filesBtn) filesBtn.addEventListener("click", async () => {
+      try {
+        const files = await api(`/skills/${s.id}/files`);
+        alert(`Файли пакета «${s.name}»:\n\n` + files.map(f => `${f.name} (${f.size} Б)`).join("\n"));
+      } catch (err) { toast(err.message, "err"); }
+    });
+    tr.querySelector("[data-act='del']").addEventListener("click", async () => {
+      if (!confirm(`Видалити скіл «${s.name}»?`)) return;
+      try { await api(`/skills/${s.id}`, { method: "DELETE" }); toast("Скіл видалено"); openTab("manage-skills"); }
       catch (err) { toast(err.message, "err"); }
     });
     body.appendChild(tr);

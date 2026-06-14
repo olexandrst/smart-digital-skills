@@ -41,9 +41,16 @@ class Skill(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
     description = db.Column(db.Text, nullable=False)
-    model_id = db.Column(db.Integer, db.ForeignKey("models.id"), nullable=False)
+    # 'prompt' — LLM-скіл; 'package' — архів зі skill.md та кодом, що виконується.
+    skill_kind = db.Column(db.String, nullable=False, default="prompt")
+    model_id = db.Column(db.Integer, db.ForeignKey("models.id"))  # nullable: пакетам не потрібен
     prompt_template = db.Column(db.Text)
     parameters = db.Column(db.Text)  # JSON: temperature, top_p
+    # Поля для скілів-пакетів:
+    runtime = db.Column(db.String)          # напр. 'python'
+    entrypoint = db.Column(db.String)       # шлях до файлу запуску відносно кореня пакета
+    package_filename = db.Column(db.String) # оригінальна назва завантаженого архіву
+    package_path = db.Column(db.String)     # шлях до збереженого архіву
     status = db.Column(db.String, nullable=False, default="draft")  # draft|testing|published|delisted
     version = db.Column(db.String, nullable=False, default="1.0.0")
     activations_count = db.Column(db.Integer, nullable=False, default=0)
@@ -63,8 +70,13 @@ class Skill(db.Model):
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "skill_kind": self.skill_kind or "prompt",
             "model_id": self.model_id,
             "model_name": self.model.name if self.model else None,
+            "runtime": self.runtime,
+            "entrypoint": self.entrypoint,
+            "package_filename": self.package_filename,
+            "has_package": bool(self.package_path),
             "status": self.status,
             "version": self.version,
             "activations_count": self.activations_count,

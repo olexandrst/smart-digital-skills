@@ -149,10 +149,65 @@ def seed():
         skill_service.assign_to_group(group.id, skill.id, admin.id)
         skill_service.self_activate(member2.id, skill.id)
 
+        # 9. Демо-скіл-ПАКЕТ (виконання Python-коду з архіву)
+        _seed_package_skill(admin)
+
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
         print("  Skill-менеджер: skillmanager / Skill123!")
         print("  Користувачі:    user1 / User123!,  user2 / User123!")
+
+
+def _zip_dir_to_bytes(src_dir):
+    """Пакує вміст теки у zip-байти (шляхи відносні до src_dir)."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(src_dir):
+            for fname in files:
+                full = os.path.join(root, fname)
+                rel = os.path.relpath(full, src_dir)
+                zf.write(full, rel)
+    return buf.getvalue()
+
+
+def _seed_package_skill(admin):
+    """Збирає приклад examples/skills/word-counter у архів та реєструє як скіл-пакет."""
+    from datetime import datetime
+    from app.services import package_service
+    from app.models import SkillInput
+
+    if Skill.query.filter_by(name="Word Counter").first():
+        return
+
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    example_dir = os.path.join(base_dir, "examples", "skills", "word-counter")
+    if not os.path.isdir(example_dir):
+        print("  (приклад word-counter не знайдено — пропускаю скіл-пакет)")
+        return
+
+    file_bytes = _zip_dir_to_bytes(example_dir)
+    meta = package_service.parse_package(file_bytes)
+
+    skill = Skill(
+        name=meta["name"], description=meta["description"],
+        skill_kind="package", runtime=meta["runtime"], entrypoint=meta["entrypoint"],
+        version=meta["version"], prompt_template=meta.get("instructions"),
+        status="published", published_at=datetime.utcnow(),
+        package_filename="word-counter.zip", created_by=admin.id,
+    )
+    db.session.add(skill)
+    db.session.flush()
+    skill.package_path = package_service.store_package(skill.id, file_bytes, "word-counter.zip")
+    for spec in meta["inputs"]:
+        db.session.add(SkillInput(
+            skill_id=skill.id, name=spec["name"], label=spec.get("label"),
+            data_type=spec.get("data_type", "string"),
+            is_required=spec.get("is_required", True),
+            default_value=spec.get("default_value"),
+            description=spec.get("description"), position=spec.get("position", 0)))
+    db.session.commit()
 
 
 if __name__ == "__main__":
