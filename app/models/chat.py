@@ -14,6 +14,7 @@ class ChatSession(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
                         nullable=False)
     group_id = db.Column(db.Integer, db.ForeignKey("groups.id"))
+    model_id = db.Column(db.Integer, db.ForeignKey("models.id"))  # обрана модель чату
     skill_id = db.Column(db.Integer, db.ForeignKey("skills.id"))
     title = db.Column(db.String)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
@@ -23,13 +24,21 @@ class ChatSession(db.Model):
         "ChatMessage", backref="session", lazy="select",
         cascade="all, delete-orphan", order_by="ChatMessage.created_at",
     )
+    model = db.relationship("Model", lazy="joined")
+
+    @property
+    def total_tokens_sum(self):
+        return sum(m.total_tokens or 0 for m in self.messages)
 
     def to_dict(self, include_messages=False):
         data = {
             "id": self.id,
             "user_id": self.user_id,
+            "model_id": self.model_id,
+            "model_name": self.model.name if self.model else None,
             "skill_id": self.skill_id,
             "title": self.title,
+            "total_tokens": self.total_tokens_sum,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
         if include_messages:
@@ -45,6 +54,7 @@ class ChatMessage(db.Model):
                            nullable=False)
     role = db.Column(db.String, nullable=False)  # system | user | assistant
     content = db.Column(db.Text)
+    skill_id = db.Column(db.Integer, db.ForeignKey("skills.id"))  # застосований скіл (опц.)
     msg_metadata = db.Column("metadata", db.Text)  # JSON
     prompt_tokens = db.Column(db.Integer, default=0)
     completion_tokens = db.Column(db.Integer, default=0)
@@ -56,7 +66,10 @@ class ChatMessage(db.Model):
             "id": self.id,
             "role": self.role,
             "content": self.content,
-            "total_tokens": self.total_tokens,
+            "skill_id": self.skill_id,
+            "prompt_tokens": self.prompt_tokens or 0,
+            "completion_tokens": self.completion_tokens or 0,
+            "total_tokens": self.total_tokens or 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

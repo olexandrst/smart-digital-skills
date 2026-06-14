@@ -4,16 +4,24 @@ from flask import Blueprint, request, jsonify
 from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
 from app.core.errors import ApiError
-from app.models import Model
+from app.models import Model, Skill
 from app.integrations import SUPPORTED_PROVIDERS, normalize_provider
 
 bp = Blueprint("models", __name__)
 
 
+def _truthy(value):
+    return str(value).lower() in ("1", "true", "yes")
+
+
 @bp.get("")
 @require_auth
 def list_models():
-    models = Model.query.order_by(Model.id).all()
+    """Список моделей. `?active=1` — лише активні (для вибору в чаті)."""
+    query = Model.query
+    if _truthy(request.args.get("active", "")):
+        query = query.filter_by(is_active=True)
+    models = query.order_by(Model.id).all()
     return jsonify([m.to_dict() for m in models])
 
 
@@ -72,3 +80,29 @@ def update_model(model_id):
         model.is_active = bool(data["is_active"])
     db.session.commit()
     return jsonify(model.to_dict())
+
+
+@bp.post("/<int:model_id>/activate")
+@require_global_role("admin")
+def set_active(model_id):
+    """Активація/деактивація моделі. Лише активні доступні користувачам у чаті."""
+    model = Model.query.get_or_404(model_id)
+    data = request.get_json(silent=True) or {}
+    model.is_active = bool(data.get("is_active", True))
+    db.session.commit()
+    return jsonify(model.to_dict())
+
+
+@bp.delete("/<int:model_id>")
+@require_global_role("admin")
+def delete_model(model_id):
+    model = Model.query.get_or_404(model_id)
+    used_by = Skill.query.filter_by(model_id=model_id).count()
+    if used_by:
+        raise ApiError(
+            f"Модель використовується у {used_by} скіл(ах). Спочатку видаліть "
+            "або переналаштуйте ці скіли, або деактивуйте модель.",
+            409, "model_in_use")
+    db.session.delete(model)
+    db.session.commit()
+    return jsonify({"message": "Модель видалено"})

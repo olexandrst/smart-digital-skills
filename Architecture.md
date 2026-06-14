@@ -67,7 +67,7 @@
 - **UserService** — CRUD користувачів, скидання паролів, призначення глобальних ролей (тільки Admin).
 - **GroupService** — створення груп, членство, інвайти, призначення скілів групі; enforced-правило «мінімум 1 менеджер»; синхронізація `user_skills` при змінах членства.
 - **SkillService** — життєвий цикл скілів, параметри вхідних даних, самостійна активація користувачем, перерахунок лічильника активацій; реєстр моделей (підключення — лише Admin).
-- **ChatService** — оркестрація запитів до моделей через AzureFoundryClient, збереження діалогів.
+- **ChatService** — оркестрація чату з **обраною користувачем моделлю**: створення сесій, багатоходовий діалог з історією, **опційне застосування скілів** до повідомлень, виклик відповідного провайдера через фабрику клієнтів та облік токенів (вхідні/вихідні/загальні). Доступні лише `is_active`-моделі.
 - **TokenService** — логування використання токенів, агрегація, (Етап 2) перевірка лімітів.
 - **AuditService** — журнал значимих дій (адмін-операції, зміни доступів).
 
@@ -327,12 +327,13 @@ CREATE TABLE user_skills (
     UNIQUE (user_id, skill_id)                   -- "крім тих, у кого вже був скіл"
 );
 
--- Сесії чату
+-- Сесії чату (користувач обирає модель для діалогу)
 CREATE TABLE chat_sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     group_id   INTEGER REFERENCES groups(id),
-    skill_id   INTEGER REFERENCES skills(id),
+    model_id   INTEGER REFERENCES models(id),      -- обрана модель чату
+    skill_id   INTEGER REFERENCES skills(id),      -- для сесій запуску скіла
     title      TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -344,9 +345,10 @@ CREATE TABLE chat_messages (
     session_id        INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     role              TEXT NOT NULL CHECK (role IN ('system','user','assistant')),
     content           TEXT,
+    skill_id          INTEGER REFERENCES skills(id), -- застосований до повідомлення скіл (опц.)
     metadata          TEXT,                       -- JSON: вкладення, CV-результати
-    prompt_tokens     INTEGER DEFAULT 0,
-    completion_tokens INTEGER DEFAULT 0,
+    prompt_tokens     INTEGER DEFAULT 0,          -- вхідні токени (на user-повідомленні)
+    completion_tokens INTEGER DEFAULT 0,          -- вихідні токени (на assistant-повідомленні)
     total_tokens      INTEGER DEFAULT 0,
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -432,7 +434,11 @@ CREATE INDEX idx_skills_status ON skills(status);
 
 1. **Мінімум один менеджер у групі.** При видаленні останнього `group_manager` система автоматично призначає менеджером системного `Admin` (правило з PRD).
 
-2. **Підключення моделей — лише Admin.** Skill Manager будує скіли поверх наявних моделей, але не реєструє самі моделі.
+2. **Підключення моделей — лише Admin.** Skill Manager будує скіли поверх наявних моделей, але не реєструє самі моделі. Admin може **додавати, видаляти та активувати/деактивувати** моделі. Видалення заблоковане, якщо модель використовується хоча б одним скілом.
+
+2a. **Лише активні моделі (`is_active=1`) доступні користувачам** для вибору в чаті. Деактивована модель зникає зі списку вибору, а спроба чату з нею відхиляється.
+
+2b. **Мультипровайдерність.** Кожна модель має `provider` (`azure_ai_foundry` / `openai` / `gemini`). Фабрика клієнтів обирає відповідний адаптер; у MVP усі працюють у режимі моку (`LLM_MOCK=1`).
 
 3. **Кожен скіл обов'язково має:** `description` (опис), `version` (семантична версія), перелік вхідних параметрів у `skill_inputs` з прапорцем `is_required` (обов'язкові/опціональні), та `activations_count` (к-сть активацій).
 
@@ -450,7 +456,9 @@ CREATE INDEX idx_skills_status ON skills(status);
 
 7. **Життєвий цикл скіла:** `draft → testing → published → delisted`. Призначати/активувати можна лише `published`.
 
-8. **Облік токенів** записується у `token_usage_logs` при кожному виклику моделі (на основі `usage` з відповіді Foundry).
+8. **Облік токенів** записується у `token_usage_logs` при кожному виклику моделі (на основі `usage` з відповіді провайдера): окремо **вхідні** (`prompt_tokens`), **вихідні** (`completion_tokens`) та **загальні** (`total_tokens`). Деталізація також зберігається на рівні `chat_messages`, а агрегація доступна по користувачу, групі та глобально.
+
+8a. **Чат із моделлю.** Користувач створює сесію з обраною активною моделлю; історія діалогу (останні N повідомлень) передається провайдеру. До окремого повідомлення можна застосувати скіл (його prompt-шаблон форматує текст), при цьому генерація йде через модель сесії.
 
 9. **Скоуп Skill Manager** обмежений скілами: жодного доступу до користувачів, груп, системних налаштувань, реєстрації моделей.
 

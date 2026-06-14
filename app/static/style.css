@@ -157,3 +157,33 @@ th { color: var(--muted); font-weight: 500; }
 .toast.err { border-color: var(--danger); }
 
 .actions { display: flex; gap: 6px; }
+
+/* Чат-розмітка */
+.chat-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
+.chat-sidebar .card { margin-bottom: 16px; }
+.chat-main { display: flex; flex-direction: column; min-height: 520px; }
+.chat-header { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.chat-main .chat-log { flex: 1; max-height: 60vh; }
+
+.session-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  position: relative;
+  border: 1px solid transparent;
+}
+.session-item:hover { background: var(--panel-2); }
+.session-item.active { background: var(--panel-2); border-color: var(--accent); }
+.session-title { font-size: 14px; font-weight: 500; padding-right: 24px; }
+.session-meta { font-size: 12px; color: var(--muted); }
+.session-del { position: absolute; top: 8px; right: 8px; padding: 2px 8px; }
+
+.msg-meta { font-size: 11px; color: var(--muted); margin-top: 6px; opacity: 0.8; }
+.msg.user .msg-meta { color: rgba(255,255,255,0.8); }
+
+@media (max-width: 720px) {
+  .chat-layout { grid-template-columns: 1fr; }
+}

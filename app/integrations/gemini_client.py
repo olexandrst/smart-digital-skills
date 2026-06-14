@@ -1,5 +1,5 @@
 """Адаптер до Google Gemini API (google-generativeai)."""
-from app.integrations.base import LLMResponse, mock_response, estimate_tokens
+from app.integrations.base import LLMResponse, mock_chat_response, estimate_tokens
 
 
 class GeminiClient:
@@ -10,11 +10,14 @@ class GeminiClient:
         self.use_mock = use_mock or not api_key
 
     def complete(self, model_name, prompt, parameters=None):
-        if self.use_mock:
-            return mock_response(self.provider_label, model_name, prompt)
-        return self._real_complete(model_name, prompt, parameters or {})
+        return self.chat(model_name, [{"role": "user", "content": prompt}], parameters)
 
-    def _real_complete(self, model_name, prompt, parameters):
+    def chat(self, model_name, messages, parameters=None):
+        if self.use_mock:
+            return mock_chat_response(self.provider_label, model_name, messages)
+        return self._real_chat(model_name, messages, parameters or {})
+
+    def _real_chat(self, model_name, messages, parameters):
         try:
             import google.generativeai as genai
         except ImportError as exc:  # pragma: no cover
@@ -25,8 +28,14 @@ class GeminiClient:
 
         genai.configure(api_key=self.api_key)
         model = genai.GenerativeModel(model_name)
+        # Конвертуємо історію у формат Gemini (assistant → model).
+        contents = [
+            {"role": "model" if m.get("role") == "assistant" else "user",
+             "parts": [m.get("content", "")]}
+            for m in messages
+        ]
         resp = model.generate_content(
-            prompt,
+            contents,
             generation_config={"temperature": parameters.get("temperature", 0.7)},
         )
 
@@ -34,9 +43,10 @@ class GeminiClient:
         prompt_tokens = getattr(usage, "prompt_token_count", None)
         completion_tokens = getattr(usage, "candidates_token_count", None)
         content = resp.text
+        prompt_fallback = sum(estimate_tokens(m.get("content", "")) for m in messages)
         return LLMResponse(
             content=content,
-            prompt_tokens=prompt_tokens if prompt_tokens is not None else estimate_tokens(prompt),
+            prompt_tokens=prompt_tokens if prompt_tokens is not None else prompt_fallback,
             completion_tokens=(completion_tokens if completion_tokens is not None
                                else estimate_tokens(content)),
         )
