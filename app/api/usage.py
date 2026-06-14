@@ -1,9 +1,10 @@
 """Облік токенів: власні (усі), групи (менеджер), глобально (Admin)."""
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 from app.extensions import db
 from app.core.permissions import require_auth, require_global_role, require_group_role
 from app.core.security import current_user
+from app.core.errors import ApiError
 from app.models import TokenUsageLog, User
 from app.services import quota_service
 
@@ -32,6 +33,23 @@ def my_usage():
     data = _aggregate(TokenUsageLog.query.filter_by(user_id=user.id))
     data["quota"] = quota_service.status(user.id)
     return jsonify(data)
+
+
+@bp.get("/default-limit")
+@require_global_role("admin")
+def get_default_limit():
+    """Системна тижнева квота за замовчуванням."""
+    return jsonify({"limit": quota_service.system_default_limit(), "period": "weekly"})
+
+
+@bp.post("/default-limit")
+@require_global_role("admin")
+def set_default_limit():
+    data = request.get_json(silent=True) or {}
+    if "limit" not in data:
+        raise ApiError("Вкажіть limit", 400, "validation_error")
+    limit = quota_service.set_system_default_limit(data["limit"])
+    return jsonify({"limit": limit, "period": "weekly"})
 
 
 @bp.get("/group/<int:group_id>")

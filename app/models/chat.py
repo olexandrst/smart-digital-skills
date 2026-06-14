@@ -90,16 +90,27 @@ class TokenUsageLog(db.Model):
 
 
 class TokenLimit(db.Model):
-    """Детальні ліміти токенів (Етап 2, схема закладена наперед)."""
+    """Ліміти (квоти) токенів. scope_type: 'global' (системна) | 'user' (персональна)."""
     __tablename__ = "token_limits"
 
     id = db.Column(db.Integer, primary_key=True)
     scope_type = db.Column(db.String, nullable=False)  # global | group | user
     scope_id = db.Column(db.Integer)
-    period = db.Column(db.String, nullable=False, default="monthly")
+    period = db.Column(db.String, nullable=False, default="weekly")
     limit_tokens = db.Column(db.Integer, nullable=False)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
+    updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
+
+
+class TokenCounter(db.Model):
+    """Лічильник використаних токенів користувача за поточний тиждень."""
+    __tablename__ = "token_counters"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
+                        primary_key=True)
+    used_tokens = db.Column(db.Integer, nullable=False, default=0)
+    period_start = db.Column(db.DateTime)  # початок поточного тижневого періоду (UTC)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
 
 

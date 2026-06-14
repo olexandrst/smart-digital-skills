@@ -140,7 +140,11 @@ async function refreshQuota() {
     const color = pct >= 90 ? "var(--danger)" : pct >= 70 ? "#f59e0b" : "var(--ok)";
     fill.style.background = color;
     $("#quota").classList.toggle("quota-full", pct >= 100);
-    $("#quota").title = `Використано ${fmt(q.used)} з ${q.limit ? fmt(q.limit) : "∞"} токенів (${pct}%)`;
+    const resets = q.resets_at ? new Date(q.resets_at).toLocaleString("uk-UA") : "";
+    $("#quota").title =
+      `Тижнева квота: ${fmt(q.used)} / ${q.limit ? fmt(q.limit) : "∞"} токенів (${pct}%)` +
+      (q.custom ? " · персональна" : " · системна") +
+      (resets ? `\nСкидання: ${resets}` : "");
   } catch (e) { /* ignore */ }
 }
 
@@ -723,9 +727,17 @@ async function renderGroupDetail(groupId) {
 
 // ---------- Користувачі (Admin) ----------
 async function viewUsers() {
-  const users = await api("/users");
+  const [users, def] = await Promise.all([api("/users"), api("/usage/default-limit")]);
   const view = $("#view");
   view.innerHTML = `
+    <div class="card">
+      <h2>Системна тижнева квота</h2>
+      <p class="muted">Діє для всіх користувачів без персональної квоти. Скидання — щопонеділка 00:05 UTC.</p>
+      <div class="row">
+        <input id="sys-limit" type="number" min="0" value="${def.limit}">
+        <button id="sys-save">Зберегти</button>
+      </div>
+    </div>
     <div class="card">
       <h2>Новий користувач</h2>
       <div class="row">
@@ -736,7 +748,13 @@ async function viewUsers() {
         <button id="u-add">Створити</button>
       </div>
     </div>
-    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Ролі</th><th>Ліміт токенів</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
+    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Ролі</th><th>Тижнева квота (використано / ліміт)</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
+
+  $("#sys-save").addEventListener("click", async () => {
+    try { await api("/usage/default-limit", { method: "POST", body: { limit: Number($("#sys-limit").value) }});
+      toast("Системну квоту оновлено"); openTab("users"); }
+    catch (err) { toast(err.message, "err"); }
+  });
   $("#u-add").addEventListener("click", async () => {
     const roles = $("#u-role").value ? [$("#u-role").value] : [];
     try { await api("/users", { method: "POST", body: {
@@ -747,21 +765,35 @@ async function viewUsers() {
   const body = $("#u-body");
   users.forEach(u => {
     const used = (u.token_used || 0).toLocaleString("uk-UA");
-    const limit = (u.token_limit || 0).toLocaleString("uk-UA");
+    const eff = (u.effective_limit || 0).toLocaleString("uk-UA");
+    const custom = u.custom_limit != null
+      ? `<span class="badge published" title="Персональна квота">власна</span>`
+      : `<span class="badge" title="Системна квота">системна</span>`;
+    const delBtn = u.custom_limit != null
+      ? `<button class="small danger" data-act="limit-del">✕ квота</button>` : "";
     const tr = el(`<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.full_name || "")}</td>
       <td>${u.roles.join(", ") || "member"}</td>
-      <td><span class="muted">${used} /</span> ${limit}
-        <button class="small ghost" data-act="limit">Змінити</button></td>
+      <td><span class="muted">${used} /</span> ${eff} ${custom}
+        <button class="small ghost" data-act="limit">${u.custom_limit != null ? "Змінити" : "Задати"}</button>
+        ${delBtn}</td>
       <td>${u.is_active ? "✓" : "—"}</td>
       <td class="actions"><button class="small" data-act="reset" data-id="${u.id}">Скинути пароль</button>
       <button class="small ghost" data-act="toggle" data-id="${u.id}" data-active="${u.is_active}">${u.is_active ? "Деактивувати" : "Активувати"}</button></td>
     </tr>`);
     tr.querySelector("[data-act='limit']").addEventListener("click", async () => {
-      const v = prompt(`Ліміт токенів для «${u.username}»:`, u.token_limit);
+      const v = prompt(`Персональна тижнева квота для «${u.username}» (токенів):`,
+                       u.custom_limit != null ? u.custom_limit : u.effective_limit);
       if (v === null) return;
       try { await api(`/users/${u.id}/token-limit`, { method: "POST", body: { limit: Number(v) }});
-        toast("Ліміт оновлено"); openTab("users"); }
+        toast("Персональну квоту встановлено"); openTab("users"); }
+      catch (err) { toast(err.message, "err"); }
+    });
+    const limDel = tr.querySelector("[data-act='limit-del']");
+    if (limDel) limDel.addEventListener("click", async () => {
+      if (!confirm(`Видалити персональну квоту «${u.username}»? Діятиме системна.`)) return;
+      try { await api(`/users/${u.id}/token-limit`, { method: "DELETE" });
+        toast("Персональну квоту видалено"); openTab("users"); }
       catch (err) { toast(err.message, "err"); }
     });
     tr.querySelector("[data-act='reset']").addEventListener("click", async () => {

@@ -224,3 +224,5 @@ def _store_exchange(session, user, model_id, skill_id, user_content, reply, usag
         total_tokens=usage["total_tokens"],
     ))
     db.session.commit()
+    # Оновлюємо тижневий лічильник квоти.
+    quota_service.record_usage(user.id, usage["total_tokens"])

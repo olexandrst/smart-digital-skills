@@ -4,6 +4,7 @@ Flask-JWT-Extended==4.6.0
 Flask-Cors==4.0.1
 python-dotenv==1.0.1
 PyYAML==6.0.2
+APScheduler==3.10.4
 
 # --- SDK реальних LLM-провайдерів ---
 # У MVP за замовчуванням працює мок (LLM_MOCK=1); ці пакети потрібні для

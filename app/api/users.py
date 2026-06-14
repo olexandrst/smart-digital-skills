@@ -12,8 +12,9 @@ bp = Blueprint("users", __name__)
 
 def _with_quota(user):
     d = user.to_dict()
-    d["token_limit"] = quota_service.get_limit(user.id)
-    d["token_used"] = quota_service.get_used(user.id)
+    d["token_used"] = quota_service.get_used(user.id)            # за поточний тиждень
+    d["custom_limit"] = quota_service.get_user_custom_limit(user.id)  # персональна або None
+    d["effective_limit"] = quota_service.effective_limit(user.id)
     return d
 
 
@@ -27,12 +28,23 @@ def list_users():
 @bp.post("/<int:user_id>/token-limit")
 @require_global_role("admin")
 def set_token_limit(user_id):
+    """Встановити/оновити ПЕРСОНАЛЬНУ тижневу квоту (має пріоритет над системною)."""
     user = User.query.get_or_404(user_id)
     data = request.get_json(silent=True) or {}
     if "limit" not in data:
         raise ApiError("Вкажіть limit", 400, "validation_error")
-    limit = quota_service.set_limit(user.id, data["limit"])
-    return jsonify({"user_id": user.id, "token_limit": limit})
+    limit = quota_service.set_user_limit(user.id, data["limit"])
+    return jsonify({"user_id": user.id, "custom_limit": limit})
+
+
+@bp.delete("/<int:user_id>/token-limit")
+@require_global_role("admin")
+def delete_token_limit(user_id):
+    """Видалити персональну квоту — користувач повертається до системної."""
+    user = User.query.get_or_404(user_id)
+    quota_service.delete_user_limit(user.id)
+    return jsonify({"user_id": user.id,
+                    "effective_limit": quota_service.effective_limit(user.id)})
 
 
 @bp.post("")

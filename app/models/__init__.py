@@ -7,6 +7,7 @@ from app.models.chat import (
     ChatMessage,
     TokenUsageLog,
     TokenLimit,
+    TokenCounter,
     AuditLog,
 )
 from app.models.file import UserFile
@@ -28,6 +29,7 @@ __all__ = [
     "ChatMessage",
     "TokenUsageLog",
     "TokenLimit",
+    "TokenCounter",
     "AuditLog",
     "UserFile",
 ]

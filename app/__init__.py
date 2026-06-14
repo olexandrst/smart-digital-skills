@@ -31,6 +31,10 @@ def create_app(config_object=None):
         with app.app_context():
             sync_schema()
 
+    # Планувальник тижневого скидання квот (понеділок 00:05 UTC).
+    if app.config.get("ENABLE_SCHEDULER", True):
+        _start_scheduler(app)
+
     @app.get("/api/health")
     def health():
         return jsonify({"status": "ok", "service": "smart-profihub"})
@@ -51,6 +55,36 @@ def create_app(config_object=None):
         return send_from_directory(base, filename)
 
     return app
+
+
+_scheduler = None
+
+
+def _start_scheduler(app):
+    """Запускає APScheduler з тижневим скиданням лічильників квот."""
+    global _scheduler
+    if _scheduler is not None:
+        return
+    # У dev із reloader стартуємо лише в робочому процесі (уникаємо подвоєння).
+    if app.debug and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        return
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+    except ImportError:
+        app.logger.warning("APScheduler не встановлено — тижневе скидання працює "
+                           "лише «ліниво» за зсувом тижневого вікна.")
+        return
+
+    from app.services import quota_service
+
+    def _job():
+        with app.app_context():
+            quota_service.reset_all()
+
+    _scheduler = BackgroundScheduler(daemon=True, timezone="UTC")
+    _scheduler.add_job(_job, "cron", day_of_week="mon", hour=0, minute=5,
+                       id="weekly_quota_reset", replace_existing=True)
+    _scheduler.start()
 
 
 def _register_jwt_handlers():

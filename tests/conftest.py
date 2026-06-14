@@ -17,6 +17,7 @@ class TestConfig(BaseConfig):
     JWT_SECRET_KEY = "test"
     SECRET_KEY = "test"
     AUTO_MIGRATE = False  # тести керують схемою самостійно
+    ENABLE_SCHEDULER = False  # без фонового планувальника у тестах
     # Артефакти тестів — у тимчасову теку, не у instance/.
     SKILL_PACKAGES_DIR = os.path.join(_TMP, "skill_packages")
     USER_FILES_DIR = os.path.join(_TMP, "user_files")
