@@ -101,6 +101,67 @@ $("#login-form").addEventListener("submit", async (e) => {
 });
 $("#logout-btn").addEventListener("click", logout);
 
+// ---------- Вендор моделі → колір ----------
+const VENDOR_LABELS = {
+  openai: "OpenAI", azure: "Azure OpenAI", gemini: "Gemini",
+  claude: "Claude", default: "Модель",
+};
+function vendorOf(model) {
+  const p = (model.provider || model.model_provider || "").toLowerCase();
+  const nm = ((model.name || model.deployment_name || model.model_name || "") + "").toLowerCase();
+  if (nm.includes("claude") || p === "anthropic") return "claude";
+  if (p === "azure_ai_foundry" || p === "azure_openai" || p === "azure") return "azure";
+  if (p === "openai") return "openai";
+  if (p === "gemini" || p === "google") return "gemini";
+  return "default";
+}
+
+// ---------- Модальне вікно вибору моделі ----------
+async function openModelModal() {
+  const overlay = $("#model-modal");
+  const tiles = $("#model-tiles");
+  tiles.innerHTML = `<p class="muted">Завантаження…</p>`;
+  overlay.classList.remove("hidden");
+  try {
+    const models = (await api("/models?active=1")).filter(m => m.model_type === "llm");
+    if (!models.length) {
+      tiles.innerHTML = `<p class="muted">Немає активних LLM-моделей. Зверніться до адміністратора.</p>`;
+      return;
+    }
+    tiles.innerHTML = "";
+    models.forEach(m => {
+      const v = vendorOf(m);
+      const tile = el(`<button class="model-tile vendor-${v}">
+        <span class="tile-vendor">${esc(VENDOR_LABELS[v])}</span>
+        <span class="tile-name">${esc(m.name)}</span>
+        <span class="tile-dep">${esc(m.deployment_name || "")}</span>
+      </button>`);
+      tile.addEventListener("click", () => createChatWithModel(m.id));
+      tiles.appendChild(tile);
+    });
+  } catch (err) { tiles.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+}
+function closeModelModal() { $("#model-modal").classList.add("hidden"); }
+
+async function createChatWithModel(modelId) {
+  try {
+    const s = await api("/chat/sessions", { method: "POST", body: { model_id: Number(modelId) } });
+    closeModelModal();
+    chatState.openAfter = s.id;
+    if (document.querySelector("#nav .nav-item.active")?.dataset.tab === "chat") {
+      await viewChat();
+    } else {
+      openTab("chat");
+    }
+  } catch (err) { toast(err.message, "err"); }
+}
+
+$("#new-chat-btn").addEventListener("click", openModelModal);
+$("#model-modal-close").addEventListener("click", closeModelModal);
+$("#model-modal").addEventListener("click", (e) => {
+  if (e.target.id === "model-modal") closeModelModal();
+});
+
 // Перемикач показу пароля.
 const pwToggle = $("#pw-toggle");
 if (pwToggle) pwToggle.addEventListener("click", () => {
@@ -197,6 +258,7 @@ async function openTab(id) {
     b.classList.toggle("active", b.dataset.tab === id));
   const tab = TABS.find(t => t.id === id);
   $("#page-title").textContent = tab ? tab.label : "";
+  $("#view").classList.toggle("flush", id === "chat");  // чат — без центрування, ближче до меню
   $("#view").innerHTML = `<p class="muted">Завантаження…</p>`;
   try { await tab.view(); }
   catch (err) { $("#view").innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`; }
@@ -204,46 +266,37 @@ async function openTab(id) {
 }
 
 // ---------- Чат з обраною моделлю ----------
-let chatState = { sessionId: null, models: [], skills: [] };
+let chatState = { sessionId: null, skills: [], openAfter: null };
 
-async function viewChat() {
-  const [models, skills, sessions] = await Promise.all([
-    api("/models?active=1"), api("/skills/mine"), api("/chat/sessions"),
-  ]);
-  const llmModels = models.filter(m => m.model_type === "llm");
-  chatState.models = llmModels;
-  chatState.skills = skills;
-  const view = $("#view");
-
-  if (!llmModels.length) {
-    view.innerHTML = `<div class="card"><h2>Чат</h2><p class="muted">Немає активних LLM-моделей. Зверніться до адміністратора, щоб активувати модель.</p></div>`;
-    return;
-  }
-
-  const modelOpts = llmModels.map(m =>
-    `<option value="${m.id}">${esc(m.name)}</option>`).join("");
-  const sessionItems = sessions.map(s => `
-    <div class="session-item" data-sid="${s.id}">
+function sessionItemHtml(s, activeId) {
+  const v = vendorOf(s);
+  return `<div class="session-item vendor-${v} ${s.id === activeId ? "active" : ""}" data-sid="${s.id}">
       <span class="session-title">${esc(s.title || "Без назви")}</span>
       <span class="session-meta">${esc(s.model_name || "")} · ${s.total_tokens} тк</span>
       <button class="session-del small ghost" data-del="${s.id}" title="Видалити">×</button>
-    </div>`).join("") || `<p class="muted">Сесій ще немає.</p>`;
+    </div>`;
+}
+
+async function viewChat() {
+  const [skills, sessions] = await Promise.all([
+    api("/skills/mine"), api("/chat/sessions"),
+  ]);
+  chatState.skills = skills;
+  const view = $("#view");
+
+  const sessionItems = sessions.map(s => sessionItemHtml(s, chatState.sessionId)).join("")
+    || `<p class="muted">Чатів ще немає. Натисніть «Новий чат» угорі.</p>`;
 
   view.innerHTML = `
     <div class="chat-layout">
       <aside class="chat-sidebar">
-        <div class="card">
-          <h3>Новий чат</h3>
-          <div class="field"><label>Модель</label><select id="chat-model">${modelOpts}</select></div>
-          <button id="chat-new" style="width:100%">Створити</button>
-        </div>
-        <div class="card">
+        <div class="card chat-history">
           <h3>Мої чати</h3>
           <div id="session-list">${sessionItems}</div>
         </div>
       </aside>
       <section class="chat-main card">
-        <div id="chat-header" class="chat-header muted">Оберіть або створіть чат.</div>
+        <div id="chat-header" class="chat-header muted">Оберіть чат або створіть новий («Новий чат» угорі).</div>
         <div id="chat-log" class="chat-log"></div>
         <div id="chat-input-box" class="hidden">
           <div class="row" style="margin-bottom:8px">
@@ -261,19 +314,12 @@ async function viewChat() {
       </section>
     </div>`;
 
-  $("#chat-new").addEventListener("click", async () => {
-    try {
-      const s = await api("/chat/sessions", { method: "POST",
-        body: { model_id: Number($("#chat-model").value) } });
-      await openChatSession(s.id);
-      await refreshSessionList();
-    } catch (err) { toast(err.message, "err"); }
-  });
-
   bindSessionListEvents();
 
-  // Автовідкриття останньої сесії, якщо є.
-  if (sessions.length) openChatSession(sessions[0].id);
+  // Відкриваємо новостворений чат, інакше — останній наявний.
+  const toOpen = chatState.openAfter || (sessions[0] && sessions[0].id);
+  chatState.openAfter = null;
+  if (toOpen) openChatSession(toOpen);
 }
 
 function bindSessionListEvents() {
@@ -305,12 +351,8 @@ async function refreshSessionList() {
   const sessions = await api("/chat/sessions");
   const list = $("#session-list");
   if (!list) return;
-  list.innerHTML = sessions.map(s => `
-    <div class="session-item ${s.id === chatState.sessionId ? "active" : ""}" data-sid="${s.id}">
-      <span class="session-title">${esc(s.title || "Без назви")}</span>
-      <span class="session-meta">${esc(s.model_name || "")} · ${s.total_tokens} тк</span>
-      <button class="session-del small ghost" data-del="${s.id}" title="Видалити">×</button>
-    </div>`).join("") || `<p class="muted">Сесій ще немає.</p>`;
+  list.innerHTML = sessions.map(s => sessionItemHtml(s, chatState.sessionId)).join("")
+    || `<p class="muted">Чатів ще немає.</p>`;
   bindSessionListEvents();
 }
 

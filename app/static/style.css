@@ -195,10 +195,11 @@ button.small { padding: 5px 10px; font-size: 13px; }
   box-shadow: inset 2px 0 0 var(--accent-2);
 }
 
-.side-foot { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 8px; }
-.user-card { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+/* Низ сайдбару — шкала квоти токенів */
+.side-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; }
+
 .avatar {
-  width: 38px; height: 38px; border-radius: 50%;
+  width: 36px; height: 36px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; color: #fff; flex: 0 0 auto;
   background: linear-gradient(135deg, #7c5cff, #e35cc8);
@@ -206,26 +207,38 @@ button.small { padding: 5px 10px; font-size: 13px; }
 .user-meta { display: flex; flex-direction: column; min-width: 0; }
 .user-meta #user-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roles { color: var(--muted); font-size: 12px; text-transform: capitalize; }
-.logout { width: 100%; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* Верхня смужка */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 16px; padding: 14px 28px;
+  gap: 16px; padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   background: rgba(13, 18, 35, 0.55);
   backdrop-filter: blur(8px);
   position: sticky; top: 0; z-index: 20;
 }
+.top-left { display: flex; align-items: center; gap: 18px; }
 .page-title { font-size: 20px; font-weight: 700; }
-.top-right { display: flex; align-items: center; gap: 14px; }
-/* Шкала квоти токенів */
+.btn-newchat {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: linear-gradient(90deg, #5b6cff, #6d5cff);
+  padding: 9px 16px; border-radius: 10px; font-weight: 600;
+  box-shadow: 0 8px 20px rgba(91, 108, 255, 0.3);
+}
+.btn-newchat:hover { background: linear-gradient(90deg, #6675ff, #7a68ff); }
+.btn-newchat svg { width: 16px; height: 16px; }
+
+.top-right { display: flex; align-items: center; gap: 12px; }
+.top-right .user-card { display: flex; align-items: center; gap: 10px; }
+.top-right .logout { padding: 7px 14px; }
+
+/* Шкала квоти токенів (у низу сайдбару) */
 .quota {
   display: flex; align-items: center; gap: 10px;
   background: var(--panel-2); border: 1px solid var(--border);
-  padding: 8px 14px; border-radius: 12px; min-width: 230px;
+  padding: 9px 12px; border-radius: 12px; width: 100%;
 }
 .quota.quota-full { border-color: var(--danger); }
 .quota-ic { width: 20px; height: 20px; fill: var(--accent-2); flex: 0 0 auto; }
@@ -239,6 +252,8 @@ button.small { padding: 5px 10px; font-size: 13px; }
 
 /* Контент */
 .view { padding: 28px; max-width: 1180px; margin: 0 auto; width: 100%; }
+/* Чат — без центрування й з меншими відступами, щоб історія хугала ліве меню */
+.view.flush { max-width: none; margin: 0; padding: 14px; }
 
 @media (max-width: 760px) {
   #app.app { flex-direction: column; }
@@ -310,27 +325,76 @@ th { color: var(--muted); font-weight: 500; }
 .actions { display: flex; gap: 6px; }
 
 /* Чат-розмітка */
-.chat-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
-.chat-sidebar .card { margin-bottom: 16px; }
-.chat-main { display: flex; flex-direction: column; min-height: 520px; }
+.chat-layout { display: grid; grid-template-columns: 230px 1fr; gap: 14px; align-items: start; }
+.chat-sidebar .card { margin-bottom: 14px; }
+.chat-history h3 { margin-top: 0; }
+.chat-main { display: flex; flex-direction: column; min-height: 560px; }
 .chat-header { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
-.chat-main .chat-log { flex: 1; max-height: 60vh; }
+.chat-main .chat-log { flex: 1; max-height: 62vh; }
 
+#session-list { display: flex; flex-direction: column; gap: 6px; }
 .session-item {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px;
+  padding: 10px 10px 10px 13px;
   border-radius: 8px;
   cursor: pointer;
   position: relative;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--vendor, var(--border));
+  background: var(--vendor-soft, transparent);
 }
-.session-item:hover { background: var(--panel-2); }
-.session-item.active { background: var(--panel-2); border-color: var(--accent); }
+.session-item:hover { filter: brightness(1.15); }
+.session-item.active { box-shadow: 0 0 0 1px var(--vendor, var(--accent)); }
 .session-title { font-size: 14px; font-weight: 500; padding-right: 24px; }
 .session-meta { font-size: 12px; color: var(--muted); }
-.session-del { position: absolute; top: 8px; right: 8px; padding: 2px 8px; }
+.session-del { position: absolute; top: 8px; right: 6px; padding: 2px 8px; }
+
+/* Кольори за вендором моделі */
+.vendor-openai { --vendor: #6b7280; --vendor-soft: rgba(75,85,99,0.18); }
+.vendor-azure  { --vendor: #e11d2e; --vendor-soft: rgba(225,29,46,0.16); }
+.vendor-gemini { --vendor: #2f6df6; --vendor-soft: rgba(47,109,246,0.16); }
+.vendor-claude { --vendor: #b5825a; --vendor-soft: rgba(181,130,90,0.18); }
+.vendor-default{ --vendor: var(--accent); --vendor-soft: rgba(99,102,241,0.14); }
+
+/* Модальне вікно вибору моделі */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(5, 8, 18, 0.65); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 18px; padding: 26px; width: 100%; max-width: 720px;
+  box-shadow: 0 30px 70px rgba(0,0,0,0.5);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; }
+.modal-head h2 { margin: 0; }
+.modal-x {
+  background: transparent; border: none; color: var(--muted);
+  font-size: 26px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.modal-x:hover { color: var(--text); }
+.modal .muted { margin: 4px 0 18px; }
+
+.model-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+.model-tile {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  padding: 16px; border-radius: 14px; cursor: pointer; color: #fff;
+  border: 1px solid rgba(255,255,255,0.12);
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.10), rgba(255,255,255,0)) ,
+    var(--vendor, var(--panel-2));
+  box-shadow: 0 10px 24px rgba(0,0,0,0.3);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.model-tile:hover { transform: translateY(-3px); box-shadow: 0 16px 34px rgba(0,0,0,0.42); }
+.tile-vendor { font-size: 12px; opacity: 0.92; text-transform: uppercase; letter-spacing: .5px; }
+.tile-name { font-size: 17px; font-weight: 700; }
+.tile-dep { font-size: 12px; opacity: 0.8; word-break: break-all; }
+/* OpenAI — чорний із сірим (темна плитка) */
+.model-tile.vendor-openai { background: linear-gradient(160deg, #2b2f36, #111317); }
 
 .msg-meta { font-size: 11px; color: var(--muted); margin-top: 6px; opacity: 0.8; }
 .msg.user .msg-meta { color: rgba(255,255,255,0.8); }

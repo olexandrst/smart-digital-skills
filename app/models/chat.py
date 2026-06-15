@@ -36,6 +36,7 @@ class ChatSession(db.Model):
             "user_id": self.user_id,
             "model_id": self.model_id,
             "model_name": self.model.name if self.model else None,
+            "model_provider": self.model.provider if self.model else None,
             "skill_id": self.skill_id,
             "title": self.title,
             "total_tokens": self.total_tokens_sum,

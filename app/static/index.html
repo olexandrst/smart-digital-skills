@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Digital Skills</title>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <!-- Екран входу -->
@@ -89,39 +89,57 @@
       <nav id="nav" class="side-nav"></nav>
 
       <div class="side-foot">
-        <div class="user-card">
-          <div class="avatar" id="user-avatar"></div>
-          <div class="user-meta">
-            <span id="user-name"></span>
-            <span id="user-roles" class="roles"></span>
+        <div class="quota" id="quota" title="Використання квоти токенів">
+          <svg class="quota-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-2h2v2Zm1.5-6.2-.9.9c-.6.6-.6 1-.6 2.3h-2v-.5c0-1 .4-1.8 1.1-2.5l1.2-1.2a1.5 1.5 0 1 0-2.6-1H8.7A3.3 3.3 0 1 1 14.5 10.8Z"/></svg>
+          <div class="quota-body">
+            <div class="quota-top">
+              <span class="quota-label">Токени</span>
+              <span class="quota-nums"><b id="quota-used">—</b> / <span id="quota-limit">—</span></span>
+            </div>
+            <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
           </div>
         </div>
-        <button id="logout-btn" class="ghost logout">Вийти</button>
       </div>
     </aside>
 
     <div class="main">
       <header class="topbar">
-        <div id="page-title" class="page-title"></div>
+        <div class="top-left">
+          <div id="page-title" class="page-title"></div>
+          <button id="new-chat-btn" class="btn-newchat" title="Новий чат">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+            Новий чат
+          </button>
+        </div>
         <div class="top-right">
-          <div class="quota" id="quota" title="Використання квоти токенів">
-            <svg class="quota-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-2h2v2Zm1.5-6.2-.9.9c-.6.6-.6 1-.6 2.3h-2v-.5c0-1 .4-1.8 1.1-2.5l1.2-1.2a1.5 1.5 0 1 0-2.6-1H8.7A3.3 3.3 0 1 1 14.5 10.8Z"/></svg>
-            <div class="quota-body">
-              <div class="quota-top">
-                <span class="quota-label">Токени</span>
-                <span class="quota-nums"><b id="quota-used">—</b> / <span id="quota-limit">—</span></span>
-              </div>
-              <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
+          <div class="user-card">
+            <div class="avatar" id="user-avatar"></div>
+            <div class="user-meta">
+              <span id="user-name"></span>
+              <span id="user-roles" class="roles"></span>
             </div>
           </div>
+          <button id="logout-btn" class="ghost logout">Вийти</button>
         </div>
       </header>
       <main id="view" class="view"></main>
     </div>
   </div>
 
+  <!-- Модальне вікно вибору моделі -->
+  <div id="model-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Оберіть модель</h2>
+        <button id="model-modal-close" class="modal-x" aria-label="Закрити">×</button>
+      </div>
+      <p class="muted">Створити новий чат з обраною моделлю.</p>
+      <div id="model-tiles" class="model-tiles"></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>
