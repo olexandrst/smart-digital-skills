@@ -16,13 +16,15 @@ from app.extensions import db
 from app.core.errors import ApiError
 from app.models import UserFile
 
-_SAFE_RE = re.compile(r"[^A-Za-z0-9._\-]+")
+# Дозволяємо Unicode-літери/цифри (\w), крапку та дефіс; решту → "_".
+_SAFE_RE = re.compile(r"[^\w.\-]+", re.UNICODE)
 
 
 def _safe_basename(name):
-    base = os.path.basename(name or "").strip() or "file"
-    base = _SAFE_RE.sub("_", base)
-    return base[:120] or "file"
+    base = (name or "").replace("\\", "/").split("/")[-1].strip() or "file"
+    base = _SAFE_RE.sub("_", base.replace(" ", "_"))
+    base = base.strip("._") or "file"
+    return base[:120]
 
 
 def _unique_name(directory, name):

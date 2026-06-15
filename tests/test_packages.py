@@ -174,19 +174,20 @@ def test_entrypoint_in_top_level_folder(client):
     assert res.get_json()["content"] == "HI"
 
 
-def test_entrypoint_auto_detected_single_py(client):
-    """Без entrypoint у skill.md і з єдиним .py — він визначається автоматично."""
+def test_no_entrypoint_is_agent_skill(client):
+    """Стандартний формат: без entrypoint скіл стає агентним (entrypoint=None)."""
     sm = login(client, "sm", "pass")
-    z = make_zip({"skill.md": SKILL_MD_NO_EP, "estimate.py": MAIN_PY})
+    z = make_zip({"SKILL.md": SKILL_MD_NO_EP, "estimate.py": MAIN_PY})
     res = upload(client, sm, z)
     assert res.status_code == 201
-    assert res.get_json()["entrypoint"] == "estimate.py"
+    data = res.get_json()
+    assert data["skill_kind"] == "package"
+    assert data["entrypoint"] is None  # агентний скіл
 
 
-def test_entrypoint_unresolvable_lists_py_files(app):
-    """Кілька .py без entrypoint і без main.py → зрозуміла помилка."""
-    import pytest
-    with pytest.raises(ApiError) as exc:
-        package_service.parse_package(make_zip({
-            "skill.md": SKILL_MD_NO_EP, "a.py": "x=1", "b.py": "y=2"}))
-    assert "entrypoint" in str(exc.value).lower()
+def test_multiple_py_no_entrypoint_ok(app):
+    """Кілька .py без entrypoint — це коректний агентний скіл (без помилки)."""
+    meta = package_service.parse_package(make_zip({
+        "SKILL.md": SKILL_MD_NO_EP, "a.py": "x=1", "b.py": "y=2"}))
+    assert meta["entrypoint"] is None
+    assert meta["name"] == "No Entry"

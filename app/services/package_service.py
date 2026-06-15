@@ -13,6 +13,7 @@
 """
 import io
 import os
+import re
 import json
 import shutil
 import zipfile
@@ -157,17 +158,21 @@ def parse_package(file_bytes):
     meta, body = _parse_frontmatter(text)
 
     name = (meta.get("name") or "").strip()
-    description = (meta.get("description") or "").strip()
+    description = (meta.get("description") or "").strip() or name
     if not name:
-        raise ApiError("У skill.md не вказано name", 400, "invalid_skill_md")
-    if not description:
-        raise ApiError("У skill.md не вказано description", 400, "invalid_skill_md")
+        raise ApiError("У SKILL.md не вказано name", 400, "invalid_skill_md")
 
     runtime = (meta.get("runtime") or "python").strip().lower()
-    if runtime != "python":
-        raise ApiError("Підтримується лише runtime: python", 400, "unsupported_runtime")
 
-    entrypoint = _resolve_entrypoint(zf, root, meta.get("entrypoint"))
+    # Стандартний формат: entrypoint опційний. Якщо вказаний — це скіл-скрипт
+    # (виконуємо напряму); якщо ні — агентний скіл (інструкції + ресурси, які
+    # модель виконує сама через код-пісочницю).
+    entrypoint = None
+    if meta.get("entrypoint"):
+        if runtime != "python":
+            raise ApiError("Для entrypoint підтримується лише runtime: python",
+                           400, "unsupported_runtime")
+        entrypoint = _resolve_entrypoint(zf, root, meta.get("entrypoint"))
 
     inputs = _normalize_inputs(meta.get("inputs", []))
 
@@ -304,11 +309,82 @@ def _collect_new_files(directory, before):
     return sorted(new)
 
 
-def run_package(skill, inputs, user=None):
-    """Розпаковує пакет у тимчасову теку та виконує entrypoint у підпроцесі.
+def _exec_header(root_abs):
+    """Спільний заголовок bootstrap: UTF-8 stdio, перенаправлення /tmp, sys.path."""
+    return (
+        "import sys, os, io, builtins\n"
+        "try:\n"
+        "    sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+        "    sys.stderr.reconfigure(encoding='utf-8', errors='replace')\n"
+        "    sys.stdin.reconfigure(encoding='utf-8')\n"
+        "except Exception: pass\n"
+        f"_ROOT = {root_abs!r}\n"
+        "def _remap(p):\n"
+        "    try: s = os.fspath(p)\n"
+        "    except Exception: return p\n"
+        "    if isinstance(s, str):\n"
+        "        for pref in ('/tmp/', '/var/tmp/', '/private/tmp/'):\n"
+        "            if s.startswith(pref):\n"
+        "                return os.path.join(_ROOT, os.path.basename(s) or 'output')\n"
+        "    return p\n"
+        "_ro = builtins.open\n"
+        "def _open(file, *a, **k): return _ro(_remap(file), *a, **k)\n"
+        "builtins.open = _open\n"
+        "io.open = _open\n"
+        "_oso = os.open\n"
+        "def _osopen(path, *a, **k): return _oso(_remap(path), *a, **k)\n"
+        "os.open = _osopen\n"
+        "for _fn in ('replace', 'rename'):\n"
+        "    _orig = getattr(os, _fn)\n"
+        "    def _mk(o):\n"
+        "        def _w(src, dst, *a, **k): return o(_remap(src), _remap(dst), *a, **k)\n"
+        "        return _w\n"
+        "    setattr(os, _fn, _mk(_orig))\n"
+        "try:\n"
+        "    for _n in ([''] + (os.listdir(_ROOT) if os.path.isdir(_ROOT) else [])):\n"
+        "        _d = os.path.join(_ROOT, _n)\n"
+        "        if os.path.isdir(_d) and _d not in sys.path: sys.path.insert(0, _d)\n"
+        "except Exception: pass\n"
+    )
 
-    Файли, створені кодом під час виконання, зберігаються у сховище користувача
-    (якщо передано user) і повертаються у полі 'files'.
+
+def _run_python(root, workdir, body, stdin=""):
+    """Запускає Python у пісочниці: UTF-8, ліміти ресурсів, перенаправлення /tmp.
+
+    `-X utf8` примусово вмикає UTF-8-режим (важливо на Windows, де локаль cp1251);
+    декодуємо вивід як UTF-8 і на боці застосунку.
+    """
+    cfg = current_app.config
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "HOME": workdir,
+        "TMPDIR": workdir,
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+    }
+    if os.name == "nt" and "SYSTEMROOT" in os.environ:
+        env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    prog = _exec_header(os.path.abspath(root)) + "\n" + body
+    timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 120))
+    preexec = _resource_limits() if os.name != "nt" else None
+    return subprocess.run(
+        [sys.executable, "-X", "utf8", "-I", "-c", prog],
+        input=stdin,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        cwd=root,
+        env=env,
+        timeout=timeout,
+        preexec_fn=preexec,
+    )
+
+
+def run_package(skill, inputs, user=None):
+    """Скіл зі скриптом (явний entrypoint): виконує entrypoint у підпроцесі.
+
+    Файли, створені кодом, зберігаються у сховище користувача (якщо передано user).
     """
     cfg = current_app.config
     if not cfg.get("SKILL_EXEC_ENABLED", True):
@@ -322,7 +398,6 @@ def run_package(skill, inputs, user=None):
     with open(skill.package_path, "rb") as fh:
         file_bytes = fh.read()
 
-    # Робоча тека — усередині застосунку (instance/run_tmp), не у /tmp.
     run_dir = cfg.get("SKILL_RUN_DIR") or os.path.join(os.getcwd(), "instance", "run_tmp")
     os.makedirs(run_dir, exist_ok=True)
     workdir = tempfile.mkdtemp(prefix="skillrun_", dir=run_dir)
@@ -331,7 +406,6 @@ def run_package(skill, inputs, user=None):
         rel_entry = skill.entrypoint or "main.py"
         entry = os.path.join(root, rel_entry)
         if not os.path.isfile(entry):
-            # Резервний пошук за базовою назвою у розпакованому дереві.
             base = os.path.basename(rel_entry)
             found = None
             for r, _d, files in os.walk(root):
@@ -341,67 +415,18 @@ def run_package(skill, inputs, user=None):
             if found is None:
                 raise ApiError("Entrypoint не знайдено у пакеті", 400, "missing_entrypoint")
             entry = found
-        rel_entry = os.path.relpath(entry, root)
 
-        # Знімок файлів у всій робочій теці ДО виконання (для виявлення нових).
         before = _snapshot(workdir)
-
         payload = json.dumps({"inputs": inputs or {}}, ensure_ascii=False)
-        env = {
-            "PATH": os.environ.get("PATH", ""),
-            "PYTHONIOENCODING": "utf-8",
-            "HOME": workdir,
-            "TMPDIR": workdir,
-            "LANG": os.environ.get("LANG", "C.UTF-8"),
-        }
-        # Запускаємо через runpy, додаючи у sys.path і корінь пакета, і теку
-        # скрипта — щоб працювали імпорти як від кореня, так і сусідніх модулів
-        # (навіть для вкладеного entrypoint на кшталт scripts/build_estimate.py).
         entry_abs = os.path.abspath(entry)
-        root_abs = os.path.abspath(root)
-        bootstrap = (
-            "import sys, os, io, builtins, runpy\n"
-            f"_ROOT = {root_abs!r}\n"
-            # Перенаправляємо записи у /tmp та /var/tmp у робочу теку додатка,
-            # щоб файли, які скіл пише в абсолютний /tmp, зберігались у застосунку
-            # і потрапляли у сховище користувача.
-            "def _remap(p):\n"
-            "    try: s = os.fspath(p)\n"
-            "    except Exception: return p\n"
-            "    if isinstance(s, str):\n"
-            "        for pref in ('/tmp/', '/var/tmp/', '/private/tmp/'):\n"
-            "            if s.startswith(pref):\n"
-            "                return os.path.join(_ROOT, os.path.basename(s) or 'output')\n"
-            "    return p\n"
-            "_ro = builtins.open\n"
-            "def _open(file, *a, **k): return _ro(_remap(file), *a, **k)\n"
-            "builtins.open = _open\n"
-            "io.open = _open\n"
-            "_oso = os.open\n"
-            "def _osopen(path, *a, **k): return _oso(_remap(path), *a, **k)\n"
-            "os.open = _osopen\n"
-            "for _fn in ('replace', 'rename'):\n"
-            "    _orig = getattr(os, _fn)\n"
-            "    def _mk(o):\n"
-            "        def _w(src, dst, *a, **k): return o(_remap(src), _remap(dst), *a, **k)\n"
-            "        return _w\n"
-            "    setattr(os, _fn, _mk(_orig))\n"
+        body = (
             f"sys.path.insert(0, {os.path.dirname(entry_abs)!r})\n"
-            f"sys.path.insert(0, _ROOT)\n"
+            "import runpy\n"
             f"runpy.run_path({entry_abs!r}, run_name='__main__')\n"
         )
-        timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 30))
+        timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 120))
         try:
-            proc = subprocess.run(
-                [sys.executable, "-I", "-c", bootstrap],
-                input=payload,
-                capture_output=True,
-                text=True,
-                cwd=root,
-                env=env,
-                timeout=timeout,
-                preexec_fn=_resource_limits(),
-            )
+            proc = _run_python(root, workdir, body, stdin=payload)
         except subprocess.TimeoutExpired:
             raise ApiError(f"Виконання перевищило ліміт {timeout}с", 400, "exec_timeout")
 
@@ -421,6 +446,112 @@ def run_package(skill, inputs, user=None):
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+# --------------------- Агентні скіли (стандартний формат) ---------------------
+
+def is_agent_skill(skill):
+    """Стандартний скіл (інструкції + ресурси) — без явного entrypoint."""
+    return skill.skill_kind == "package" and not skill.entrypoint
+
+
+def read_skill_bundle(skill, max_chars=28000):
+    """Повертає (instructions, bundle_text, file_list) із пакета скіла."""
+    with open(skill.package_path, "rb") as fh:
+        zf = _read_zip(fh.read())
+    md_path, _root = _find_skill_md(zf)
+    md_text = zf.read(md_path).decode("utf-8", "replace")
+    _meta, body = _parse_frontmatter(md_text)
+
+    file_list = [i.filename for i in zf.infolist() if not i.filename.endswith("/")]
+    parts, total = [], len(body)
+    text_ext = (".md", ".txt", ".py", ".json", ".csv", ".yaml", ".yml")
+    for rel in file_list:
+        if rel == md_path or not rel.lower().endswith(text_ext):
+            continue
+        try:
+            content = zf.read(rel).decode("utf-8", "replace")
+        except Exception:
+            continue
+        chunk = f"\n\n===== {rel} =====\n{content}"
+        if total + len(chunk) > max_chars:
+            chunk = chunk[: max(0, max_chars - total)] + "\n... [обрізано]"
+            parts.append(chunk)
+            break
+        parts.append(chunk)
+        total += len(chunk)
+    return body.strip(), "".join(parts), file_list
+
+
+def build_agent_system_prompt(skill):
+    instructions, bundle, file_list = read_skill_bundle(skill)
+    tree = "\n".join(" - " + f for f in file_list)
+    return (
+        "Ти — агент, що виконує навичку (skill) у форматі Anthropic Agent Skills. "
+        "Працюй за інструкціями навички нижче й використовуй надані файли.\n\n"
+        "У тебе є Python-пісочниця у теці навички (її файли вже на місці, "
+        "поточна тека = корінь навички). Щоб виконати код, виведи РІВНО один блок:\n"
+        "```run-python\n<твій Python-код>\n```\n"
+        "Я виконаю його й поверну stdout/stderr наступним повідомленням. "
+        "Можеш робити кілька кроків. Імпорт скриптів навички працює напряму "
+        "(напр. `from build_estimate import build_estimate, Performer, Activity`). "
+        "Файли, які створює код (зберігай ВІДНОСНИМ шляхом), автоматично "
+        "віддаються користувачу як посилання.\n"
+        "Коли все готово — дай фінальну відповідь користувачу БЕЗ блоку коду "
+        "(стислий підсумок результату).\n\n"
+        f"========== SKILL.md ==========\n{instructions}\n\n"
+        f"========== Файли навички ==========\n{tree}\n"
+        f"{bundle}\n"
+    )
+
+
+_CODE_RE = re.compile(r"```(?:run-python|python|py|tool_code)\s*\n(.*?)```",
+                      re.DOTALL | re.IGNORECASE)
+
+
+def extract_run_python(text):
+    m = _CODE_RE.search(text or "")
+    return m.group(1).strip() if m else None
+
+
+def prepare_sandbox(skill):
+    """Розпаковує пакет у пісочницю всередині застосунку; повертає стан."""
+    cfg = current_app.config
+    if not cfg.get("SKILL_EXEC_ENABLED", True):
+        raise ApiError("Виконання скілів вимкнено (SKILL_EXEC_ENABLED=0)", 403, "exec_disabled")
+    if not skill.package_path or not os.path.exists(skill.package_path):
+        raise ApiError("Архів скіла відсутній", 400, "package_missing")
+    with open(skill.package_path, "rb") as fh:
+        file_bytes = fh.read()
+    run_dir = cfg.get("SKILL_RUN_DIR") or os.path.join(os.getcwd(), "instance", "run_tmp")
+    os.makedirs(run_dir, exist_ok=True)
+    workdir = tempfile.mkdtemp(prefix="skillagent_", dir=run_dir)
+    root = _safe_extract(file_bytes, workdir)
+    return {"workdir": workdir, "root": root, "before": _snapshot(workdir)}
+
+
+def exec_in_sandbox(sandbox, code):
+    """Виконує код моделі у пісочниці; повертає {stdout, stderr, returncode}."""
+    cfg = current_app.config
+    timeout = int(cfg.get("SKILL_EXEC_TIMEOUT", 120))
+    try:
+        proc = _run_python(sandbox["root"], sandbox["workdir"], code, stdin="")
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stderr": f"Перевищено ліміт часу {timeout}с", "returncode": -1}
+    max_out = int(cfg.get("SKILL_EXEC_MAX_OUTPUT", 100000))
+    return {
+        "stdout": (proc.stdout or "")[:max_out],
+        "stderr": (proc.stderr or "")[:max_out],
+        "returncode": proc.returncode,
+    }
+
+
+def finalize_sandbox(sandbox, user, skill_id):
+    return _persist_outputs(sandbox["workdir"], sandbox["before"], user, skill_id)
+
+
+def cleanup_sandbox(sandbox):
+    shutil.rmtree(sandbox["workdir"], ignore_errors=True)
+
+
 def _persist_outputs(workdir, before, user, skill_id):
     """Зберігає створені файли у сховище користувача; повертає їх метадані."""
     if user is None:
@@ -435,6 +566,7 @@ def _persist_outputs(workdir, before, user, skill_id):
             saved.append(uf.to_dict())
         except Exception:  # один зіпсований файл не має зривати виконання
             continue
+    return saved
     return saved
 
 

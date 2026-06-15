@@ -5,6 +5,8 @@
   - 'package' — архів зі skill.md та кодом, що виконується локально.
 """
 import json
+import re
+from flask import current_app
 from app.extensions import db
 from app.core.errors import ApiError
 from app.models import (
@@ -15,6 +17,66 @@ from app.services import package_service, quota_service
 
 # Скільки останніх повідомлень передавати моделі як контекст діалогу.
 HISTORY_LIMIT = 20
+
+
+def _agent_max_steps():
+    return int(current_app.config.get("SKILL_AGENT_MAX_STEPS", 6))
+
+
+def _pick_agent_model(skill):
+    """Модель для агентного скіла: модель скіла або перша активна LLM."""
+    if skill.model_id:
+        m = Model.query.get(skill.model_id)
+        if m and m.is_active:
+            return m
+    return (Model.query.filter_by(is_active=True, model_type="llm")
+            .order_by(Model.id).first())
+
+
+def run_agent_skill(user, model, skill, content, history=None):
+    """Агентний цикл: модель читає інструкції SKILL.md і сама виконує код
+    у пісочниці (стандартний формат скілів). Повертає (reply, usage, files)."""
+    if model is None:
+        raise ApiError("Немає активної LLM-моделі для агентного скіла",
+                       400, "no_model")
+    quota_service.ensure_within_limit(user)
+
+    system_prompt = package_service.build_agent_system_prompt(skill)
+    messages = [{"role": "system", "content": system_prompt}]
+    for m in (history or [])[-HISTORY_LIMIT:]:
+        if m.role in ("user", "assistant"):
+            messages.append({"role": m.role, "content": m.content})
+    messages.append({"role": "user", "content": content})
+
+    client = get_client_for_model(model)
+    params = _skill_params(skill)
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    sandbox = package_service.prepare_sandbox(skill)
+    final = ""
+    try:
+        for _step in range(_agent_max_steps()):
+            res = client.chat(model.deployment_name, messages, params)
+            usage["prompt_tokens"] += res.prompt_tokens
+            usage["completion_tokens"] += res.completion_tokens
+            usage["total_tokens"] += res.total_tokens
+            messages.append({"role": "assistant", "content": res.content})
+            final = res.content
+
+            code = package_service.extract_run_python(res.content)
+            if not code:
+                break
+            ex = package_service.exec_in_sandbox(sandbox, code)
+            obs = (f"[returncode={ex['returncode']}]\n"
+                   f"stdout:\n{ex['stdout']}\nstderr:\n{ex['stderr']}")
+            messages.append({"role": "user",
+                             "content": "Результат виконання коду:\n" + obs[:8000]})
+        files = package_service.finalize_sandbox(sandbox, user, skill.id)
+    finally:
+        package_service.cleanup_sandbox(sandbox)
+
+    clean = re.sub(r"```(?:run-python|python|py|tool_code).*?```", "",
+                   final, flags=re.DOTALL | re.IGNORECASE).strip()
+    return (clean or final), usage, files
 
 
 def _user_has_skill(user_id, skill_id):
@@ -122,8 +184,17 @@ def send_message(user, session_id, content, skill_id=None):
         applied_skill = _validate_runnable_skill(user, skill_id)
 
     files = []
-    # Скіл-пакет: виконуємо код, модель не викликаємо.
-    if applied_skill is not None and applied_skill.skill_kind == "package":
+    if applied_skill is not None and package_service.is_agent_skill(applied_skill):
+        # Агентний скіл (стандартний формат): модель оркеструє виконання.
+        model = session.model
+        if model is None or not model.is_active:
+            raise ApiError("Для агентного скіла потрібна активна модель сесії",
+                           400, "model_inactive")
+        reply, usage, files = run_agent_skill(
+            user, model, applied_skill, content, history=session.messages)
+        model_id = model.id
+    elif applied_skill is not None and applied_skill.skill_kind == "package":
+        # Скіл-скрипт (явний entrypoint): виконуємо код, модель не викликаємо.
         inputs = _inputs_for_message(applied_skill, content)
         reply, usage, files = _execute_skill(applied_skill, inputs, user)
         model_id = session.model_id
@@ -178,26 +249,36 @@ def delete_session(user, session_id):
 # ----------------------- Одноразовий запуск скіла -----------------------
 
 def run_skill(user, skill_id, inputs, session_id=None):
-    """Запуск скіла як одноразової дії (вкладка «Мої скіли»). Обидва типи."""
+    """Запуск скіла як одноразової дії (вкладка «Мої скіли»). Усі типи."""
     skill = _validate_runnable_skill(user, skill_id)
+    agent = package_service.is_agent_skill(skill)
+    model = _pick_agent_model(skill) if agent else None
 
     session = None
     if session_id:
         session = ChatSession.query.filter_by(id=session_id, user_id=user.id).first()
     if session is None:
         session = ChatSession(user_id=user.id, skill_id=skill_id,
-                              model_id=skill.model_id, title=skill.name)
+                              model_id=(model.id if model else skill.model_id),
+                              title=skill.name)
         db.session.add(session)
         db.session.flush()
 
-    if skill.skill_kind == "package":
+    if agent:
+        text = (inputs or {}).get("text") or json.dumps(inputs or {}, ensure_ascii=False)
+        content, usage, files = run_agent_skill(user, model, skill, text)
+        user_content = text
+        log_model_id = model.id if model else None
+    elif skill.skill_kind == "package":
         content, usage, files = _execute_skill(skill, inputs or {}, user)
         user_content = json.dumps(inputs or {}, ensure_ascii=False)
+        log_model_id = skill.model_id
     else:
         content, usage, files = _execute_skill(skill, inputs or {}, user)
         user_content = _build_prompt(skill, inputs or {})
+        log_model_id = skill.model_id
 
-    _store_exchange(session, user, skill.model_id, skill_id, user_content, content, usage)
+    _store_exchange(session, user, log_model_id, skill_id, user_content, content, usage)
 
     return {
         "session_id": session.id,

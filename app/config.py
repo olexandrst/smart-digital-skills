@@ -65,6 +65,8 @@ class BaseConfig:
     SKILL_EXEC_ENABLED = os.getenv("SKILL_EXEC_ENABLED", "1") == "1"
     # Таймаут одного виконання (секунди).
     SKILL_EXEC_TIMEOUT = int(os.getenv("SKILL_EXEC_TIMEOUT", "120"))
+    # Макс. кроків (ітерацій модель↔код) для агентного скіла.
+    SKILL_AGENT_MAX_STEPS = int(os.getenv("SKILL_AGENT_MAX_STEPS", "6"))
     # Ліміт пам'яті процесу (МБ; 0 = без ліміту). За замовчуванням вимкнено,
     # бо RLIMIT_AS на деяких системах заважає старту Python.
     SKILL_EXEC_MEMORY_MB = int(os.getenv("SKILL_EXEC_MEMORY_MB", "0"))
