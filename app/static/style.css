@@ -32,20 +32,7 @@ body {
   align-items: center;
   overflow: hidden;
   /* Зображення — фон УСІЄЇ сторінки (а не лише праворуч). */
-  background: url("hero.jpg?v=4") center right / cover no-repeat, #0a0e1f;
-}
-/* Затемнення зліва направо — для читабельності контенту над фото. */
-.auth::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background: linear-gradient(90deg,
-    rgba(7, 10, 22, 0.97) 0%,
-    rgba(7, 10, 22, 0.93) 26%,
-    rgba(7, 10, 22, 0.62) 44%,
-    rgba(7, 10, 22, 0.22) 58%,
-    rgba(7, 10, 22, 0) 72%);
+  background: url("hero.jpg?v=5") center right / cover no-repeat, #0a0e1f;
 }
 
 .auth-left {
@@ -138,8 +125,6 @@ body {
 .btn-primary:hover { background: linear-gradient(90deg, #6675ff, #7a68ff); }
 
 @media (max-width: 760px) {
-  /* На вузьких екранах фото лишається фоном, але затемнюємо сильніше. */
-  .auth::before { background: rgba(7, 10, 22, 0.9); }
   .auth-left { max-width: none; }
 }
 
