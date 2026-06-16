@@ -337,13 +337,14 @@ async function viewChat() {
 }
 
 function renderSkillRibbon(skills) {
+  const skillIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>';
+  const bookIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5Zm16 0a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5Z"/></svg>';
   const tiles = [`<button class="ribbon-tile ribbon-catalog" data-catalog="1" title="Перейти у Каталог навичок">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5Zm16 0a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5Z"/></svg>
-      <span>Каталог навичок</span></button>`];
+      ${bookIcon}<span class="rt-name">Каталог навичок</span></button>`];
   (skills || []).forEach(s => {
     const pressed = s.id === chatState.selectedSkill ? "pressed" : "";
     tiles.push(`<button class="ribbon-tile ${pressed}" data-skill="${s.id}" title="${esc(s.description || s.name)}">
-      <span class="rt-name">${esc(s.name)}</span></button>`);
+      ${skillIcon}<span class="rt-name">${esc(s.name)}</span></button>`);
   });
   if (!skills || !skills.length) {
     tiles.push(`<p class="muted ribbon-empty">Немає активованих скілів. Відкрийте Каталог.</p>`);
