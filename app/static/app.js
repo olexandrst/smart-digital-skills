@@ -4,13 +4,14 @@ const API = "/api";
 let state = { token: null, refresh: null, user: null };
 
 // ---------- HTTP-хелпер ----------
-async function api(path, { method = "GET", body, auth = true } = {}) {
+async function api(path, { method = "GET", body, auth = true, signal } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (auth && state.token) headers["Authorization"] = `Bearer ${state.token}`;
   const res = await fetch(API + path, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   let data = null;
   try { data = await res.json(); } catch (e) { /* no body */ }
@@ -32,6 +33,71 @@ function toast(msg, type = "ok") {
 function hasRole(code) { return state.user && state.user.roles.includes(code); }
 function esc(s) { return (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function fmtSize(n) { if (n < 1024) return `${n} Б`; if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`; return `${(n / 1024 / 1024).toFixed(1)} МБ`; }
+
+// ---------- Мінімальний Markdown → HTML (вхід вже екранований) ----------
+function mdInline(s) {
+  s = s.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (m, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  return s;
+}
+function _mdRow(line) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+}
+function _mdTableSep(l) { return l && /\|/.test(l) && /^[\s:|-]+$/.test(l.trim()) && /-/.test(l); }
+function _mdBlockStart(l) { return /^\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>|```)/.test(l) || /^\s*---+\s*$/.test(l); }
+function renderMarkdown(md) {
+  const lines = esc(md || "").split(/\r?\n/);
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = line.match(/^\s*```(\w*)\s*$/);
+    if (fence) {
+      const buf = []; i++;
+      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++;
+      out.push(`<pre class="md-pre"><code>${buf.join("\n")}</code></pre>`);
+      continue;
+    }
+    if (/\|/.test(line) && _mdTableSep(lines[i + 1])) {
+      const header = _mdRow(line); i += 2;
+      const rows = [];
+      while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== "") { rows.push(_mdRow(lines[i])); i++; }
+      let t = '<table class="md-table"><thead><tr>' + header.map(h => `<th>${mdInline(h)}</th>`).join("") + "</tr></thead><tbody>";
+      rows.forEach(r => { t += "<tr>" + r.map(c => `<td>${mdInline(c)}</td>`).join("") + "</tr>"; });
+      out.push(t + "</tbody></table>");
+      continue;
+    }
+    const h = line.match(/^\s*(#{1,6})\s+(.*)$/);
+    if (h) { const lvl = Math.min(h[1].length + 1, 4); out.push(`<h${lvl} class="md-h">${mdInline(h[2])}</h${lvl}>`); i++; continue; }
+    if (/^\s*---+\s*$/.test(line)) { out.push("<hr class='md-hr'>"); i++; continue; }
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*+]\s+/, "")); i++; }
+      out.push('<ul class="md-ul">' + items.map(it => `<li>${mdInline(it)}</li>`).join("") + "</ul>");
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+\.\s+/, "")); i++; }
+      out.push('<ol class="md-ol">' + items.map(it => `<li>${mdInline(it)}</li>`).join("") + "</ol>");
+      continue;
+    }
+    if (line.trim() === "") { i++; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() !== "" && !_mdBlockStart(lines[i]) &&
+           !(/\|/.test(lines[i]) && _mdTableSep(lines[i + 1]))) {
+      para.push(lines[i]); i++;
+    }
+    if (para.length) out.push(`<p class="md-p">${para.map(mdInline).join("<br>")}</p>`);
+    else i++;
+  }
+  return out.join("");
+}
 
 // Завантаження файлу через fetch з JWT (звичайне посилання не передало б заголовок).
 async function downloadFile(id, name) {
@@ -324,7 +390,10 @@ async function viewChat() {
           </div>
         </div>
       </section>
-      <aside class="skill-ribbon" id="skill-ribbon">${renderSkillRibbon(skills)}</aside>
+      <aside class="skill-panel">
+        <div class="ribbon-title">Навички</div>
+        <div class="skill-ribbon" id="skill-ribbon">${renderSkillRibbon(skills)}</div>
+      </aside>
     </div>`;
 
   bindSessionListEvents();
@@ -338,17 +407,15 @@ async function viewChat() {
 
 function renderSkillRibbon(skills) {
   const skillIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>';
-  const bookIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5Zm16 0a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5Z"/></svg>';
-  const tiles = [`<button class="ribbon-tile ribbon-catalog" data-catalog="1" title="Перейти у Каталог навичок">
-      ${bookIcon}<span class="rt-name">Каталог навичок</span></button>`];
+  const plusIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>';
+  // Плитка «додати скіл» (Каталог) — не виділена, з великим плюсом.
+  const tiles = [`<button class="ribbon-tile ribbon-add" data-catalog="1" title="Додати навичку з Каталогу">
+      ${plusIcon}<span class="rt-name">Додати</span></button>`];
   (skills || []).forEach(s => {
     const pressed = s.id === chatState.selectedSkill ? "pressed" : "";
     tiles.push(`<button class="ribbon-tile ${pressed}" data-skill="${s.id}" title="${esc(s.description || s.name)}">
       ${skillIcon}<span class="rt-name">${esc(s.name)}</span></button>`);
   });
-  if (!skills || !skills.length) {
-    tiles.push(`<p class="muted ribbon-empty">Немає активованих скілів. Відкрийте Каталог.</p>`);
-  }
   return tiles.join("");
 }
 
@@ -398,15 +465,36 @@ async function refreshSessionList() {
   bindSessionListEvents();
 }
 
-// Непомітне число токенів збоку під повідомленням.
+// Непомітне число токенів збоку; відповіді ШІ — з Markdown-розміткою.
 function renderChatMessage(m) {
   const log = $("#chat-log");
   const n = m.role === "assistant" ? m.completion_tokens : m.prompt_tokens;
-  const bubble = el(`<div class="msg ${m.role}">${esc(m.content)}<span class="msg-tok"></span></div>`);
+  const body = m.role === "assistant"
+    ? `<div class="md-body">${renderMarkdown(m.content)}</div>`
+    : esc(m.content);
+  const bubble = el(`<div class="msg ${m.role}">${body}<span class="msg-tok"></span></div>`);
   if (n != null && n !== "") bubble.querySelector(".msg-tok").textContent = n;
   log.appendChild(bubble);
   log.scrollTop = log.scrollHeight;
   return bubble;
+}
+
+function showChatLoading() {
+  const log = $("#chat-log");
+  const el2 = el(`<div class="chat-loading"><span class="cl-dot"></span><span>ШІ генерує відповідь…</span><div class="cl-bar"><div></div></div></div>`);
+  log.appendChild(el2);
+  log.scrollTop = log.scrollHeight;
+  return el2;
+}
+function renderChatError(msg) {
+  const log = $("#chat-log");
+  log.appendChild(el(`<div class="chat-error">⚠️ <b>Якась чортівня!</b> Трапилася помилка: ${esc(msg)}</div>`));
+  log.scrollTop = log.scrollHeight;
+}
+function renderChatNote(text) {
+  const log = $("#chat-log");
+  log.appendChild(el(`<div class="chat-note">${esc(text)}</div>`));
+  log.scrollTop = log.scrollHeight;
 }
 
 async function openChatSession(sessionId) {
@@ -422,23 +510,26 @@ async function openChatSession(sessionId) {
     i.classList.toggle("active", Number(i.dataset.sid) === sessionId));
 
   const sendBtn = $("#chat-send");
-  // Enter — надіслати; Shift+Enter — новий рядок.
-  $("#chat-text").onkeydown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (!sendBtn.disabled) sendBtn.onclick();
-    }
-  };
-  sendBtn.onclick = async () => {
+
+  function setSending(on) {
+    sendBtn.classList.toggle("stop", on);
+    sendBtn.textContent = on ? "■ Стоп" : "Надіслати";
+  }
+
+  async function doSend() {
     const text = $("#chat-text").value.trim();
     if (!text) return;
     const skillId = chatState.selectedSkill || null;
     const userEl = renderChatMessage({ role: "user", content: text });
     $("#chat-text").value = "";
-    sendBtn.disabled = true;
+    const loading = showChatLoading();
+    const controller = new AbortController();
+    chatState.controller = controller;
+    setSending(true);
     try {
       const res = await api(`/chat/sessions/${sessionId}/messages`, {
-        method: "POST", body: { content: text, skill_id: skillId } });
+        method: "POST", body: { content: text, skill_id: skillId }, signal: controller.signal });
+      loading.remove();
       userEl.querySelector(".msg-tok").textContent = res.usage.prompt_tokens;
       renderChatMessage({ role: "assistant", content: res.content,
         completion_tokens: res.usage.completion_tokens });
@@ -446,8 +537,27 @@ async function openChatSession(sessionId) {
       if (fl) { $("#chat-log").appendChild(fl); $("#chat-log").scrollTop = $("#chat-log").scrollHeight; }
       refreshSessionList();
       refreshQuota();
-    } catch (err) { toast(err.message, "err"); }
-    finally { sendBtn.disabled = false; }
+    } catch (err) {
+      loading.remove();
+      if (err.name === "AbortError") renderChatNote("⏹ Запит зупинено.");
+      else renderChatError(err.message);
+    } finally {
+      chatState.controller = null;
+      setSending(false);
+    }
+  }
+
+  // Кнопка працює як «Надіслати», а під час запиту — як «Стоп».
+  sendBtn.onclick = () => {
+    if (chatState.controller) { chatState.controller.abort(); return; }
+    doSend();
+  };
+  // Enter — надіслати; Shift+Enter — новий рядок.
+  $("#chat-text").onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!chatState.controller) doSend();
+    }
   };
 }
 
