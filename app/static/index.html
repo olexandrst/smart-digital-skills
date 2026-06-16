@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Smart Digital Skills</title>
-  <link rel="stylesheet" href="style.css?v=7">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <!-- Екран входу -->
@@ -62,7 +62,6 @@
 
         <button type="submit" class="btn-primary">Увійти</button>
         <div id="login-error" class="error"></div>
-        <div class="hint">Демо-доступ: <b>admin</b> / <b>Admin123!</b></div>
       </form>
     </div>
   </div>
@@ -89,6 +88,10 @@
       <nav id="nav" class="side-nav"></nav>
 
       <div class="side-foot">
+        <button id="theme-toggle" class="theme-toggle ghost" title="Перемкнути тему">
+          <svg id="theme-icon" viewBox="0 0 24 24" aria-hidden="true"></svg>
+          <span id="theme-label">Світла тема</span>
+        </button>
         <div class="quota" id="quota" title="Використання квоти токенів">
           <svg class="quota-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-2h2v2Zm1.5-6.2-.9.9c-.6.6-.6 1-.6 2.3h-2v-.5c0-1 .4-1.8 1.1-2.5l1.2-1.2a1.5 1.5 0 1 0-2.6-1H8.7A3.3 3.3 0 1 1 14.5 10.8Z"/></svg>
           <div class="quota-body">
@@ -140,6 +143,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

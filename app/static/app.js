@@ -147,6 +147,7 @@ async function createChatWithModel(modelId) {
   try {
     const s = await api("/chat/sessions", { method: "POST", body: { model_id: Number(modelId) } });
     closeModelModal();
+    chatState.selectedSkill = null;  // новий чат — відтискаємо обраний скіл
     chatState.openAfter = s.id;
     if (document.querySelector("#nav .nav-item.active")?.dataset.tab === "chat") {
       await viewChat();
@@ -162,6 +163,22 @@ $("#model-modal").addEventListener("click", (e) => {
   if (e.target.id === "model-modal") closeModelModal();
 });
 
+// ---------- Тема (Темна / Світла), лише всередині застосунку ----------
+const SUN = '<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-13v2m0 16v2M4 12H2m20 0h-2M5.6 5.6 4.2 4.2m15.6 1.4 1.4-1.4M5.6 18.4l-1.4 1.4m15.6-1.4 1.4 1.4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>';
+const MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" fill="currentColor"/>';
+function themePref() { return localStorage.getItem("theme") === "light" ? "light" : "dark"; }
+function applyTheme() {
+  const light = themePref() === "light";
+  document.body.classList.toggle("theme-light", light);
+  const lbl = $("#theme-label"), ic = $("#theme-icon");
+  if (lbl) lbl.textContent = light ? "Темна тема" : "Світла тема";
+  if (ic) ic.innerHTML = light ? MOON : SUN;
+}
+$("#theme-toggle").addEventListener("click", () => {
+  localStorage.setItem("theme", themePref() === "light" ? "dark" : "light");
+  applyTheme();
+});
+
 // Перемикач показу пароля.
 const pwToggle = $("#pw-toggle");
 if (pwToggle) pwToggle.addEventListener("click", () => {
@@ -172,6 +189,7 @@ if (pwToggle) pwToggle.addEventListener("click", () => {
 });
 
 function showLogin() {
+  document.body.classList.remove("theme-light");  // логін завжди темний
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");
 }
@@ -179,6 +197,7 @@ function showLogin() {
 async function showApp() {
   $("#login-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
+  applyTheme();  // застосовуємо тему користувача (лише в застосунку)
   const display = state.user.full_name || state.user.username;
   $("#user-name").textContent = display;
   $("#user-roles").textContent = state.user.roles.length ? state.user.roles.join(", ") : "member";
@@ -402,6 +421,13 @@ async function openChatSession(sessionId) {
     i.classList.toggle("active", Number(i.dataset.sid) === sessionId));
 
   const sendBtn = $("#chat-send");
+  // Enter — надіслати; Shift+Enter — новий рядок.
+  $("#chat-text").onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!sendBtn.disabled) sendBtn.onclick();
+    }
+  };
   sendBtn.onclick = async () => {
     const text = $("#chat-text").value.trim();
     if (!text) return;

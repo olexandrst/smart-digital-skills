@@ -446,3 +446,40 @@ th { color: var(--muted); font-weight: 500; }
 @media (max-width: 720px) {
   .chat-layout { grid-template-columns: 1fr; }
 }
+
+/* ===== Перемикач теми ===== */
+.theme-toggle {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin-bottom: 10px;
+}
+.theme-toggle svg { width: 16px; height: 16px; }
+
+/* Завжди білий текст у бульбашці користувача (обидві теми) */
+.msg.user { color: #fff; }
+
+/* ===== Світла тема (лише всередині застосунку: body.theme-light) ===== */
+body.theme-light {
+  --bg: #eef1f8;
+  --panel: #ffffff;
+  --panel-2: #f1f4fb;
+  --border: #dbe1ee;
+  --text: #1c2335;
+  --muted: #5c6678;
+  background: var(--bg);
+}
+body.theme-light .sidebar { background: #ffffff; }
+body.theme-light .topbar { background: rgba(255, 255, 255, 0.72); }
+body.theme-light .quota-bar { background: rgba(0, 0, 0, 0.08); }
+body.theme-light .msg.assistant { background: var(--panel-2); }
+body.theme-light .nav-item.active {
+  background: rgba(99, 102, 241, 0.14);
+  color: var(--accent);
+}
+body.theme-light .ribbon-tile.pressed {
+  background: rgba(99, 102, 241, 0.16);
+  color: var(--accent);
+}
+body.theme-light .file-link { color: #4f46e5; }
+body.theme-light .toast,
+body.theme-light .card,
+body.theme-light .modal { box-shadow: 0 12px 30px rgba(40, 50, 90, 0.12); }
