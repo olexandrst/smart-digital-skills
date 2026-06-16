@@ -69,6 +69,10 @@ def run_agent_skill(user, model, skill, content, history=None):
             ex = package_service.exec_in_sandbox(sandbox, code)
             obs = (f"[returncode={ex['returncode']}]\n"
                    f"stdout:\n{ex['stdout']}\nstderr:\n{ex['stderr']}")
+            if ex["returncode"] != 0:
+                obs += ("\n\n(Код завершився з ПОМИЛКОЮ. Виправ СВІЙ код виклику за "
+                        "traceback вище та спробуй ще раз — не відмовляйся від виконання "
+                        "і не замінюй його текстом.)")
             messages.append({"role": "user",
                              "content": "Результат виконання коду:\n" + obs[:8000]})
         files = package_service.finalize_sandbox(sandbox, user, skill.id)
