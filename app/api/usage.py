@@ -5,7 +5,7 @@ from app.extensions import db
 from app.core.permissions import require_auth, require_global_role, require_group_role
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.models import TokenUsageLog, User
+from app.models import TokenUsageLog, User, Model
 from app.services import quota_service
 
 bp = Blueprint("usage", __name__)
@@ -30,7 +30,7 @@ def _aggregate(query):
 @require_auth
 def my_usage():
     user = current_user()
-    data = _aggregate(TokenUsageLog.query.filter_by(user_id=user.id))
+    data = _aggregate(TokenUsageLog.query.filter_by(user_id=user.id, is_system=False))
     data["quota"] = quota_service.status(user.id)
     return jsonify(data)
 
@@ -55,15 +55,14 @@ def set_default_limit():
 @bp.get("/group/<int:group_id>")
 @require_group_role("manager")
 def group_usage(group_id):
-    q = TokenUsageLog.query.filter_by(group_id=group_id)
+    q = TokenUsageLog.query.filter_by(group_id=group_id, is_system=False)
     return jsonify(_aggregate(q))
 
 
 @bp.get("/global")
 @require_global_role("admin")
 def global_usage():
-    total = _aggregate(TokenUsageLog.query)
-    # Розбивка по користувачах для адмін-панелі.
+    total = _aggregate(TokenUsageLog.query.filter_by(is_system=False))
     rows = (
         db.session.query(
             User.username,
@@ -71,11 +70,40 @@ def global_usage():
             func.count(TokenUsageLog.id),
         )
         .join(TokenUsageLog, TokenUsageLog.user_id == User.id)
+        .filter(TokenUsageLog.is_system == False)  # noqa: E712
         .group_by(User.id)
         .all()
     )
     total["by_user"] = [
         {"username": r[0], "total_tokens": int(r[1]), "requests": int(r[2])}
+        for r in rows
+    ]
+    return jsonify(total)
+
+
+@bp.get("/system")
+@require_global_role("admin")
+def system_usage():
+    """Окремий облік СИСТЕМНОГО використання токенів: по моделях та фічах."""
+    total = _aggregate(TokenUsageLog.query.filter_by(is_system=True))
+    rows = (
+        db.session.query(
+            Model.name,
+            TokenUsageLog.feature,
+            func.coalesce(func.sum(TokenUsageLog.prompt_tokens), 0),
+            func.coalesce(func.sum(TokenUsageLog.completion_tokens), 0),
+            func.coalesce(func.sum(TokenUsageLog.total_tokens), 0),
+            func.count(TokenUsageLog.id),
+        )
+        .outerjoin(Model, TokenUsageLog.model_id == Model.id)
+        .filter(TokenUsageLog.is_system == True)  # noqa: E712
+        .group_by(Model.name, TokenUsageLog.feature)
+        .all()
+    )
+    total["breakdown"] = [
+        {"model": r[0] or "—", "feature": r[1],
+         "prompt_tokens": int(r[2]), "completion_tokens": int(r[3]),
+         "total_tokens": int(r[4]), "requests": int(r[5])}
         for r in rows
     ]
     return jsonify(total)

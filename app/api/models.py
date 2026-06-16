@@ -82,6 +82,27 @@ def update_model(model_id):
     return jsonify(model.to_dict())
 
 
+@bp.post("/<int:model_id>/system")
+@require_global_role("admin")
+def set_system(model_id):
+    """Призначає модель системною (для службових задач, напр. іменування чатів).
+
+    Системна модель — лише одна; призначення скидає прапор з інших.
+    """
+    model = Model.query.get_or_404(model_id)
+    data = request.get_json(silent=True) or {}
+    make = bool(data.get("is_system", True))
+    if make:
+        if model.model_type != "llm":
+            raise ApiError("Системною може бути лише LLM-модель", 400, "validation_error")
+        Model.query.filter(Model.id != model.id).update({Model.is_system: False})
+        model.is_system = True
+    else:
+        model.is_system = False
+    db.session.commit()
+    return jsonify(model.to_dict())
+
+
 @bp.post("/<int:model_id>/activate")
 @require_global_role("admin")
 def set_active(model_id):

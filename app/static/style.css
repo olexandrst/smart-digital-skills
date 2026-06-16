@@ -301,10 +301,18 @@ th { color: var(--muted); font-weight: 500; }
 .stat .label { color: var(--muted); font-size: 13px; }
 
 /* Чат */
-.chat-log { display: flex; flex-direction: column; gap: 12px; margin: 16px 0; max-height: 420px; overflow-y: auto; }
-.msg { padding: 12px 14px; border-radius: 10px; max-width: 80%; white-space: pre-wrap; }
+.chat-log { display: flex; flex-direction: column; gap: 14px; margin: 16px 0; max-height: 420px; overflow-y: auto; }
+.msg { position: relative; padding: 12px 14px 12px; border-radius: 10px; max-width: 80%; white-space: pre-wrap; }
 .msg.user { background: var(--accent); align-self: flex-end; }
 .msg.assistant { background: var(--panel-2); align-self: flex-start; }
+/* Непомітне число токенів збоку під повідомленням */
+.msg-tok {
+  position: absolute; bottom: -15px; font-size: 10px; color: var(--muted);
+  opacity: 0.55; line-height: 1; pointer-events: none;
+}
+.msg-tok:empty { display: none; }
+.msg.user .msg-tok { right: 4px; }
+.msg.assistant .msg-tok { left: 4px; }
 
 .field { margin-bottom: 12px; }
 .field label { display: block; margin-bottom: 4px; font-size: 13px; color: var(--muted); }
@@ -324,9 +332,34 @@ th { color: var(--muted); font-weight: 500; }
 
 .actions { display: flex; gap: 6px; }
 
-/* Чат-розмітка */
-.chat-layout { display: grid; grid-template-columns: 230px 1fr; gap: 14px; align-items: start; }
+/* Чат-розмітка: історія | чат | стрічка скілів */
+.chat-layout { display: grid; grid-template-columns: 225px 1fr 215px; gap: 14px; align-items: start; }
 .chat-sidebar .card { margin-bottom: 14px; }
+
+/* Стрічка скілів справа */
+.skill-ribbon { display: flex; flex-direction: column; gap: 10px; position: sticky; top: 14px; }
+.ribbon-tile {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); padding: 13px 14px; border-radius: 12px;
+  font-weight: 500; cursor: pointer; width: 100%;
+  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+}
+.ribbon-tile svg { width: 18px; height: 18px; fill: var(--accent-2); flex: 0 0 auto; }
+.ribbon-tile:hover { background: var(--panel-2); }
+.ribbon-tile.ribbon-catalog {
+  background: linear-gradient(135deg, rgba(124,92,255,0.18), rgba(227,92,200,0.12));
+  border-color: rgba(124,92,255,0.4); font-weight: 600;
+}
+/* «Натиснута» плитка скіла */
+.ribbon-tile.pressed {
+  background: linear-gradient(90deg, rgba(99,102,241,0.32), rgba(124,92,255,0.18));
+  border-color: var(--accent-2); color: #fff;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.35), 0 0 0 1px var(--accent-2);
+  transform: translateY(1px);
+}
+.ribbon-tile .rt-name { font-size: 13.5px; }
+.ribbon-empty { font-size: 12px; padding: 4px 2px; }
 .chat-history h3 { margin-top: 0; }
 .chat-main { display: flex; flex-direction: column; min-height: 560px; }
 .chat-header { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }

@@ -19,6 +19,7 @@ class Model(db.Model):
     context_window = db.Column(db.Integer)
     config = db.Column(db.Text)  # JSON
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    is_system = db.Column(db.Boolean, nullable=False, default=False)  # системна модель
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
 
@@ -29,6 +30,7 @@ class Model(db.Model):
             "model_type": self.model_type,
             "provider": self.provider,
             "deployment_name": self.deployment_name,
+            "is_system": self.is_system,
             "api_version": self.api_version,
             "context_window": self.context_window,
             "is_active": self.is_active,

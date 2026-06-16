@@ -87,6 +87,8 @@ class TokenUsageLog(db.Model):
     prompt_tokens = db.Column(db.Integer, nullable=False, default=0)
     completion_tokens = db.Column(db.Integer, nullable=False, default=0)
     total_tokens = db.Column(db.Integer, nullable=False, default=0)
+    feature = db.Column(db.String, nullable=False, default="chat")  # chat | chat_naming | ...
+    is_system = db.Column(db.Boolean, nullable=False, default=False)  # використання системою
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
 

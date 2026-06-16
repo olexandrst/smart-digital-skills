@@ -283,6 +283,7 @@ CREATE TABLE models (
     context_window  INTEGER,
     config          TEXT,                         -- JSON
     is_active       INTEGER NOT NULL DEFAULT 1,
+    is_system       INTEGER NOT NULL DEFAULT 0,    -- системна модель (службові задачі)
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -388,6 +389,8 @@ CREATE TABLE token_usage_logs (
     prompt_tokens     INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     total_tokens      INTEGER NOT NULL DEFAULT 0,
+    feature           TEXT NOT NULL DEFAULT 'chat',  -- 'chat' | 'chat_naming' | ...
+    is_system         INTEGER NOT NULL DEFAULT 0,    -- системне використання (поза квотами)
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

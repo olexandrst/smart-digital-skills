@@ -6,6 +6,7 @@
 """
 import json
 import re
+import threading
 from flask import current_app
 from app.extensions import db
 from app.core.errors import ApiError
@@ -179,6 +180,7 @@ def send_message(user, session_id, content, skill_id=None):
         raise ApiError("Порожнє повідомлення", 400, "validation_error")
 
     session = _get_owned_session(user, session_id)
+    is_first_exchange = len(session.messages) == 0
     applied_skill = None
     if skill_id:
         applied_skill = _validate_runnable_skill(user, skill_id)
@@ -228,6 +230,9 @@ def send_message(user, session_id, content, skill_id=None):
                  "total_tokens": result.total_tokens}
 
     _store_exchange(session, user, model_id, skill_id, content, reply, usage)
+
+    if is_first_exchange:
+        _maybe_autoname(session, content)
 
     return {
         "session_id": session.id,
@@ -303,7 +308,59 @@ def _store_exchange(session, user, model_id, skill_id, user_content, reply, usag
         prompt_tokens=usage["prompt_tokens"],
         completion_tokens=usage["completion_tokens"],
         total_tokens=usage["total_tokens"],
+        feature="chat", is_system=False,
     ))
     db.session.commit()
-    # Оновлюємо тижневий лічильник квоти.
+    # Оновлюємо тижневий лічильник квоти (лише користувацьке використання).
     quota_service.record_usage(user.id, usage["total_tokens"])
+
+
+# ----------------------- Системна модель: іменування чатів -----------------------
+
+def system_model():
+    return Model.query.filter_by(is_system=True, is_active=True).first()
+
+
+def _maybe_autoname(session, first_message):
+    """Асинхронно генерує назву чату системною моделлю після першого обміну."""
+    if not current_app.config.get("CHAT_AUTONAME", True):
+        return
+    sysm = system_model()
+    if sysm is None:
+        return
+    app = current_app._get_current_object()
+    th = threading.Thread(
+        target=_autoname_worker,
+        args=(app, session.id, session.user_id, sysm.id, first_message[:2000]),
+        daemon=True,
+    )
+    th.start()
+
+
+def _autoname_worker(app, session_id, user_id, model_id, message):
+    with app.app_context():
+        try:
+            model = Model.query.get(model_id)
+            sess = ChatSession.query.get(session_id)
+            if model is None or sess is None:
+                return
+            prompt = ("Запропонуй коротку назву чату (3–6 слів, без лапок, "
+                      "тією ж мовою) за першим повідомленням користувача. "
+                      "Відповідай ЛИШЕ назвою.\n\n" + message)
+            client = get_client_for_model(model)
+            res = client.chat(model.deployment_name,
+                              [{"role": "user", "content": prompt}], {})
+            title = (res.content or "").strip().strip('"').splitlines()[0][:80]
+            if title:
+                sess.title = title
+            # Окремий СИСТЕМНИЙ облік токенів (фіча "chat_naming").
+            db.session.add(TokenUsageLog(
+                user_id=user_id, model_id=model_id, session_id=session_id,
+                prompt_tokens=res.prompt_tokens,
+                completion_tokens=res.completion_tokens,
+                total_tokens=res.total_tokens,
+                feature="chat_naming", is_system=True,
+            ))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()

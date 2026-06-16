@@ -266,7 +266,7 @@ async function openTab(id) {
 }
 
 // ---------- Чат з обраною моделлю ----------
-let chatState = { sessionId: null, skills: [], openAfter: null };
+let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null };
 
 function sessionItemHtml(s, activeId) {
   const v = vendorOf(s);
@@ -299,27 +299,49 @@ async function viewChat() {
         <div id="chat-header" class="chat-header muted">Оберіть чат або створіть новий («Новий чат» угорі).</div>
         <div id="chat-log" class="chat-log"></div>
         <div id="chat-input-box" class="hidden">
-          <div class="row" style="margin-bottom:8px">
-            <select id="chat-skill" style="flex:1">
-              <option value="">Без скіла</option>
-              ${skills.map(s => `<option value="${s.id}">Скіл: ${esc(s.name)}</option>`).join("")}
-            </select>
-          </div>
           <div class="row">
             <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1; min-height:60px"></textarea>
             <button id="chat-send">Надіслати</button>
           </div>
-          <div id="chat-usage" class="muted" style="margin-top:8px"></div>
         </div>
       </section>
+      <aside class="skill-ribbon" id="skill-ribbon">${renderSkillRibbon(skills)}</aside>
     </div>`;
 
   bindSessionListEvents();
+  bindRibbon();
 
   // Відкриваємо новостворений чат, інакше — останній наявний.
   const toOpen = chatState.openAfter || (sessions[0] && sessions[0].id);
   chatState.openAfter = null;
   if (toOpen) openChatSession(toOpen);
+}
+
+function renderSkillRibbon(skills) {
+  const tiles = [`<button class="ribbon-tile ribbon-catalog" data-catalog="1" title="Перейти у Каталог навичок">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2V5Zm16 0a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2V5Z"/></svg>
+      <span>Каталог навичок</span></button>`];
+  (skills || []).forEach(s => {
+    const pressed = s.id === chatState.selectedSkill ? "pressed" : "";
+    tiles.push(`<button class="ribbon-tile ${pressed}" data-skill="${s.id}" title="${esc(s.description || s.name)}">
+      <span class="rt-name">${esc(s.name)}</span></button>`);
+  });
+  if (!skills || !skills.length) {
+    tiles.push(`<p class="muted ribbon-empty">Немає активованих скілів. Відкрийте Каталог.</p>`);
+  }
+  return tiles.join("");
+}
+
+function bindRibbon() {
+  document.querySelectorAll(".ribbon-tile[data-catalog]").forEach(b =>
+    b.addEventListener("click", () => openTab("catalog")));
+  document.querySelectorAll(".ribbon-tile[data-skill]").forEach(b =>
+    b.addEventListener("click", () => {
+      const id = Number(b.dataset.skill);
+      chatState.selectedSkill = (chatState.selectedSkill === id) ? null : id;
+      document.querySelectorAll(".ribbon-tile[data-skill]").forEach(t =>
+        t.classList.toggle("pressed", Number(t.dataset.skill) === chatState.selectedSkill));
+    }));
 }
 
 function bindSessionListEvents() {
@@ -356,20 +378,22 @@ async function refreshSessionList() {
   bindSessionListEvents();
 }
 
+// Непомітне число токенів збоку під повідомленням.
 function renderChatMessage(m) {
   const log = $("#chat-log");
-  const meta = m.role === "assistant"
-    ? `<div class="msg-meta">вих: ${m.completion_tokens} тк</div>`
-    : `<div class="msg-meta">вх: ${m.prompt_tokens} тк${m.skill_id ? " · скіл застосовано" : ""}</div>`;
-  log.appendChild(el(`<div class="msg ${m.role}">${esc(m.content)}${meta}</div>`));
+  const n = m.role === "assistant" ? m.completion_tokens : m.prompt_tokens;
+  const bubble = el(`<div class="msg ${m.role}">${esc(m.content)}<span class="msg-tok"></span></div>`);
+  if (n != null && n !== "") bubble.querySelector(".msg-tok").textContent = n;
+  log.appendChild(bubble);
   log.scrollTop = log.scrollHeight;
+  return bubble;
 }
 
 async function openChatSession(sessionId) {
   chatState.sessionId = sessionId;
   const session = await api(`/chat/sessions/${sessionId}`);
   $("#chat-header").innerHTML =
-    `<strong>${esc(session.title || "Чат")}</strong> · модель: ${esc(session.model_name || "—")} · разом: ${session.total_tokens} тк`;
+    `<strong>${esc(session.title || "Чат")}</strong> <span class="muted">· ${esc(session.model_name || "—")}</span>`;
   const log = $("#chat-log");
   log.innerHTML = "";
   session.messages.forEach(renderChatMessage);
@@ -381,21 +405,18 @@ async function openChatSession(sessionId) {
   sendBtn.onclick = async () => {
     const text = $("#chat-text").value.trim();
     if (!text) return;
-    const skillId = $("#chat-skill").value ? Number($("#chat-skill").value) : null;
-    renderChatMessage({ role: "user", content: text, prompt_tokens: "…", skill_id: skillId });
+    const skillId = chatState.selectedSkill || null;
+    const userEl = renderChatMessage({ role: "user", content: text });
     $("#chat-text").value = "";
     sendBtn.disabled = true;
     try {
       const res = await api(`/chat/sessions/${sessionId}/messages`, {
         method: "POST", body: { content: text, skill_id: skillId } });
+      userEl.querySelector(".msg-tok").textContent = res.usage.prompt_tokens;
       renderChatMessage({ role: "assistant", content: res.content,
         completion_tokens: res.usage.completion_tokens });
       const fl = renderFileLinks(res.files);
       if (fl) { $("#chat-log").appendChild(fl); $("#chat-log").scrollTop = $("#chat-log").scrollHeight; }
-      $("#chat-usage").textContent =
-        `Останній обмін — вхідні: ${res.usage.prompt_tokens}, вихідні: ${res.usage.completion_tokens}, загальні: ${res.usage.total_tokens}. Разом у сесії: ${res.session_total_tokens} тк.`;
-      $("#chat-header").innerHTML =
-        `<strong>${esc(session.title || "Чат")}</strong> · модель: ${esc(session.model_name || "—")} · разом: ${res.session_total_tokens} тк`;
       refreshSessionList();
       refreshQuota();
     } catch (err) { toast(err.message, "err"); }
@@ -665,7 +686,7 @@ async function viewModels() {
       <p class="muted" style="margin:8px 0 0">deployment / model name — ідентифікатор моделі у провайдера
       (напр. <code>gpt-4o</code> для OpenAI/Azure, <code>gemini-1.5-pro</code> для Gemini).</p>
     </div>
-    <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам для вибору в чаті.</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Тип</th><th>Деплоймент / модель</th><th>Статус</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
+    <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам у чаті. <strong>Системна</strong> модель використовується платформою для службових задач (напр. іменування чатів).</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Тип</th><th>Деплоймент / модель</th><th>Статус</th><th>Системна</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
   $("#m-add").addEventListener("click", async () => {
     try {
       await api("/models", { method: "POST", body: {
@@ -679,17 +700,29 @@ async function viewModels() {
     const status = m.is_active
       ? `<span class="badge published">активна</span>`
       : `<span class="badge delisted">неактивна</span>`;
+    const sysCell = m.is_system
+      ? `<span class="badge published">системна</span>`
+      : (m.model_type === "llm"
+          ? `<button class="small ghost" data-act="sys">Зробити системною</button>`
+          : `<span class="muted">—</span>`);
     const tr = el(`<tr>
       <td>${esc(m.name)}</td>
       <td><span class="badge">${esc(PROVIDER_LABELS[m.provider] || m.provider)}</span></td>
       <td>${m.model_type}</td>
       <td>${esc(m.deployment_name)}</td>
       <td>${status}</td>
+      <td>${sysCell}</td>
       <td class="actions">
         <button class="small ghost" data-act="toggle" data-id="${m.id}" data-active="${m.is_active}">${m.is_active ? "Деактивувати" : "Активувати"}</button>
         <button class="small danger" data-act="del" data-id="${m.id}">Видалити</button>
       </td>
     </tr>`);
+    const sysBtn = tr.querySelector("[data-act='sys']");
+    if (sysBtn) sysBtn.addEventListener("click", async () => {
+      try { await api(`/models/${m.id}/system`, { method: "POST", body: { is_system: true } });
+        toast(`«${m.name}» — системна модель`); openTab("models"); }
+      catch (err) { toast(err.message, "err"); }
+    });
     tr.querySelector("[data-act='toggle']").addEventListener("click", async () => {
       try { await api(`/models/${m.id}/activate`, { method: "POST", body: { is_active: !m.is_active } });
         toast("Статус оновлено"); openTab("models"); }
@@ -864,12 +897,25 @@ async function viewUsage() {
   </div></div>`;
 
   if (hasRole("admin")) {
-    const g = await api("/usage/global");
+    const [g, sys] = await Promise.all([api("/usage/global"), api("/usage/system")]);
     const rows = g.by_user.map(u => `<tr><td>${esc(u.username)}</td><td>${u.total_tokens}</td><td>${u.requests}</td></tr>`).join("");
-    html += `<div class="card"><h2>Глобальне споживання (Admin)</h2>
+    html += `<div class="card"><h2>Глобальне споживання користувачів (Admin)</h2>
       <div class="stat-grid"><div class="stat"><div class="num">${g.total_tokens}</div><div class="label">Усього токенів</div></div>
       <div class="stat"><div class="num">${g.requests}</div><div class="label">Запитів</div></div></div>
       <table style="margin-top:16px"><thead><tr><th>Користувач</th><th>Токенів</th><th>Запитів</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+
+    const sysRows = (sys.breakdown || []).map(b =>
+      `<tr><td>${esc(b.model)}</td><td><span class="badge">${esc(b.feature)}</span></td><td>${b.prompt_tokens}</td><td>${b.completion_tokens}</td><td>${b.total_tokens}</td><td>${b.requests}</td></tr>`).join("")
+      || `<tr><td colspan="6" class="muted">Системного використання ще не було.</td></tr>`;
+    html += `<div class="card"><h2>Системне використання (Admin)</h2>
+      <p class="muted">Окремий облік токенів, які витрачає платформа (поза квотами користувачів).</p>
+      <div class="stat-grid">
+        <div class="stat"><div class="num">${sys.total_tokens}</div><div class="label">Усього (система)</div></div>
+        <div class="stat"><div class="num">${sys.prompt_tokens}</div><div class="label">Вхідні</div></div>
+        <div class="stat"><div class="num">${sys.completion_tokens}</div><div class="label">Вихідні</div></div>
+        <div class="stat"><div class="num">${sys.requests}</div><div class="label">Запитів</div></div>
+      </div>
+      <table style="margin-top:16px"><thead><tr><th>Модель</th><th>Фіча</th><th>Вхідні</th><th>Вихідні</th><th>Усього</th><th>Запитів</th></tr></thead><tbody>${sysRows}</tbody></table></div>`;
   }
   view.innerHTML = html;
 }
