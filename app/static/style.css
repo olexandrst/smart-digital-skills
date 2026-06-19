@@ -1,14 +1,22 @@
 :root {
-  --bg: #0a0e1f;
-  --panel: #111729;
-  --panel-2: #18203a;
-  --border: #232c47;
-  --text: #e6eaf5;
-  --muted: #8b95b2;
+  --bg: #070b1a;
+  --panel: #131a30;
+  --panel-2: #1a2340;
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #e9edf9;
+  --muted: #94a1c2;
   --accent: #6366f1;
   --accent-2: #818cf8;
   --danger: #ef4444;
   --ok: #22c55e;
+  /* Glassmorphism */
+  --glass: rgba(23, 30, 56, 0.55);
+  --glass-2: rgba(30, 39, 70, 0.42);
+  --glass-strong: rgba(14, 19, 40, 0.66);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-hi: rgba(255, 255, 255, 0.06);
+  --shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+  --radius: 16px;
 }
 
 * { box-sizing: border-box; }
@@ -16,10 +24,14 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background:
-    radial-gradient(900px 600px at 100% 0%, rgba(124, 92, 255, 0.10), transparent 60%),
-    var(--bg);
   color: var(--text);
+  /* Насичений темно-синій фон із кольоровими сяйвами (як на логіні) */
+  background:
+    radial-gradient(1100px 760px at 92% -8%, rgba(124, 92, 255, 0.22), transparent 58%),
+    radial-gradient(900px 700px at 6% 8%, rgba(56, 96, 230, 0.18), transparent 55%),
+    radial-gradient(1000px 800px at 78% 108%, rgba(227, 92, 200, 0.14), transparent 60%),
+    linear-gradient(160deg, #080c1c 0%, #0a0f22 50%, #080b18 100%);
+  background-attachment: fixed;
 }
 
 .hidden { display: none !important; }
@@ -138,14 +150,20 @@ body {
 }
 
 input, select, textarea {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
   color: var(--text);
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 14px;
   width: 100%;
   font-family: inherit;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.22);
 }
 textarea { resize: vertical; min-height: 90px; }
 
@@ -173,8 +191,10 @@ button.small { padding: 5px 10px; font-size: 13px; }
 .sidebar {
   width: 250px;
   flex: 0 0 250px;
-  background: rgba(13, 18, 35, 0.92);
-  border-right: 1px solid var(--border);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
+  border-right: 1px solid var(--glass-border);
   display: flex;
   flex-direction: column;
   padding: 18px 14px;
@@ -194,14 +214,15 @@ button.small { padding: 5px 10px; font-size: 13px; }
   background: transparent; color: var(--muted);
   padding: 11px 12px; border-radius: 10px;
   font-size: 14px; font-weight: 500; text-align: left;
-  width: 100%;
+  width: 100%; border: 1px solid transparent;
 }
 .nav-item svg { width: 19px; height: 19px; fill: currentColor; flex: 0 0 auto; }
-.nav-item:hover { background: var(--panel-2); color: var(--text); }
+.nav-item:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(99,102,241,0.25), rgba(124,92,255,0.12));
+  background: linear-gradient(90deg, rgba(99,102,241,0.32), rgba(124,92,255,0.16));
   color: #fff;
-  box-shadow: inset 2px 0 0 var(--accent-2);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 2px 0 0 var(--accent-2), 0 6px 18px rgba(99,102,241,0.18);
 }
 
 /* Низ сайдбару — шкала квоти токенів */
@@ -223,9 +244,10 @@ button.small { padding: 5px 10px; font-size: 13px; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 12px 24px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(13, 18, 35, 0.55);
-  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  backdrop-filter: blur(22px) saturate(150%);
   position: sticky; top: 0; z-index: 20;
 }
 .top-left { display: flex; align-items: center; gap: 18px; }
@@ -246,8 +268,9 @@ button.small { padding: 5px 10px; font-size: 13px; }
 /* Шкала квоти токенів (у низу сайдбару) */
 .quota {
   display: flex; align-items: center; gap: 10px;
-  background: var(--panel-2); border: 1px solid var(--border);
-  padding: 9px 12px; border-radius: 12px; width: 100%;
+  background: var(--glass-2); border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  padding: 9px 12px; border-radius: 14px; width: 100%;
 }
 .quota.quota-full { border-color: var(--danger); }
 .quota-ic { width: 20px; height: 20px; fill: var(--accent-2); flex: 0 0 auto; }
@@ -271,9 +294,12 @@ button.small { padding: 5px 10px; font-size: 13px; }
   .nav-item { width: auto; }
 }
 .card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
   padding: 20px;
   margin-bottom: 20px;
 }
@@ -291,29 +317,34 @@ th { color: var(--muted); font-weight: 500; }
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
+  background: var(--glass-2);
+  border: 1px solid var(--glass-border);
 }
 .badge.published { color: var(--ok); border-color: var(--ok); }
 .badge.draft, .badge.testing { color: var(--muted); }
 .badge.delisted { color: var(--danger); border-color: var(--danger); }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-.skill-card { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.skill-card { background: var(--glass-2); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid var(--glass-border); border-radius: 14px; padding: 16px; }
 .skill-card h3 { margin: 0 0 6px; }
 .skill-card p { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
 
 .muted { color: var(--muted); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
-.stat { background: var(--panel-2); border-radius: 10px; padding: 16px; text-align: center; }
+.stat { background: var(--glass-2); border: 1px solid var(--glass-border); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-radius: 14px; padding: 16px; text-align: center; }
 .stat .num { font-size: 28px; font-weight: 700; }
 .stat .label { color: var(--muted); font-size: 13px; }
 
 /* Чат */
 .chat-log { display: flex; flex-direction: column; gap: 18px; margin: 16px 0; max-height: 420px; overflow-y: auto; padding-right: 6px; }
 .msg { position: relative; padding: 12px 14px 12px; border-radius: 12px; max-width: 82%; white-space: pre-wrap; }
-.msg.user { background: var(--accent); align-self: flex-end; }
-.msg.assistant { background: var(--panel-2); align-self: flex-start; white-space: normal; max-width: 88%; }
+.msg.user { background: linear-gradient(135deg, #5b6cff, #7c5cff); align-self: flex-end; }
+.msg.assistant {
+  background: var(--glass-2); align-self: flex-start; white-space: normal; max-width: 88%;
+  border: 1px solid var(--glass-border);
+  -webkit-backdrop-filter: blur(14px) saturate(140%); backdrop-filter: blur(14px) saturate(140%);
+}
+.msg.user { box-shadow: 0 8px 22px rgba(99, 102, 241, 0.32); }
 
 /* Стильний скролбар (чат і взагалі прокручувані зони) */
 .chat-log::-webkit-scrollbar, .side-nav::-webkit-scrollbar,
@@ -397,10 +428,13 @@ body.theme-light .chat-error b { color: #991b1b; }
   position: fixed;
   bottom: 24px;
   right: 24px;
-  background: var(--panel);
-  border: 1px solid var(--border);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow);
   padding: 14px 18px;
-  border-radius: 10px;
+  border-radius: 12px;
   z-index: 100;
 }
 .toast.ok { border-color: var(--ok); }
@@ -420,10 +454,12 @@ body.theme-light .chat-error b { color: #991b1b; }
   aspect-ratio: 1 / 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; gap: 8px;
-  background: var(--panel); border: 1px solid var(--border);
-  color: var(--text); padding: 10px; border-radius: 14px;
+  background: var(--glass-2);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  color: var(--text); padding: 10px; border-radius: 16px;
   font-weight: 500; cursor: pointer; width: 100%;
-  transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+  transition: transform .14s ease, box-shadow .14s ease, background .14s ease;
 }
 .ribbon-tile svg { width: 26px; height: 26px; fill: var(--accent-2); flex: 0 0 auto; }
 .ribbon-tile:hover { background: var(--panel-2); transform: translateY(-2px); }
@@ -484,9 +520,12 @@ body.theme-light .chat-error b { color: #991b1b; }
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 .modal {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: 18px; padding: 26px; width: 100%; max-width: 720px;
-  box-shadow: 0 30px 70px rgba(0,0,0,0.5);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid var(--glass-border);
+  border-radius: 22px; padding: 26px; width: 100%; max-width: 720px;
+  box-shadow: 0 40px 90px rgba(0,0,0,0.55);
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; }
 .modal-head h2 { margin: 0; }
@@ -543,20 +582,27 @@ body.theme-light .chat-error b { color: #991b1b; }
 /* Завжди білий текст у бульбашці користувача (обидві теми) */
 .msg.user { color: #fff; }
 
-/* ===== Світла тема (лише всередині застосунку: body.theme-light) ===== */
+/* ===== Світла тема — морозне скло (frosted glass) ===== */
 body.theme-light {
-  --bg: #e1e6f0;          /* трохи темніший за панелі, але не сильно */
+  --bg: #dde3ef;
   --panel: #ffffff;
   --panel-2: #eef1f8;
-  --border: #d3dae9;
-  --text: #1c2335;
+  --border: rgba(20, 30, 60, 0.10);
+  --text: #1b2333;
   --muted: #586277;
-  background: var(--bg);
+  --glass: rgba(255, 255, 255, 0.66);
+  --glass-2: rgba(255, 255, 255, 0.55);
+  --glass-strong: rgba(255, 255, 255, 0.78);
+  --glass-border: rgba(20, 30, 60, 0.10);
+  --shadow: 0 14px 36px rgba(40, 50, 90, 0.14);
+  /* субтильні кольорові сяйва, щоб скло «грало» */
+  background:
+    radial-gradient(900px 700px at 92% -6%, rgba(124, 92, 255, 0.10), transparent 55%),
+    radial-gradient(800px 650px at 4% 6%, rgba(56, 96, 230, 0.08), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
 }
-body.theme-light .sidebar { background: #ffffff; }
-body.theme-light .topbar { background: rgba(255, 255, 255, 0.72); }
 body.theme-light .quota-bar { background: rgba(0, 0, 0, 0.08); }
-body.theme-light .msg.assistant { background: var(--panel-2); }
 /* Ghost-кнопки: текст темний (інакше білий на світлому — невидимий) */
 body.theme-light button.ghost { color: var(--text); }
 body.theme-light button.ghost:hover { background: var(--panel-2); }
@@ -570,6 +616,3 @@ body.theme-light .ribbon-tile.pressed {
 }
 body.theme-light .ribbon-tile.pressed svg { fill: var(--accent); }
 body.theme-light .file-link { color: #4f46e5; }
-body.theme-light .toast,
-body.theme-light .card,
-body.theme-light .modal { box-shadow: 0 12px 30px rgba(40, 50, 90, 0.12); }
