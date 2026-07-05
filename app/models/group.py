@@ -60,7 +60,7 @@ class GroupMembership(db.Model):
             "user_id": self.user_id,
             "username": self.user.username if self.user else None,
             "full_name": self.user.full_name if self.user else None,
-            "role": self.role,
+            "email": self.user.email if self.user else None,
             "status": self.status,
             "joined_at": self.joined_at.isoformat() if self.joined_at else None,
         }

@@ -389,8 +389,10 @@ smart-digital-skills/
 | POST | `/auth/refresh` | Оновлення access-токена | refresh-токен |
 | GET | `/auth/me` | Поточний користувач | авторизовані |
 | GET/POST | `/users` | Список / створення користувачів | Admin |
-| PATCH | `/users/{id}` | Оновлення | Admin |
+| GET | `/users/search` | Пошук користувачів (`?q=` за логіном/іменем/email) | Admin |
+| PATCH/DELETE | `/users/{id}` | Оновлення / видалення користувача | Admin |
 | POST | `/users/{id}/reset-password` | Скидання пароля | Admin |
+| GET/DELETE | `/users/{id}/groups[/{gid}]` | Групи користувача / вилучення з групи | Admin |
 | GET | `/models` | Реєстр моделей (`?active=1` — лише активні) | авторизовані |
 | POST | `/models` | Підключення моделі (з `provider`) | Admin |
 | PATCH | `/models/{id}` | Оновлення моделі | Admin |
@@ -420,10 +422,11 @@ smart-digital-skills/
 | GET/DELETE | `/chat/sessions/{id}` | Перегляд / видалення сесії | власник |
 | POST | `/chat/sessions/{id}/messages` | Надіслати повідомлення (опц. `skill_id`) | власник |
 | GET/POST | `/groups` | Список / створення груп | створення: Admin |
-| POST/DELETE | `/groups/{id}/members[/{uid}]` | Керування учасниками | Group Manager |
-| POST/DELETE | `/groups/{id}/skills[/{sid}]` | Призначення навичок групі | Group Manager |
+| PATCH/DELETE | `/groups/{id}` | Перейменування / видалення групи | Admin |
+| POST/DELETE | `/groups/{id}/members[/{uid}]` | Керування учасниками (без ролей) | Admin |
+| POST/DELETE | `/groups/{id}/skills[/{sid}]` | Призначення навичок групі | Admin |
 | GET | `/usage/me` | Власні токени | авторизовані |
-| GET | `/usage/group/{id}` | Токени групи | Group Manager |
+| GET | `/usage/group/{id}` | Токени групи | член групи / Admin |
 | GET | `/usage/global` | Глобальні токени | Admin |
 | GET/POST | `/usage/default-limit` | Системна тижнева квота | Admin |
 | POST/DELETE | `/users/{id}/token-limit` | Персональна квота: задати/оновити / видалити | Admin |

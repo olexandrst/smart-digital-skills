@@ -171,8 +171,10 @@ def create_session(user, model_id, title=None):
         raise ApiError("Модель не знайдено", 404, "not_found")
     if not model.is_active:
         raise ApiError("Модель неактивна та недоступна для чату", 400, "model_inactive")
+    # Назва без моделі (у списку чатів модель не показуємо); після першого
+    # обміну назву автоматично замінить короткий підсумок (_maybe_autoname).
     session = ChatSession(user_id=user.id, model_id=model_id,
-                          title=title or f"Чат · {model.name}")
+                          title=title or "Новий чат")
     db.session.add(session)
     db.session.commit()
     return session

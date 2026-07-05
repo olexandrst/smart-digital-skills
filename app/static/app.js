@@ -16,9 +16,23 @@ async function api(path, { method = "GET", body, auth = true, signal } = {}) {
   let data = null;
   try { data = await res.json(); } catch (e) { /* no body */ }
   if (!res.ok) {
+    // Прострочений/недійсний токен на авторизованому запиті — на сторінку входу.
+    if (res.status === 401 && auth && state.token) {
+      sessionExpired();
+    }
     throw new Error((data && data.message) || `Помилка ${res.status}`);
   }
   return data;
+}
+
+// Викидає користувача на логін через протермінований/недійсний токен.
+let _expiredNotified = false;
+function sessionExpired() {
+  if (_expiredNotified) return;  // не спамимо тостами при кількох паралельних запитах
+  _expiredNotified = true;
+  toast("Сесія завершилася. Увійдіть знову.", "err");
+  logout();
+  setTimeout(() => { _expiredNotified = false; }, 1500);
 }
 
 // ---------- Утиліти ----------
@@ -324,7 +338,7 @@ const NAV_ICONS = {
 const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
   { id: "catalog", label: "Каталог", view: viewCatalog },
-  { id: "files", label: "Файли", view: viewFiles },
+  { id: "files", label: "Мої файли", view: viewFiles },
   { id: "manage-skills", label: "Управління навичками", view: viewManageSkills, roles: ["admin", "skill_manager"] },
   { id: "models", label: "Моделі", view: viewModels, roles: ["admin"] },
   { id: "groups", label: "Групи", view: viewGroups },
@@ -370,7 +384,6 @@ function sessionItemHtml(s, activeId) {
   const v = vendorOf(s);
   return `<div class="session-item vendor-${v} ${s.id === activeId ? "active" : ""}" data-sid="${s.id}">
       <span class="session-title">${esc(s.title || "Без назви")}</span>
-      <span class="session-meta">${esc(s.model_name || "")} · ${s.total_tokens} тк</span>
       <button class="session-del small ghost" data-del="${s.id}" title="Видалити">×</button>
     </div>`;
 }
@@ -1159,72 +1172,167 @@ async function viewModels() {
 }
 
 // ---------- Групи ----------
+
+// Живий пошук користувачів (за іменем/логіном/email) з випадним списком.
+function attachUserSearch(input, resultsEl, { exclude = new Set(), onPick }) {
+  let timer = null;
+  const doSearch = async () => {
+    const q = input.value.trim();
+    try {
+      const users = await api(`/users/search?q=${encodeURIComponent(q)}`);
+      const list = users.filter(u => !exclude.has(u.id));
+      resultsEl.innerHTML = "";
+      if (!list.length) { resultsEl.innerHTML = `<div class="us-empty muted">Нічого не знайдено</div>`; return; }
+      list.forEach(u => {
+        const item = el(`<button class="us-item" type="button">
+          <span class="us-name">${esc(u.full_name || u.username)}</span>
+          <span class="us-sub muted">${esc(u.email || u.username)}</span></button>`);
+        item.addEventListener("click", () => onPick(u));
+        resultsEl.appendChild(item);
+      });
+    } catch (err) { resultsEl.innerHTML = `<div class="us-empty error">${esc(err.message)}</div>`; }
+  };
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(doSearch, 220); });
+  input.addEventListener("focus", doSearch);
+}
+
 async function viewGroups() {
   const groups = await api("/groups");
   const view = $("#view");
-  let createCard = "";
-  if (hasRole("admin")) {
-    createCard = `<div class="card"><h2>Нова група</h2><div class="row">
-      <input id="g-name" placeholder="Назва групи"><input id="g-desc" placeholder="Опис">
-      <button id="g-add">Створити</button></div></div>`;
-  }
+  const admin = hasRole("admin");
+  const createCard = admin ? `<div class="card"><h2>Нова група</h2><div class="row">
+      <input id="g-name" placeholder="Назва групи">
+      <input id="g-desc" placeholder="Опис (необов'язково)">
+      <button id="g-add">Створити</button></div></div>` : "";
   view.innerHTML = createCard + `<div class="card"><h2>Групи</h2><div id="g-list"></div></div>`;
-  if (hasRole("admin")) $("#g-add").addEventListener("click", async () => {
-    try { await api("/groups", { method: "POST", body: { name: $("#g-name").value, description: $("#g-desc").value }});
+
+  if (admin) $("#g-add").addEventListener("click", async () => {
+    const name = $("#g-name").value.trim();
+    if (!name) { toast("Вкажіть назву групи", "err"); return; }
+    try { await api("/groups", { method: "POST", body: { name, description: $("#g-desc").value }});
       toast("Групу створено"); openTab("groups"); }
     catch (err) { toast(err.message, "err"); }
   });
+
   const list = $("#g-list");
-  if (!groups.length) list.innerHTML = `<p class="muted">Немає груп.</p>`;
+  if (!groups.length) { list.innerHTML = `<p class="muted">Немає груп.</p>`; return; }
   for (const g of groups) {
-    const wrap = el(`<div class="card" style="background:var(--panel-2)"><h3>${esc(g.name)}</h3><p class="muted">${esc(g.description || "")}</p><div id="g-detail-${g.id}"></div></div>`);
+    const actions = admin ? `<div class="g-actions">
+        <button class="small ghost g-rename">Перейменувати</button>
+        <button class="small danger g-del">Видалити</button></div>` : "";
+    const wrap = el(`<div class="card g-card">
+      <div class="g-head">
+        <div class="g-head-info">
+          <h3 class="g-title">${esc(g.name)}</h3>
+          <p class="muted g-desc">${esc(g.description || "")}</p>
+        </div>
+        ${actions}
+      </div>
+      <div id="g-detail-${g.id}"></div>
+    </div>`);
+    if (admin) {
+      wrap.querySelector(".g-rename").addEventListener("click", async () => {
+        const name = prompt("Нова назва групи:", g.name);
+        if (name === null) return;
+        const description = prompt("Опис (необов'язково):", g.description || "");
+        try { await api(`/groups/${g.id}`, { method: "PATCH",
+            body: { name, description: description == null ? "" : description }});
+          toast("Групу оновлено"); openTab("groups"); }
+        catch (err) { toast(err.message, "err"); }
+      });
+      wrap.querySelector(".g-del").addEventListener("click", async () => {
+        if (!confirm(`Видалити групу «${g.name}»?\n\nУчасники втратять доступ до навичок, наданих цією групою.`)) return;
+        try { await api(`/groups/${g.id}`, { method: "DELETE" }); toast("Групу видалено"); openTab("groups"); }
+        catch (err) { toast(err.message, "err"); }
+      });
+    }
     list.appendChild(wrap);
     renderGroupDetail(g.id);
   }
 }
 
 async function renderGroupDetail(groupId) {
-  const [detail, gskills] = await Promise.all([api(`/groups/${groupId}`), api(`/groups/${groupId}/skills`)]);
+  const detail = await api(`/groups/${groupId}`);
   const container = $(`#g-detail-${groupId}`);
-  const members = detail.members.map(m =>
-    `<tr><td>${esc(m.full_name || m.username)}</td><td>${m.role}</td>
-     <td class="actions"><button class="small danger" data-act="rm" data-uid="${m.user_id}">×</button></td></tr>`).join("");
-  const skillsHtml = gskills.map(s => `<span class="badge">${esc(s.name)}</span>`).join(" ") || `<span class="muted">немає</span>`;
+  if (!container) return;
+  const admin = hasRole("admin");
+  const members = detail.members || [];
+  const memberIds = new Set(members.map(m => m.user_id));
 
   container.innerHTML = `
-    <table><thead><tr><th>Учасник</th><th>Роль</th><th></th></tr></thead><tbody>${members}</tbody></table>
-    <p><strong>Навички групи:</strong> ${skillsHtml}</p>
-    <div class="row">
-      <input placeholder="user_id" data-f="uid">
-      <select data-f="role"><option value="member">member</option><option value="manager">manager</option></select>
-      <button data-act="add-member">Додати учасника</button>
+    <div class="g-members-head">
+      <strong>Учасники (${members.length})</strong>
+      <input class="g-msearch" placeholder="Пошук учасника…" autocomplete="off">
     </div>
-    <div class="row" style="margin-top:8px">
-      <input placeholder="skill_id" data-f="sid">
-      <button data-act="add-skill">Призначити навичку</button>
-    </div>`;
+    <div class="g-members"></div>
+    ${admin ? `
+    <div class="g-add">
+      <div class="muted g-add-label">Додати учасника:</div>
+      <div class="us-box">
+        <input class="us-input" placeholder="Пошук за іменем або email…" autocomplete="off">
+        <div class="us-results"></div>
+      </div>
+    </div>` : ""}`;
 
-  const getF = (f) => container.querySelector(`[data-f="${f}"]`).value;
-  container.querySelectorAll("[data-act='rm']").forEach(b => b.addEventListener("click", async () => {
-    try { await api(`/groups/${groupId}/members/${b.dataset.uid}`, { method: "DELETE" }); toast("Видалено"); renderGroupDetail(groupId); }
-    catch (err) { toast(err.message, "err"); }
-  }));
-  container.querySelector("[data-act='add-member']").addEventListener("click", async () => {
-    try { await api(`/groups/${groupId}/members`, { method: "POST", body: { user_id: Number(getF("uid")), role: getF("role") }});
-      toast("Учасника додано"); renderGroupDetail(groupId); }
-    catch (err) { toast(err.message, "err"); }
-  });
-  container.querySelector("[data-act='add-skill']").addEventListener("click", async () => {
-    try { await api(`/groups/${groupId}/skills`, { method: "POST", body: { skill_id: Number(getF("sid")) }});
-      toast("Навичку призначено"); renderGroupDetail(groupId); }
-    catch (err) { toast(err.message, "err"); }
-  });
+  const listEl = container.querySelector(".g-members");
+  function paintMembers(filter = "") {
+    if (!members.length) { listEl.innerHTML = `<div class="muted g-empty">У групі немає учасників.</div>`; return; }
+    const f = filter.trim().toLowerCase();
+    const shown = members.filter(m => !f ||
+      [m.full_name, m.username, m.email].some(v => (v || "").toLowerCase().includes(f)));
+    if (!shown.length) { listEl.innerHTML = `<div class="muted g-empty">Нічого не знайдено.</div>`; return; }
+    listEl.innerHTML = "";
+    shown.forEach(m => {
+      const row = el(`<div class="g-member">
+        <div class="g-member-info">
+          <span class="g-member-name">${esc(m.full_name || m.username)}</span>
+          <span class="g-member-sub muted">${esc(m.email || m.username)}</span>
+        </div>
+        ${admin ? `<button class="small danger g-rm">Вилучити</button>` : ""}
+      </div>`);
+      const rm = row.querySelector(".g-rm");
+      if (rm) rm.addEventListener("click", async () => {
+        try { await api(`/groups/${groupId}/members/${m.user_id}`, { method: "DELETE" });
+          toast("Учасника вилучено"); renderGroupDetail(groupId); }
+        catch (err) { toast(err.message, "err"); }
+      });
+      listEl.appendChild(row);
+    });
+  }
+  paintMembers();
+  container.querySelector(".g-msearch").addEventListener("input",
+    (e) => paintMembers(e.target.value));
+
+  if (admin) {
+    attachUserSearch(container.querySelector(".us-input"),
+      container.querySelector(".us-results"), {
+        exclude: memberIds,
+        onPick: async (u) => {
+          try { await api(`/groups/${groupId}/members`, { method: "POST", body: { user_id: u.id }});
+            toast(`Додано: ${u.full_name || u.username}`); renderGroupDetail(groupId); }
+          catch (err) { toast(err.message, "err"); }
+        },
+      });
+  }
 }
 
 // ---------- Користувачі (Admin) ----------
+const USER_ROLE_OPTS = [
+  { v: "", label: "member (звичайний)" },
+  { v: "skill_manager", label: "skill_manager" },
+  { v: "admin", label: "admin" },
+];
+function primaryRole(u) {
+  if (u.roles.includes("admin")) return "admin";
+  if (u.roles.includes("skill_manager")) return "skill_manager";
+  return "";
+}
+
 async function viewUsers() {
   const [users, def] = await Promise.all([api("/users"), api("/usage/default-limit")]);
   const view = $("#view");
+  const roleOpts = (sel) => USER_ROLE_OPTS.map(o =>
+    `<option value="${o.v}" ${o.v === sel ? "selected" : ""}>${esc(o.label)}</option>`).join("");
   view.innerHTML = `
     <div class="card">
       <h2>Системна тижнева квота</h2>
@@ -1239,12 +1347,14 @@ async function viewUsers() {
       <div class="row">
         <input id="u-username" placeholder="Логін">
         <input id="u-name" placeholder="Повне ім'я">
+        <input id="u-email" placeholder="Email" type="email">
         <input id="u-pass" placeholder="Пароль" type="text">
-        <select id="u-role"><option value="">member</option><option value="skill_manager">skill_manager</option><option value="admin">admin</option></select>
+        <select id="u-role">${roleOpts("")}</select>
         <button id="u-add">Створити</button>
       </div>
     </div>
-    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Ролі</th><th>Тижнева квота (використано / ліміт)</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
+    <div id="u-detail"></div>
+    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Email</th><th>Ролі</th><th>Тижнева квота (використано / ліміт)</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
 
   $("#sys-save").addEventListener("click", async () => {
     try { await api("/usage/default-limit", { method: "POST", body: { limit: Number($("#sys-limit").value) }});
@@ -1254,10 +1364,12 @@ async function viewUsers() {
   $("#u-add").addEventListener("click", async () => {
     const roles = $("#u-role").value ? [$("#u-role").value] : [];
     try { await api("/users", { method: "POST", body: {
-      username: $("#u-username").value, full_name: $("#u-name").value, password: $("#u-pass").value, roles }});
+      username: $("#u-username").value, full_name: $("#u-name").value,
+      email: $("#u-email").value || null, password: $("#u-pass").value, roles }});
       toast("Користувача створено"); openTab("users"); }
     catch (err) { toast(err.message, "err"); }
   });
+
   const body = $("#u-body");
   users.forEach(u => {
     const used = (u.token_used || 0).toLocaleString("uk-UA");
@@ -1265,18 +1377,24 @@ async function viewUsers() {
     const custom = u.custom_limit != null
       ? `<span class="badge published" title="Персональна квота">власна</span>`
       : `<span class="badge" title="Системна квота">системна</span>`;
-    const delBtn = u.custom_limit != null
+    const delQuota = u.custom_limit != null
       ? `<button class="small danger" data-act="limit-del">✕ квота</button>` : "";
+    const protectedUser = u.is_system_admin || u.id === (state.user && state.user.id);
     const tr = el(`<tr>
       <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.full_name || "")}</td>
+      <td>${esc(u.email || "—")}</td>
       <td>${u.roles.join(", ") || "member"}</td>
       <td><span class="muted">${used} /</span> ${eff} ${custom}
         <button class="small ghost" data-act="limit">${u.custom_limit != null ? "Змінити" : "Задати"}</button>
-        ${delBtn}</td>
+        ${delQuota}</td>
       <td>${u.is_active ? "✓" : "—"}</td>
-      <td class="actions"><button class="small" data-act="reset" data-id="${u.id}">Скинути пароль</button>
-      <button class="small ghost" data-act="toggle" data-id="${u.id}" data-active="${u.is_active}">${u.is_active ? "Деактивувати" : "Активувати"}</button></td>
+      <td class="actions">
+        <button class="small ghost" data-act="edit">Редагувати</button>
+        <button class="small" data-act="reset">Пароль</button>
+        <button class="small danger" data-act="del" ${protectedUser ? "disabled title='Захищений обліковий запис'" : ""}>Видалити</button>
+      </td>
     </tr>`);
+    tr.querySelector("[data-act='edit']").addEventListener("click", () => openUserEditor(u.id));
     tr.querySelector("[data-act='limit']").addEventListener("click", async () => {
       const v = prompt(`Персональна тижнева квота для «${u.username}» (токенів):`,
                        u.custom_limit != null ? u.custom_limit : u.effective_limit);
@@ -1298,11 +1416,74 @@ async function viewUsers() {
       try { await api(`/users/${u.id}/reset-password`, { method: "POST", body: { password: p }}); toast("Пароль оновлено"); }
       catch (err) { toast(err.message, "err"); }
     });
-    tr.querySelector("[data-act='toggle']").addEventListener("click", async () => {
-      try { await api(`/users/${u.id}`, { method: "PATCH", body: { is_active: !u.is_active }}); toast("Оновлено"); openTab("users"); }
+    const delBtn = tr.querySelector("[data-act='del']");
+    if (delBtn && !protectedUser) delBtn.addEventListener("click", async () => {
+      if (!confirm(`Видалити користувача «${u.username}»?\n\nБудуть видалені його чати, файли, членства та вся історія. Дію не можна скасувати.`)) return;
+      try { await api(`/users/${u.id}`, { method: "DELETE" }); toast("Користувача видалено"); openTab("users"); }
       catch (err) { toast(err.message, "err"); }
     });
     body.appendChild(tr);
+  });
+}
+
+// Редактор користувача: атрибути + список груп із можливістю вилучення.
+async function openUserEditor(userId) {
+  const [u, groups] = await Promise.all([
+    api(`/users/${userId}`), api(`/users/${userId}/groups`).catch(() => []),
+  ]);
+  const roleOpts = USER_ROLE_OPTS.map(o =>
+    `<option value="${o.v}" ${o.v === primaryRole(u) ? "selected" : ""}>${esc(o.label)}</option>`).join("");
+  const box = $("#u-detail");
+  box.innerHTML = `
+    <div class="card">
+      <h2>Користувач: ${esc(u.username)}</h2>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Повне ім'я</label><input id="ue-name" value="${esc(u.full_name || "")}"></div>
+        <div class="field" style="flex:1"><label>Email</label><input id="ue-email" value="${esc(u.email || "")}"></div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Роль</label><select id="ue-role">${roleOpts}</select></div>
+        <div class="field" style="flex:1"><label>Статус</label>
+          <select id="ue-active"><option value="1" ${u.is_active ? "selected" : ""}>Активний</option><option value="0" ${!u.is_active ? "selected" : ""}>Деактивований</option></select></div>
+      </div>
+      <div class="row">
+        <button id="ue-save">Зберегти</button>
+        <button id="ue-close" class="ghost">Закрити</button>
+      </div>
+      <hr class="md-hr">
+      <h3>Групи користувача</h3>
+      <div id="ue-groups" class="ue-groups"></div>
+    </div>`;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  function paintGroups(list) {
+    const g = $("#ue-groups");
+    if (!list.length) { g.innerHTML = `<span class="muted">Користувач не входить у жодну групу.</span>`; return; }
+    g.innerHTML = "";
+    list.forEach(gr => {
+      const chip = el(`<span class="cat-chip">${esc(gr.name)}<button title="Вилучити з групи" data-gid="${gr.id}">×</button></span>`);
+      chip.querySelector("button").addEventListener("click", async () => {
+        if (!confirm(`Вилучити «${u.username}» з групи «${gr.name}»?`)) return;
+        try {
+          await api(`/users/${userId}/groups/${gr.id}`, { method: "DELETE" });
+          toast("Вилучено з групи");
+          paintGroups(await api(`/users/${userId}/groups`));
+        } catch (err) { toast(err.message, "err"); }
+      });
+      g.appendChild(chip);
+    });
+  }
+  paintGroups(groups);
+
+  $("#ue-close").addEventListener("click", () => { box.innerHTML = ""; });
+  $("#ue-save").addEventListener("click", async () => {
+    const roles = $("#ue-role").value ? [$("#ue-role").value] : [];
+    try {
+      await api(`/users/${userId}`, { method: "PATCH", body: {
+        full_name: $("#ue-name").value, email: $("#ue-email").value || null,
+        is_active: $("#ue-active").value === "1", roles }});
+      toast("Користувача оновлено"); openTab("users");
+    } catch (err) { toast(err.message, "err"); }
   });
 }
 
