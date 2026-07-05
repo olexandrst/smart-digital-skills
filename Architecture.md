@@ -288,11 +288,13 @@ CREATE TABLE models (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Каталог скілів (LLM-скіли та скіли-пакети з кодом)
+-- Каталог навичок (LLM-навички та навички-пакети з кодом)
 CREATE TABLE skills (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     name              TEXT NOT NULL,
     description       TEXT NOT NULL,                -- обов'язковий опис
+    author            TEXT,                         -- автор (зі skill.md, редагується)
+    category          TEXT,                         -- категорія (зі skill.md, редагується)
     skill_kind        TEXT NOT NULL DEFAULT 'prompt'-- 'prompt' (LLM) | 'package' (код)
                       CHECK (skill_kind IN ('prompt','package')),
     model_id          INTEGER REFERENCES models(id),-- nullable: пакетам не потрібен
@@ -302,8 +304,8 @@ CREATE TABLE skills (
     entrypoint        TEXT,                         -- скіл-пакет: файл запуску
     package_filename  TEXT,                         -- оригінальна назва архіву
     package_path      TEXT,                         -- шлях до збереженого архіву
-    status            TEXT NOT NULL DEFAULT 'draft'
-                      CHECK (status IN ('draft','testing','published','delisted')),
+    status            TEXT NOT NULL DEFAULT 'draft'  -- 'draft' = «Не опублікована»
+                      CHECK (status IN ('draft','published')),
     version           TEXT NOT NULL DEFAULT '1.0.0',-- семантична версія
     activations_count INTEGER NOT NULL DEFAULT 0,   -- к-сть унікальних активацій (denormalized)
     created_by        INTEGER REFERENCES users(id),
@@ -488,7 +490,7 @@ CREATE INDEX idx_skills_status ON skills(status);
 
 6. **Видимість скіла для мембера** = наявність активної стрічки в `user_skills`. У каталозі для самостійної активації показуються лише `published`-скіли.
 
-7. **Життєвий цикл скіла:** `draft → testing → published → delisted`. Призначати/активувати можна лише `published`.
+7. **Життєвий цикл навички:** два стани — `draft` («Не опублікована», статус щойно завантаженої) та `published` («Опублікована»). Admin/Skill Manager публікує та скасовує публікацію. Призначати/активувати можна лише `published`. Керування каталогом — лише завантаженням пакетів: без контексту = нова навичка, у контексті наявної = її нова версія (ідентичність і зв'язки зберігаються). Обов'язкові атрибути (назва, версія, автор, опис, категорія) читаються зі `skill.md` і редагуються в UI. Видалення навички видаляє всі її зв'язки з групами та користувачами (повторне встановлення вимагає нової активації).
 
 8. **Облік токенів** записується у `token_usage_logs` при кожному виклику моделі (на основі `usage` з відповіді провайдера): окремо **вхідні** (`prompt_tokens`), **вихідні** (`completion_tokens`) та **загальні** (`total_tokens`). Деталізація також зберігається на рівні `chat_messages`, а агрегація доступна по користувачу, групі та глобально.
 
