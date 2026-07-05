@@ -260,6 +260,34 @@ def delete_package_file(skill):
             pass
 
 
+# ----------------------------- Іконки навичок -----------------------------
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def store_icon(skill_id, file_bytes):
+    """Зберігає PNG-іконку навички. Валідує сигнатуру та розмір."""
+    max_bytes = current_app.config.get("SKILL_ICON_MAX_BYTES", 2 * 1024 * 1024)
+    if not file_bytes or not file_bytes.startswith(_PNG_MAGIC):
+        raise ApiError("Іконка має бути у форматі PNG", 400, "invalid_icon")
+    if len(file_bytes) > max_bytes:
+        raise ApiError("Іконка завелика (максимум 2 МБ)", 400, "icon_too_large")
+    icons_dir = current_app.config["SKILL_ICONS_DIR"]
+    os.makedirs(icons_dir, exist_ok=True)
+    path = os.path.join(icons_dir, f"skill_{skill_id}.png")
+    with open(path, "wb") as fh:
+        fh.write(file_bytes)
+    return path
+
+
+def delete_icon(skill):
+    if skill.icon_path and os.path.exists(skill.icon_path):
+        try:
+            os.remove(skill.icon_path)
+        except OSError:
+            pass
+
+
 def list_package_files(skill):
     if not skill.package_path or not os.path.exists(skill.package_path):
         return []

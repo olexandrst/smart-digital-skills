@@ -101,9 +101,17 @@ def change_status(skill_id):
 @bp.post("/<int:skill_id>/activate")
 @require_auth
 def activate(skill_id):
-    """Самостійна активація опублікованої навички для себе."""
+    """Самостійна активація (встановлення) опублікованої навички для себе."""
     count = skill_service.self_activate(current_user().id, skill_id)
-    return jsonify({"message": "Навичку активовано", "activations_count": count})
+    return jsonify({"message": "Навичку встановлено", "activations_count": count})
+
+
+@bp.post("/<int:skill_id>/deactivate")
+@require_auth
+def deactivate(skill_id):
+    """Самостійне вилучення навички користувачем (знімає її з «встановлених»)."""
+    count = skill_service.self_deactivate(current_user().id, skill_id)
+    return jsonify({"message": "Навичку вилучено", "activations_count": count})
 
 
 @bp.post("/<int:skill_id>/run")
@@ -197,6 +205,41 @@ def download_package(skill_id):
                      download_name=f"{safe}.zip")
 
 
+@bp.post("/<int:skill_id>/icon")
+@require_global_role("admin", "skill_manager")
+def upload_icon(skill_id):
+    """Завантаження PNG-іконки навички (замінює наявну)."""
+    skill = Skill.query.get_or_404(skill_id)
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
+    skill.icon_path = package_service.store_icon(skill.id, file.read())
+    skill.updated_at = datetime.utcnow()  # оновлюємо версію для скидання кешу іконки
+    db.session.commit()
+    return jsonify(skill.to_dict())
+
+
+@bp.delete("/<int:skill_id>/icon")
+@require_global_role("admin", "skill_manager")
+def delete_icon(skill_id):
+    """Видалення завантаженої іконки — навичка повертається до стандартної."""
+    skill = Skill.query.get_or_404(skill_id)
+    package_service.delete_icon(skill)
+    skill.icon_path = None
+    skill.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(skill.to_dict())
+
+
+@bp.get("/<int:skill_id>/icon")
+def get_icon(skill_id):
+    """Віддає PNG-іконку навички. Публічний маршрут (для тегів <img>)."""
+    skill = Skill.query.get_or_404(skill_id)
+    if not skill.icon_path or not os.path.exists(skill.icon_path):
+        raise ApiError("Іконку не задано", 404, "icon_missing")
+    return send_file(skill.icon_path, mimetype="image/png")
+
+
 @bp.get("/<int:skill_id>/files")
 @require_auth
 def list_files(skill_id):
@@ -218,6 +261,7 @@ def delete_skill(skill_id):
     skill = Skill.query.get_or_404(skill_id)
     if skill.skill_kind == "package":
         package_service.delete_package_file(skill)
+    package_service.delete_icon(skill)
 
     UserSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
     GroupSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)

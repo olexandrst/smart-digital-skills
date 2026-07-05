@@ -329,6 +329,133 @@ th { color: var(--muted); font-weight: 500; }
 .skill-card h3 { margin: 0 0 6px; }
 .skill-card p { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
 
+/* ===== Каталог навичок: пошук + плитки-«островки» ===== */
+.catalog { max-width: 1120px; margin: 0 auto; }
+.catalog-search {
+  position: relative; display: flex; align-items: center;
+  max-width: 560px; margin: 4px auto 26px;
+}
+.catalog-search svg {
+  position: absolute; left: 16px; width: 20px; height: 20px;
+  fill: var(--muted); pointer-events: none;
+}
+.catalog-search input {
+  padding: 13px 16px 13px 46px; border-radius: 999px; font-size: 15px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow);
+}
+.cat-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 18px;
+}
+.cat-empty { grid-column: 1 / -1; text-align: center; padding: 24px 0; }
+
+/* Плитка-«островок» */
+.cat-card {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  background: var(--glass);
+  -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px; padding: 22px 18px 18px;
+  box-shadow: var(--shadow);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.cat-card:hover { transform: translateY(-3px); box-shadow: 0 22px 50px rgba(0,0,0,0.5); }
+
+.cat-logo {
+  width: 64px; height: 64px; margin: 2px 0 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.cat-logo-img {
+  width: 64px; height: 64px; object-fit: contain; border-radius: 14px;
+}
+.cat-logo-default {
+  width: 64px; height: 64px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #7c5cff, #e35cc8);
+}
+.cat-logo-default svg { width: 32px; height: 32px; fill: #fff; }
+
+.cat-name { margin: 0 0 8px; font-size: 17px; font-weight: 700; line-height: 1.2; }
+.cat-meta {
+  display: flex; flex-direction: column; align-items: center; gap: 5px; margin-bottom: 12px;
+}
+.cat-meta .cat-sub { font-size: 12px; color: var(--muted); }
+
+.cat-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
+.cat-more {
+  background: none; border: none; padding: 0; margin: 0;
+  color: var(--accent-2); font-size: 13px; font-weight: 600; cursor: pointer;
+  width: auto; display: inline;
+}
+.cat-more:hover { background: none; text-decoration: underline; }
+
+/* Кнопка на весь низ картки: «Встановити» (синя) / «Вилучити» (червона) */
+.cat-btn {
+  margin-top: auto; width: 100%;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 14px; border-radius: 10px; font-weight: 600; font-size: 14px;
+}
+.cat-btn svg { width: 17px; height: 17px; fill: currentColor; }
+.cat-install { background: #2563eb; color: #fff; }
+.cat-install:hover { background: #1d4ed8; }
+.cat-remove { background: var(--danger); color: #fff; }
+.cat-remove:hover { background: #dc2626; }
+
+/* Material-тема: суцільні поверхні для карток каталогу */
+body.theme-material .cat-card {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+body.theme-material .catalog-search input {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+body.theme-material .cat-install { background: #1a73e8; }
+body.theme-material .cat-install:hover { background: #1765cc; }
+body.theme-material .cat-remove { background: #d93025; }
+
+/* ===== Управління категоріями (чипси) ===== */
+.cat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.cat-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 6px 6px 12px; border-radius: 999px; font-size: 13px;
+  background: var(--glass-2); border: 1px solid var(--glass-border);
+}
+.cat-chip button {
+  background: transparent; border: none; color: var(--muted); cursor: pointer;
+  width: 20px; height: 20px; padding: 0; border-radius: 50%;
+  font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center;
+}
+.cat-chip button:hover { background: var(--danger); color: #fff; }
+
+/* ===== Редактор навички: іконка + поля ===== */
+.editor-top { display: flex; gap: 18px; align-items: flex-start; margin-bottom: 4px; }
+.editor-fields { flex: 1; min-width: 0; }
+.editor-icon {
+  flex: 0 0 auto; width: 132px; display: flex; flex-direction: column;
+  align-items: center; gap: 8px; text-align: center;
+}
+.editor-icon-preview {
+  width: 84px; height: 84px; border-radius: 16px;
+  border: 1px solid var(--glass-border); background: var(--glass-2);
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.editor-icon-preview img { width: 100%; height: 100%; object-fit: contain; }
+.editor-icon-default {
+  width: 60px; height: 60px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #7c5cff, #e35cc8);
+}
+.editor-icon-default svg { width: 30px; height: 30px; fill: #fff; }
+.editor-icon-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.editor-icon-actions button { width: 100%; }
+.editor-icon-hint { font-size: 11px; line-height: 1.35; }
+
+@media (max-width: 640px) {
+  .editor-top { flex-direction: column; align-items: stretch; }
+  .editor-icon { width: 100%; flex-direction: row; text-align: left; }
+  .editor-icon-actions { width: auto; }
+}
+
 .muted { color: var(--muted); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
 .stat { background: var(--glass-2); border: 1px solid var(--glass-border); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-radius: 14px; padding: 16px; text-align: center; }

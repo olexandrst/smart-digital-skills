@@ -5,6 +5,7 @@
 """
 import os
 import json
+from datetime import datetime
 from app import create_app
 from app.extensions import db
 from app.core.security import hash_password
@@ -120,6 +121,7 @@ def seed():
                 "prompt_template": "Зроби стислий підсумок тексту мовою {language}:\n\n{text}",
                 "parameters": json.dumps({"temperature": 0.3}),
                 "status": "published",
+                "published_at": datetime.utcnow(),
                 "version": "1.0.0",
                 "created_by": admin.id,
             })

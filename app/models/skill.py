@@ -45,6 +45,7 @@ class Skill(db.Model):
     description = db.Column(db.Text, nullable=False)
     author = db.Column(db.String)        # автор навички (зі skill.md або редагується)
     category = db.Column(db.String)      # категорія навички
+    icon_path = db.Column(db.String)     # шлях до завантаженої PNG-іконки (nullable)
     # 'prompt' — LLM-навичка; 'package' — архів зі skill.md та кодом, що виконується.
     skill_kind = db.Column(db.String, nullable=False, default="prompt")
     model_id = db.Column(db.Integer, db.ForeignKey("models.id"))  # nullable: пакетам не потрібен
@@ -70,6 +71,7 @@ class Skill(db.Model):
     )
 
     def to_dict(self, include_inputs=True):
+        icon_ver = int(self.updated_at.timestamp()) if self.updated_at else 0
         data = {
             "id": self.id,
             "name": self.name,
@@ -83,14 +85,32 @@ class Skill(db.Model):
             "entrypoint": self.entrypoint,
             "package_filename": self.package_filename,
             "has_package": bool(self.package_path),
+            "has_icon": bool(self.icon_path),
+            # URL іконки з версійним параметром для скидання кешу браузера.
+            "icon_url": (f"/api/skills/{self.id}/icon?v={icon_ver}"
+                         if self.icon_path else None),
             "status": self.status,
             "version": self.version,
             "activations_count": self.activations_count,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "published_at": self.published_at.isoformat() if self.published_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
         if include_inputs:
             data["inputs"] = [i.to_dict() for i in self.inputs]
         return data
+
+
+class SkillCategory(db.Model):
+    """Керований довідник категорій навичок (Admin/Skill Manager)."""
+    __tablename__ = "skill_categories"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, nullable=False, unique=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+    def to_dict(self):
+        return {"id": self.id, "name": self.name}
 
 
 class SkillInput(db.Model):

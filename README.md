@@ -143,7 +143,7 @@ python wsgi.py
 - **admin** — усі вкладки: чат, користувачі, моделі (додати/видалити/активувати),
   групи, управління скілами, токени.
 - **skillmanager** — завантаження/публікація навичок (без доступу до користувачів).
-- **user1 / user2** — «Мої навички» та «Каталог»: активація та запуск Summarizer.
+- **user1 / user2** — «Каталог»: пошук навичок, встановлення/вилучення, запуск Summarizer.
 
 ---
 
@@ -401,13 +401,20 @@ smart-digital-skills/
 | GET | `/skills/mine` | Активні навички користувача | авторизовані |
 | PATCH | `/skills/{id}` | Редагування атрибутів (назва, версія, автор, опис, категорія) | Admin/Skill Manager |
 | POST | `/skills/{id}/status` | Публікація (`published`) / зняття (`draft`) | Admin/Skill Manager |
-| POST | `/skills/{id}/activate` | Самостійна активація | авторизовані |
+| POST | `/skills/{id}/activate` | Самостійне встановлення | авторизовані |
+| POST | `/skills/{id}/deactivate` | Самостійне вилучення | авторизовані |
 | POST | `/skills/upload` | Завантаження НОВОЇ навички (архів) | Admin/Skill Manager |
 | POST | `/skills/{id}/upload` | Завантаження НОВОЇ ВЕРСІЇ навички | Admin/Skill Manager |
+| POST | `/skills/{id}/icon` | Завантаження PNG-іконки | Admin/Skill Manager |
+| DELETE | `/skills/{id}/icon` | Видалення іконки (повернення до стандартної) | Admin/Skill Manager |
+| GET | `/skills/{id}/icon` | Іконка навички (PNG) | публічний |
 | GET | `/skills/{id}/download` | Скачування пакета навички | Admin/Skill Manager |
 | GET | `/skills/{id}/files` | Перелік файлів у пакеті | авторизовані |
 | DELETE | `/skills/{id}` | Видалення навички + всіх зв'язків з групами/користувачами | Admin/Skill Manager |
 | POST | `/skills/{id}/run` | Запуск навички (LLM або виконання коду) | авторизовані з доступом |
+| GET | `/categories` | Список категорій навичок | авторизовані |
+| POST | `/categories` | Створення категорії | Admin/Skill Manager |
+| DELETE | `/categories/{id}` | Видалення категорії | Admin/Skill Manager |
 | GET/POST | `/chat/sessions` | Список / створення сесій чату (з `model_id`) | авторизовані |
 | GET/DELETE | `/chat/sessions/{id}` | Перегляд / видалення сесії | власник |
 | POST | `/chat/sessions/{id}/messages` | Надіслати повідомлення (опц. `skill_id`) | власник |
