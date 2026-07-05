@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Digital Skills</title>
+  <link rel="stylesheet" href="style.css?v=12">
+</head>
+<body>
+  <!-- Екран входу -->
+  <div id="login-screen" class="auth">
+    <div class="auth-left">
+      <div class="auth-brand">
+        <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <defs>
+            <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7c5cff"/>
+              <stop offset="1" stop-color="#e35cc8"/>
+            </linearGradient>
+          </defs>
+          <path d="M30 8c-6 0-9 4-11 8-2 4-4 8-9 8a7 7 0 0 1 0-14c3 0 5 1 7 3"
+                fill="none" stroke="url(#bg)" stroke-width="5" stroke-linecap="round"/>
+          <path d="M18 40c6 0 9-4 11-8 2-4 4-8 9-8a7 7 0 0 1 0 14c-3 0-5-1-7-3"
+                fill="none" stroke="url(#bg)" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">Smart Digital Skills</span>
+      </div>
+
+      <h1 class="auth-headline">
+        Прискорюйте роботу.<br>
+        <span class="grad">Автоматизуйте більше.</span>
+      </h1>
+      <p class="auth-sub">
+        Ваш AI-простір для спілкування з провідними моделями,<br>
+        керування токенами та доступу до каталогу цифрових навичок.
+      </p>
+
+      <form id="login-form" class="login-card">
+        <h2>З поверненням</h2>
+        <p class="card-sub">Увійдіть до свого робочого простору</p>
+
+        <div class="input-wrap">
+          <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 5v1h14v-1c0-3-3-5-7-5Z"/>
+          </svg>
+          <input type="text" id="login-username" placeholder="Email або логін"
+                 autocomplete="username" required>
+        </div>
+
+        <div class="input-wrap">
+          <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5Zm-3 8V7a3 3 0 0 1 6 0v3H9Z"/>
+          </svg>
+          <input type="password" id="login-password" placeholder="Пароль"
+                 autocomplete="current-password" required>
+          <button type="button" id="pw-toggle" class="pw-toggle" aria-label="Показати пароль">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 5c-5 0-9 4-10 7 1 3 5 7 10 7s9-4 10-7c-1-3-5-7-10-7Zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"/>
+            </svg>
+          </button>
+        </div>
+
+        <button type="submit" class="btn-primary">Увійти</button>
+        <div id="login-error" class="error"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Головний застосунок -->
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="side-brand">
+        <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+          <defs>
+            <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7c5cff"/>
+              <stop offset="1" stop-color="#e35cc8"/>
+            </linearGradient>
+          </defs>
+          <path d="M30 8c-6 0-9 4-11 8-2 4-4 8-9 8a7 7 0 0 1 0-14c3 0 5 1 7 3"
+                fill="none" stroke="url(#bg2)" stroke-width="5" stroke-linecap="round"/>
+          <path d="M18 40c6 0 9-4 11-8 2-4 4-8 9-8a7 7 0 0 1 0 14c-3 0-5-1-7-3"
+                fill="none" stroke="url(#bg2)" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        <span>Smart Digital Skills</span>
+      </div>
+
+      <nav id="nav" class="side-nav"></nav>
+
+      <div class="side-foot">
+        <div class="theme-seg" id="theme-seg"></div>
+        <div class="quota" id="quota" title="Використання квоти токенів">
+          <svg class="quota-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm1 15h-2v-2h2v2Zm1.5-6.2-.9.9c-.6.6-.6 1-.6 2.3h-2v-.5c0-1 .4-1.8 1.1-2.5l1.2-1.2a1.5 1.5 0 1 0-2.6-1H8.7A3.3 3.3 0 1 1 14.5 10.8Z"/></svg>
+          <div class="quota-body">
+            <div class="quota-top">
+              <span class="quota-label">Токени</span>
+              <span class="quota-nums"><b id="quota-used">—</b> / <span id="quota-limit">—</span></span>
+            </div>
+            <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="top-left">
+          <div id="page-title" class="page-title"></div>
+          <button id="new-chat-btn" class="btn-newchat" title="Новий чат">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+            Новий чат
+          </button>
+        </div>
+        <div class="top-right">
+          <div class="user-card">
+            <div class="avatar" id="user-avatar"></div>
+            <div class="user-meta">
+              <span id="user-name"></span>
+              <span id="user-roles" class="roles"></span>
+            </div>
+          </div>
+          <button id="logout-btn" class="ghost logout">Вийти</button>
+        </div>
+      </header>
+      <main id="view" class="view"></main>
+    </div>
+  </div>
+
+  <!-- Модальне вікно вибору моделі -->
+  <div id="model-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Оберіть модель</h2>
+        <button id="model-modal-close" class="modal-x" aria-label="Закрити">×</button>
+      </div>
+      <p class="muted">Створити новий чат з обраною моделлю.</p>
+      <div id="model-tiles" class="model-tiles"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js?v=12"></script>
+</body>
+</html>

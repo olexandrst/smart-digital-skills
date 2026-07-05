@@ -67,7 +67,10 @@
 - **UserService** — CRUD користувачів, скидання паролів, призначення глобальних ролей (тільки Admin).
 - **GroupService** — створення груп, членство, інвайти, призначення скілів групі; enforced-правило «мінімум 1 менеджер»; синхронізація `user_skills` при змінах членства.
 - **SkillService** — життєвий цикл скілів, параметри вхідних даних, самостійна активація користувачем, перерахунок лічильника активацій; реєстр моделей (підключення — лише Admin).
-- **ChatService** — оркестрація запитів до моделей через AzureFoundryClient, збереження діалогів.
+- **PackageService** — скіли-пакети: розбір архіву та `skill.md`, безпечне розпакування, збереження та **ізольоване виконання Python-коду** (підпроцес, таймаут, ліміти ресурсів), захоплення створених файлів.
+- **FileService** — постійне сховище файлів користувача: підкаталог з GUID-назвою (`storage_uid`), збереження файлів від скілів та завантажених користувачем, перелік, звантаження, видалення.
+- **QuotaService** — тижневі квоти токенів: системна (`global`) та персональна (`user`, пріоритетна), лічильник використання (`token_counters`), енфорсмент (429) і скидання щопонеділка о 00:05 UTC (планувальник + «ліниве» за тижневим вікном).
+- **ChatService** — оркестрація чату з **обраною користувачем моделлю**: створення сесій, багатоходовий діалог з історією, **опційне застосування скілів** до повідомлень, виклик відповідного провайдера через фабрику клієнтів та облік токенів (вхідні/вихідні/загальні). Доступні лише `is_active`-моделі.
 - **TokenService** — логування використання токенів, агрегація, (Етап 2) перевірка лімітів.
 - **AuditService** — журнал значимих дій (адмін-операції, зміни доступів).
 
@@ -203,9 +206,24 @@ CREATE TABLE users (
     external_id     TEXT,                       -- Entra ID object id (Етап 2)
     is_active       INTEGER NOT NULL DEFAULT 1,
     is_system_admin INTEGER NOT NULL DEFAULT 0,
+    storage_uid     TEXT UNIQUE,                 -- GUID-назва теки файлів користувача
     last_login_at   TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Файли користувача (зберігаються назавжди у <USER_FILES_DIR>/<storage_uid>/)
+CREATE TABLE user_files (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename     TEXT NOT NULL,                  -- відображувана назва
+    stored_name  TEXT NOT NULL,                  -- фізична назва у теці користувача
+    content_type TEXT,
+    size         INTEGER NOT NULL DEFAULT 0,
+    source       TEXT NOT NULL DEFAULT 'upload'  -- 'upload' | 'skill_run'
+                 CHECK (source IN ('upload','skill_run')),
+    skill_id     INTEGER REFERENCES skills(id),  -- якщо створено скілом
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Глобальні ролі користувача (M:N)
@@ -265,18 +283,25 @@ CREATE TABLE models (
     context_window  INTEGER,
     config          TEXT,                         -- JSON
     is_active       INTEGER NOT NULL DEFAULT 1,
+    is_system       INTEGER NOT NULL DEFAULT 0,    -- системна модель (службові задачі)
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Каталог скілів
+-- Каталог скілів (LLM-скіли та скіли-пакети з кодом)
 CREATE TABLE skills (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     name              TEXT NOT NULL,
     description       TEXT NOT NULL,                -- обов'язковий опис
-    model_id          INTEGER NOT NULL REFERENCES models(id),
-    prompt_template   TEXT,
+    skill_kind        TEXT NOT NULL DEFAULT 'prompt'-- 'prompt' (LLM) | 'package' (код)
+                      CHECK (skill_kind IN ('prompt','package')),
+    model_id          INTEGER REFERENCES models(id),-- nullable: пакетам не потрібен
+    prompt_template   TEXT,                         -- для LLM; для пакета — інструкції
     parameters        TEXT,                         -- JSON: temperature, top_p
+    runtime           TEXT,                         -- скіл-пакет: напр. 'python'
+    entrypoint        TEXT,                         -- скіл-пакет: файл запуску
+    package_filename  TEXT,                         -- оригінальна назва архіву
+    package_path      TEXT,                         -- шлях до збереженого архіву
     status            TEXT NOT NULL DEFAULT 'draft'
                       CHECK (status IN ('draft','testing','published','delisted')),
     version           TEXT NOT NULL DEFAULT '1.0.0',-- семантична версія
@@ -327,12 +352,13 @@ CREATE TABLE user_skills (
     UNIQUE (user_id, skill_id)                   -- "крім тих, у кого вже був скіл"
 );
 
--- Сесії чату
+-- Сесії чату (користувач обирає модель для діалогу)
 CREATE TABLE chat_sessions (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     group_id   INTEGER REFERENCES groups(id),
-    skill_id   INTEGER REFERENCES skills(id),
+    model_id   INTEGER REFERENCES models(id),      -- обрана модель чату
+    skill_id   INTEGER REFERENCES skills(id),      -- для сесій запуску скіла
     title      TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -344,9 +370,10 @@ CREATE TABLE chat_messages (
     session_id        INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
     role              TEXT NOT NULL CHECK (role IN ('system','user','assistant')),
     content           TEXT,
+    skill_id          INTEGER REFERENCES skills(id), -- застосований до повідомлення скіл (опц.)
     metadata          TEXT,                       -- JSON: вкладення, CV-результати
-    prompt_tokens     INTEGER DEFAULT 0,
-    completion_tokens INTEGER DEFAULT 0,
+    prompt_tokens     INTEGER DEFAULT 0,          -- вхідні токени (на user-повідомленні)
+    completion_tokens INTEGER DEFAULT 0,          -- вихідні токени (на assistant-повідомленні)
     total_tokens      INTEGER DEFAULT 0,
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -362,19 +389,28 @@ CREATE TABLE token_usage_logs (
     prompt_tokens     INTEGER NOT NULL DEFAULT 0,
     completion_tokens INTEGER NOT NULL DEFAULT 0,
     total_tokens      INTEGER NOT NULL DEFAULT 0,
+    feature           TEXT NOT NULL DEFAULT 'chat',  -- 'chat' | 'chat_naming' | ...
+    is_system         INTEGER NOT NULL DEFAULT 0,    -- системне використання (поза квотами)
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Ліміти токенів (Етап 2)
+-- Квоти токенів: 'global' (системна) та 'user' (персональна, пріоритетна)
 CREATE TABLE token_limits (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     scope_type   TEXT NOT NULL CHECK (scope_type IN ('global','group','user')),
-    scope_id     INTEGER,                         -- NULL для global
-    period       TEXT NOT NULL DEFAULT 'monthly'
-                 CHECK (period IN ('daily','monthly','total')),
+    scope_id     INTEGER,                         -- NULL для global, інакше user_id
+    period       TEXT NOT NULL DEFAULT 'weekly',  -- у MVP — 'weekly'
     limit_tokens INTEGER NOT NULL,
     is_active    INTEGER NOT NULL DEFAULT 1,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Тижневий лічильник використаних токенів користувача
+CREATE TABLE token_counters (
+    user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    used_tokens  INTEGER NOT NULL DEFAULT 0,
+    period_start TEXT,                            -- початок поточного тижня (UTC)
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -432,7 +468,11 @@ CREATE INDEX idx_skills_status ON skills(status);
 
 1. **Мінімум один менеджер у групі.** При видаленні останнього `group_manager` система автоматично призначає менеджером системного `Admin` (правило з PRD).
 
-2. **Підключення моделей — лише Admin.** Skill Manager будує скіли поверх наявних моделей, але не реєструє самі моделі.
+2. **Підключення моделей — лише Admin.** Skill Manager будує скіли поверх наявних моделей, але не реєструє самі моделі. Admin може **додавати, видаляти та активувати/деактивувати** моделі. Видалення заблоковане, якщо модель використовується хоча б одним скілом.
+
+2a. **Лише активні моделі (`is_active=1`) доступні користувачам** для вибору в чаті. Деактивована модель зникає зі списку вибору, а спроба чату з нею відхиляється.
+
+2b. **Мультипровайдерність.** Кожна модель має `provider` (`azure_ai_foundry` / `openai` / `gemini`). Фабрика клієнтів обирає відповідний адаптер; у MVP усі працюють у режимі моку (`LLM_MOCK=1`).
 
 3. **Кожен скіл обов'язково має:** `description` (опис), `version` (семантична версія), перелік вхідних параметрів у `skill_inputs` з прапорцем `is_required` (обов'язкові/опціональні), та `activations_count` (к-сть активацій).
 
@@ -450,7 +490,15 @@ CREATE INDEX idx_skills_status ON skills(status);
 
 7. **Життєвий цикл скіла:** `draft → testing → published → delisted`. Призначати/активувати можна лише `published`.
 
-8. **Облік токенів** записується у `token_usage_logs` при кожному виклику моделі (на основі `usage` з відповіді Foundry).
+8. **Облік токенів** записується у `token_usage_logs` при кожному виклику моделі (на основі `usage` з відповіді провайдера): окремо **вхідні** (`prompt_tokens`), **вихідні** (`completion_tokens`) та **загальні** (`total_tokens`). Деталізація також зберігається на рівні `chat_messages`, а агрегація доступна по користувачу, групі та глобально.
+
+8a. **Чат із моделлю.** Користувач створює сесію з обраною активною моделлю; історія діалогу (останні N повідомлень) передається провайдеру. До окремого повідомлення можна застосувати скіл (його prompt-шаблон форматує текст), при цьому генерація йде через модель сесії.
+
+10. **Скіли-пакети (`skill_kind='package'`), стандартний формат Agent Skills.** Архів (`.zip`/`.skill`) зі `SKILL.md` (YAML-фронтматер + інструкції), кодом та файлами. Два режими: **агентний** (без `entrypoint`) — `SKILL.md` і файли передаються моделі, яка через код-пісочницю (протокол ` ```run-python `, до `SKILL_AGENT_MAX_STEPS` кроків) сама виконує bundled-скрипти; **скрипт** (явний `entrypoint`) — платформа виконує файл напряму (stdin `{"inputs":{...}}` → stdout). Виконання — в окремому підпроцесі з ізоляцією (тимчасова тека, таймаут, ліміти CPU/пам'яті/розміру, чисте середовище, захист zip-slip/bomb), у **UTF-8-режимі** (`-X utf8`, важливо для Windows). Записи у `/tmp` перенаправляються у теку застосунку. Рушій вмикається `SKILL_EXEC_ENABLED`; для повної ізоляції — контейнер/VM.
+
+12. **Тижневі квоти токенів.** Системна квота (`token_limits.scope_type='global'`, `period='weekly'`, дефолт `DEFAULT_WEEKLY_TOKEN_LIMIT`) діє для всіх; персональна (`scope_type='user'`) має пріоритет, якщо задана (Admin може створити/оновити/видалити). Використання рахується в `token_counters` за поточний тиждень; перевищення блокує виклики моделей (429). Скидання — щопонеділка о 00:05 UTC через APScheduler, плюс «ліниве» скидання при зсуві тижневого вікна (`current_period_start`).
+
+11. **Файли користувача.** Кожному користувачу відповідає підкаталог з GUID-назвою (`users.storage_uid`) у `USER_FILES_DIR`. Файли, які код скіла створює у своїй робочій теці під час виконання, автоматично виявляються (порівняння знімків теки до/після) і **зберігаються назавжди** у сховищі користувача, що запустив скіл (`source='skill_run'`). Користувач також може завантажувати власні файли (`source='upload'`). Доступ суворо ізольований: операції перевіряють власника; звантаження — автентифікованим запитом.
 
 9. **Скоуп Skill Manager** обмежений скілами: жодного доступу до користувачів, груп, системних налаштувань, реєстрації моделей.
 
