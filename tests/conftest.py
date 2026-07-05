@@ -21,6 +21,7 @@ class TestConfig(BaseConfig):
     CHAT_AUTONAME = False  # без фонового іменування чатів у тестах
     # Артефакти тестів — у тимчасову теку, не у instance/.
     SKILL_PACKAGES_DIR = os.path.join(_TMP, "skill_packages")
+    SKILL_ICONS_DIR = os.path.join(_TMP, "skill_icons")
     USER_FILES_DIR = os.path.join(_TMP, "user_files")
     SKILL_RUN_DIR = os.path.join(_TMP, "run_tmp")
 

@@ -52,6 +52,18 @@ def self_activate(user_id, skill_id):
     return recompute_activations(skill_id)
 
 
+def self_deactivate(user_id, skill_id):
+    """Самостійне вилучення навички: деактивує доступ користувача до неї."""
+    us = UserSkill.query.filter_by(user_id=user_id, skill_id=skill_id,
+                                   is_active=True).first()
+    if us:
+        us.is_active = False
+    db.session.flush()
+    count = recompute_activations(skill_id)
+    db.session.commit()
+    return count
+
+
 def assign_to_group(group_id, skill_id, assigned_by):
     """Призначення скіла групі: group_skills + матеріалізація для активних мемберів."""
     _require_published(skill_id)

@@ -323,7 +323,6 @@ const NAV_ICONS = {
 
 const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
-  { id: "skills", label: "Мої навички", view: viewMySkills },
   { id: "catalog", label: "Каталог", view: viewCatalog },
   { id: "files", label: "Файли", view: viewFiles },
   { id: "manage-skills", label: "Управління навичками", view: viewManageSkills, roles: ["admin", "skill_manager"] },
@@ -575,89 +574,126 @@ async function openChatSession(sessionId) {
   };
 }
 
-// ---------- Мої навички + запуск ----------
-async function viewMySkills() {
-  const skills = await api("/skills/mine");
-  const view = $("#view");
-  if (!skills.length) {
-    view.innerHTML = `<div class="card"><h2>Мої навички</h2><p class="muted">Поки немає активних навичок. Перейдіть у «Каталог», щоб активувати.</p></div>`;
-    return;
-  }
-  view.innerHTML = `<div class="card"><h2>Мої навички</h2><div class="grid" id="my-grid"></div></div><div id="runner"></div>`;
-  const grid = $("#my-grid");
-  skills.forEach(s => {
-    const c = el(`<div class="skill-card">
-      <h3>${esc(s.name)}</h3>
-      <p>${esc(s.description)}</p>
-      <button class="small" data-id="${s.id}">Запустити</button>
-    </div>`);
-    c.querySelector("button").addEventListener("click", () => openRunner(s.id));
-    grid.appendChild(c);
-  });
+// ---------- Каталог (встановлення / вилучення навичок) ----------
+
+// Стандартна іконка навички (коли власну не задано) — фірмова «блискавка».
+const DEFAULT_SKILL_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>';
+const DESC_PREVIEW_LEN = 120;  // скільки символів опису показувати згорнутим
+
+let catalogState = { skills: [], mineIds: new Set(), query: "", expanded: new Set() };
+
+// Дата публікації (fallback — дата створення) для сортування «новіші зверху».
+function pubTime(s) {
+  const d = s.published_at || s.created_at;
+  return d ? new Date(d).getTime() : 0;
 }
 
-async function openRunner(skillId) {
-  const skill = await api(`/skills/${skillId}`);
-  const runner = $("#runner");
-  const fields = skill.inputs.map(i => `
-    <div class="field">
-      <label>${esc(i.label || i.name)} ${i.is_required ? "*" : ""}</label>
-      <textarea data-name="${esc(i.name)}" placeholder="${esc(i.description || "")}">${esc(i.default_value || "")}</textarea>
-    </div>`).join("");
-  runner.innerHTML = `<div class="card">
-    <h2>Запуск: ${esc(skill.name)}</h2>
-    <div id="chat-log" class="chat-log"></div>
-    ${fields}
-    <button id="run-btn">Виконати</button>
-  </div>`;
-  let sessionId = null;
-  $("#run-btn").addEventListener("click", async () => {
-    const inputs = {};
-    runner.querySelectorAll("[data-name]").forEach(t => inputs[t.dataset.name] = t.value);
-    const log = $("#chat-log");
-    log.appendChild(el(`<div class="msg user">${esc(inputs.text || JSON.stringify(inputs))}</div>`));
-    $("#run-btn").disabled = true;
-    try {
-      const res = await api(`/skills/${skillId}/run`, {
-        method: "POST", body: { inputs, session_id: sessionId },
-      });
-      sessionId = res.session_id;
-      log.appendChild(el(`<div class="msg assistant">${esc(res.content)}</div>`));
-      const fl = renderFileLinks(res.files);
-      if (fl) log.appendChild(fl);
-      log.scrollTop = log.scrollHeight;
-      refreshQuota();
-      toast(`Токенів використано: ${res.usage.total_tokens}`);
-    } catch (err) { toast(err.message, "err"); }
-    finally { $("#run-btn").disabled = false; }
-  });
-}
-
-// ---------- Каталог (самостійна активація) ----------
 async function viewCatalog() {
   const [all, mine] = await Promise.all([api("/skills"), api("/skills/mine")]);
-  const published = all.filter(s => s.status === "published");
-  const mineIds = new Set(mine.map(s => s.id));
+  const published = all
+    .filter(s => s.status === "published")
+    .sort((a, b) => pubTime(b) - pubTime(a));  // новіші — зверху
+  catalogState.skills = published;
+  catalogState.mineIds = new Set(mine.map(s => s.id));
+  catalogState.expanded = new Set();
+
   const view = $("#view");
-  view.innerHTML = `<div class="card"><h2>Каталог навичок</h2><div class="grid" id="cat-grid"></div></div>`;
+  view.innerHTML = `
+    <div class="catalog">
+      <div class="catalog-search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 3.9 10.6l4.3 4.3 1.4-1.4-4.3-4.3A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z"/></svg>
+        <input id="cat-q" type="text" placeholder="Пошук навичок…" autocomplete="off" value="${esc(catalogState.query)}">
+      </div>
+      <div class="cat-grid" id="cat-grid"></div>
+    </div>`;
+
+  const q = $("#cat-q");
+  q.addEventListener("input", () => { catalogState.query = q.value; renderCatalogGrid(); });
+  renderCatalogGrid();
+  q.focus();
+  // Курсор — у кінець уже введеного тексту (перерендер зберігає запит).
+  q.setSelectionRange(q.value.length, q.value.length);
+}
+
+function renderCatalogGrid() {
   const grid = $("#cat-grid");
-  if (!published.length) grid.innerHTML = `<p class="muted">Немає опублікованих навичок.</p>`;
-  published.forEach(s => {
-    const active = mineIds.has(s.id);
-    const c = el(`<div class="skill-card">
-      <h3>${esc(s.name)}</h3>
-      <div style="margin-bottom:8px"><span class="badge">${esc(s.category || "Загальне")}</span>
-        <span class="muted" style="font-size:12px"> v${esc(s.version)} · ${esc(s.author || "—")}</span></div>
-      <p>${esc(s.description)}</p>
-      <span class="muted">Активацій: ${s.activations_count}</span><br><br>
-      <button class="small" data-id="${s.id}" ${active ? "disabled" : ""}>${active ? "Активовано" : "Активувати"}</button>
-    </div>`);
-    if (!active) c.querySelector("button").addEventListener("click", async (e) => {
-      try { await api(`/skills/${s.id}/activate`, { method: "POST" }); toast("Навичку активовано"); openTab("catalog"); }
-      catch (err) { toast(err.message, "err"); }
-    });
-    grid.appendChild(c);
+  if (!grid) return;
+  const query = catalogState.query.trim().toLowerCase();
+  const list = catalogState.skills.filter(s => {
+    if (!query) return true;
+    return [s.name, s.description, s.category, s.author]
+      .some(v => (v || "").toLowerCase().includes(query));
   });
+
+  grid.innerHTML = "";
+  if (!catalogState.skills.length) {
+    grid.innerHTML = `<p class="muted cat-empty">Немає опублікованих навичок.</p>`;
+    return;
+  }
+  if (!list.length) {
+    grid.innerHTML = `<p class="muted cat-empty">Нічого не знайдено за запитом «${esc(catalogState.query)}».</p>`;
+    return;
+  }
+  list.forEach(s => grid.appendChild(catalogCard(s)));
+}
+
+function catalogCard(s) {
+  const installed = catalogState.mineIds.has(s.id);
+  const logo = s.has_icon
+    ? `<img class="cat-logo-img" src="${esc(s.icon_url)}" alt="${esc(s.name)}">`
+    : `<span class="cat-logo-default">${DEFAULT_SKILL_ICON}</span>`;
+
+  const card = el(`<div class="cat-card">
+    <div class="cat-logo">${logo}</div>
+    <h3 class="cat-name">${esc(s.name)}</h3>
+    <div class="cat-meta">
+      <span class="badge cat-cat">${esc(s.category || "Загальне")}</span>
+      <span class="cat-sub">v${esc(s.version)} · ${esc(s.author || "—")}</span>
+    </div>
+    <div class="cat-desc"></div>
+    <button class="cat-btn ${installed ? "cat-remove" : "cat-install"}" data-id="${s.id}">
+      ${installed
+        ? `Вилучити`
+        : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4 6.3 11.7l1.4-1.4L11 13.6V3h1Zm-7 15h14v2H5v-2Z"/></svg>Встановити`}
+    </button>
+  </div>`);
+
+  renderCatDesc(card.querySelector(".cat-desc"), s);
+
+  card.querySelector(".cat-btn").addEventListener("click", async () => {
+    const action = installed ? "deactivate" : "activate";
+    try {
+      const res = await api(`/skills/${s.id}/${action}`, { method: "POST" });
+      toast(installed ? "Навичку вилучено" : "Навичку встановлено");
+      if (installed) catalogState.mineIds.delete(s.id);
+      else catalogState.mineIds.add(s.id);
+      // Оновлюємо лічильник активацій локально й перемальовуємо картки.
+      const local = catalogState.skills.find(x => x.id === s.id);
+      if (local && res && typeof res.activations_count === "number") {
+        local.activations_count = res.activations_count;
+      }
+      renderCatalogGrid();
+    } catch (err) { toast(err.message, "err"); }
+  });
+  return card;
+}
+
+// Опис із «розумною» обрізкою + перемикач «докладніше/згорнути».
+function renderCatDesc(box, s) {
+  const full = s.description || "";
+  const isLong = full.length > DESC_PREVIEW_LEN;
+  const expanded = catalogState.expanded.has(s.id);
+  if (!isLong) { box.textContent = full; return; }
+  const shown = expanded ? full : full.slice(0, DESC_PREVIEW_LEN).trimEnd() + "…";
+  box.textContent = shown + " ";
+  const toggle = el(`<button class="cat-more">${expanded ? "згорнути" : "докладніше"}</button>`);
+  toggle.addEventListener("click", () => {
+    if (expanded) catalogState.expanded.delete(s.id);
+    else catalogState.expanded.add(s.id);
+    renderCatDesc(box, s);
+  });
+  box.appendChild(toggle);
 }
 
 // ---------- Файли користувача ----------
@@ -758,6 +794,38 @@ function statusBadge(s) {
     : `<span class="badge draft">Не опублікована</span>`;
 }
 
+// Керування категоріями (довідник для вибору при редагуванні навички).
+async function renderCategoryChips() {
+  const box = $("#cat-chips");
+  if (!box) return;
+  try {
+    const cats = await api("/categories");
+    if (!cats.length) { box.innerHTML = `<span class="muted">Категорій ще немає.</span>`; return; }
+    box.innerHTML = "";
+    cats.forEach(c => {
+      const chip = el(`<span class="cat-chip">${esc(c.name)}<button title="Видалити категорію" data-id="${c.id}">×</button></span>`);
+      chip.querySelector("button").addEventListener("click", async () => {
+        if (!confirm(`Видалити категорію «${c.name}»?\n\nНавички, у яких вона вказана, збережуть свою назву категорії.`)) return;
+        try { await api(`/categories/${c.id}`, { method: "DELETE" }); toast("Категорію видалено"); renderCategoryChips(); }
+        catch (err) { toast(err.message, "err"); }
+      });
+      box.appendChild(chip);
+    });
+  } catch (err) { box.innerHTML = `<span class="error">${esc(err.message)}</span>`; }
+}
+
+async function addCategory() {
+  const input = $("#cat-new");
+  const name = input.value.trim();
+  if (!name) { toast("Вкажіть назву категорії", "err"); return; }
+  try {
+    await api("/categories", { method: "POST", body: { name } });
+    input.value = "";
+    toast("Категорію додано");
+    renderCategoryChips();
+  } catch (err) { toast(err.message, "err"); }
+}
+
 async function viewManageSkills() {
   const skills = await api("/skills");
   const view = $("#view");
@@ -770,8 +838,21 @@ async function viewManageSkills() {
         <button id="sk-upload">Завантажити</button>
       </div>
     </div>
+    <div class="card">
+      <h2>Категорії</h2>
+      <p class="muted">Керуйте списком категорій. Обрати категорію можна при редагуванні навички.</p>
+      <div class="row" style="margin-bottom:12px">
+        <input id="cat-new" placeholder="Назва нової категорії">
+        <button id="cat-add">Додати</button>
+      </div>
+      <div id="cat-chips" class="cat-chips"></div>
+    </div>
     <div id="sk-edit"></div>
     <div class="card"><h2>Усі навички</h2><table><thead><tr><th>Назва</th><th>Версія</th><th>Автор</th><th>Категорія</th><th>Статус</th><th>Активацій</th><th>Дії</th></tr></thead><tbody id="sk-body"></tbody></table></div>`;
+
+  renderCategoryChips();
+  $("#cat-add").addEventListener("click", addCategory);
+  $("#cat-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCategory(); });
 
   $("#sk-upload").addEventListener("click", async () => {
     const file = $("#sk-file").files[0];
@@ -827,20 +908,58 @@ async function viewManageSkills() {
   });
 }
 
-// Контекст навички: редагування атрибутів + завантаження нової версії.
+// Завантаження PNG-іконки навички.
+async function uploadSkillIcon(file, skillId) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API}/skills/${skillId}/icon`, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${state.token}` },
+    body: form,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || "Помилка завантаження іконки");
+  return data;
+}
+
+// Контекст навички: редагування атрибутів + іконка + завантаження нової версії.
 async function openSkillEditor(skillId) {
-  const s = await api(`/skills/${skillId}`);
+  const [s, cats] = await Promise.all([
+    api(`/skills/${skillId}`), api("/categories").catch(() => []),
+  ]);
+  // Гарантуємо, що поточна категорія навички є серед варіантів (навіть якщо її
+  // видалили з довідника).
+  const names = cats.map(c => c.name);
+  if (s.category && !names.includes(s.category)) names.unshift(s.category);
+  const catOptions = [`<option value="">— без категорії —</option>`]
+    .concat(names.map(n =>
+      `<option value="${esc(n)}" ${n === s.category ? "selected" : ""}>${esc(n)}</option>`))
+    .join("");
+
   const box = $("#sk-edit");
   box.innerHTML = `
     <div class="card">
       <h2>Навичка: ${esc(s.name)} <span class="muted">v${esc(s.version)}</span></h2>
-      <div class="row">
-        <div class="field" style="flex:2"><label>Назва</label><input id="se-name" value="${esc(s.name)}"></div>
-        <div class="field" style="flex:1"><label>Версія</label><input id="se-version" value="${esc(s.version)}"></div>
-      </div>
-      <div class="row">
-        <div class="field" style="flex:1"><label>Автор</label><input id="se-author" value="${esc(s.author || "")}"></div>
-        <div class="field" style="flex:1"><label>Категорія</label><input id="se-category" value="${esc(s.category || "")}"></div>
+      <div class="editor-top">
+        <div class="editor-icon">
+          <div class="editor-icon-preview" id="se-icon-preview"></div>
+          <input type="file" id="se-icon-file" accept="image/png" hidden>
+          <div class="editor-icon-actions">
+            <button class="small ghost" id="se-icon-pick">Завантажити PNG</button>
+            <button class="small ghost danger" id="se-icon-del" ${s.has_icon ? "" : "hidden"}>Прибрати</button>
+          </div>
+          <div class="muted editor-icon-hint">PNG, до 2 МБ. Якщо не задано — стандартна.</div>
+        </div>
+        <div class="editor-fields">
+          <div class="row">
+            <div class="field" style="flex:2"><label>Назва</label><input id="se-name" value="${esc(s.name)}"></div>
+            <div class="field" style="flex:1"><label>Версія</label><input id="se-version" value="${esc(s.version)}"></div>
+          </div>
+          <div class="row">
+            <div class="field" style="flex:1"><label>Автор</label><input id="se-author" value="${esc(s.author || "")}"></div>
+            <div class="field" style="flex:1"><label>Категорія</label><select id="se-category">${catOptions}</select></div>
+          </div>
+        </div>
       </div>
       <div class="field"><label>Опис</label><textarea id="se-desc">${esc(s.description || "")}</textarea></div>
       <div class="row">
@@ -858,11 +977,44 @@ async function openSkillEditor(skillId) {
     </div>`;
   box.scrollIntoView({ behavior: "smooth", block: "start" });
 
+  // Прев'ю іконки: власна (якщо є) або стандартна.
+  function paintIcon(skill) {
+    const p = $("#se-icon-preview");
+    if (skill.has_icon) {
+      p.innerHTML = `<img src="${esc(skill.icon_url)}" alt="іконка">`;
+    } else {
+      p.innerHTML = `<span class="editor-icon-default">${DEFAULT_SKILL_ICON}</span>`;
+    }
+    $("#se-icon-del").hidden = !skill.has_icon;
+  }
+  paintIcon(s);
+
   if (s.has_package) {
     api(`/skills/${s.id}/files`).then(files => {
       $("#se-files").textContent = "Файли пакета: " + files.map(f => f.name).join(", ");
     }).catch(() => {});
   }
+
+  $("#se-icon-pick").addEventListener("click", () => $("#se-icon-file").click());
+  $("#se-icon-file").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const updated = await uploadSkillIcon(file, s.id);
+      s.has_icon = updated.has_icon; s.icon_url = updated.icon_url;
+      paintIcon(updated);
+      toast("Іконку оновлено");
+    } catch (err) { toast(err.message, "err"); }
+    finally { e.target.value = ""; }
+  });
+  $("#se-icon-del").addEventListener("click", async () => {
+    try {
+      const updated = await api(`/skills/${s.id}/icon`, { method: "DELETE" });
+      s.has_icon = false; s.icon_url = null;
+      paintIcon(updated);
+      toast("Іконку прибрано");
+    } catch (err) { toast(err.message, "err"); }
+  });
 
   $("#se-save").addEventListener("click", async () => {
     try {

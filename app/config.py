@@ -47,6 +47,11 @@ class BaseConfig:
     # Каталог зі збереженими архівами скілів.
     SKILL_PACKAGES_DIR = os.getenv(
         "SKILL_PACKAGES_DIR", os.path.join(INSTANCE_DIR, "skill_packages"))
+    # Каталог із завантаженими PNG-іконками навичок.
+    SKILL_ICONS_DIR = os.getenv(
+        "SKILL_ICONS_DIR", os.path.join(INSTANCE_DIR, "skill_icons"))
+    # Максимальний розмір PNG-іконки навички (байти).
+    SKILL_ICON_MAX_BYTES = int(os.getenv("SKILL_ICON_MAX_BYTES", str(2 * 1024 * 1024)))
     # Каталог файлів користувачів (по підкаталогу-GUID на користувача).
     USER_FILES_DIR = os.getenv(
         "USER_FILES_DIR", os.path.join(INSTANCE_DIR, "user_files"))
