@@ -501,6 +501,12 @@ function renderChatMessage(m) {
   const bubble = el(`<div class="msg ${m.role}">${body}<span class="msg-tok"></span></div>`);
   if (n != null && n !== "") bubble.querySelector(".msg-tok").textContent = n;
   log.appendChild(bubble);
+  // Робочі посилання на створені файли (зберігаються з повідомленням — переживають
+  // перевідкриття чату).
+  if (m.files && m.files.length) {
+    const fl = renderFileLinks(m.files);
+    if (fl) log.appendChild(fl);
+  }
   log.scrollTop = log.scrollHeight;
   return bubble;
 }
@@ -557,10 +563,10 @@ async function openChatSession(sessionId) {
         method: "POST", body: { content: text, skill_id: skillId }, signal: controller.signal });
       loading.remove();
       userEl.querySelector(".msg-tok").textContent = res.usage.prompt_tokens;
+      // Файли рендеряться як частина повідомлення (той самий шлях, що й при
+      // перевідкритті чату) — жодного окремого блоку, що губиться.
       renderChatMessage({ role: "assistant", content: res.content,
-        completion_tokens: res.usage.completion_tokens });
-      const fl = renderFileLinks(res.files);
-      if (fl) { $("#chat-log").appendChild(fl); $("#chat-log").scrollTop = $("#chat-log").scrollHeight; }
+        completion_tokens: res.usage.completion_tokens, files: res.files });
       refreshSessionList();
       refreshQuota();
     } catch (err) {
