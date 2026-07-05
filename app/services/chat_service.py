@@ -131,11 +131,11 @@ def _inputs_for_message(skill, content):
 def _validate_runnable_skill(user, skill_id):
     skill = Skill.query.get(skill_id)
     if skill is None:
-        raise ApiError("Скіл не знайдено", 404, "not_found")
+        raise ApiError("Навичку не знайдено", 404, "not_found")
     if not _user_has_skill(user.id, skill_id):
-        raise ApiError("Скіл не активовано для вас", 403, "forbidden")
+        raise ApiError("Навичку не активовано для вас", 403, "forbidden")
     if skill.status != "published":
-        raise ApiError("Скіл недоступний", 400, "skill_not_published")
+        raise ApiError("Навичка недоступна", 400, "skill_not_published")
     return skill
 
 

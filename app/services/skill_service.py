@@ -23,9 +23,9 @@ def recompute_activations(skill_id):
 def _require_published(skill_id):
     skill = Skill.query.get(skill_id)
     if skill is None:
-        raise ApiError("Скіл не знайдено", 404, "not_found")
+        raise ApiError("Навичку не знайдено", 404, "not_found")
     if skill.status != "published":
-        raise ApiError("Призначати/активувати можна лише published-скіли",
+        raise ApiError("Призначати/активувати можна лише опубліковані навички",
                         400, "skill_not_published")
     return skill
 

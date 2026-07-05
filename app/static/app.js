@@ -213,7 +213,7 @@ async function createChatWithModel(modelId) {
   try {
     const s = await api("/chat/sessions", { method: "POST", body: { model_id: Number(modelId) } });
     closeModelModal();
-    chatState.selectedSkill = null;  // новий чат — відтискаємо обраний скіл
+    chatState.selectedSkill = null;  // новий чат — відтискаємо обрану навичку
     chatState.openAfter = s.id;
     if (document.querySelector("#nav .nav-item.active")?.dataset.tab === "chat") {
       await viewChat();
@@ -323,10 +323,10 @@ const NAV_ICONS = {
 
 const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
-  { id: "skills", label: "Мої скіли", view: viewMySkills },
+  { id: "skills", label: "Мої навички", view: viewMySkills },
   { id: "catalog", label: "Каталог", view: viewCatalog },
   { id: "files", label: "Файли", view: viewFiles },
-  { id: "manage-skills", label: "Управління скілами", view: viewManageSkills, roles: ["admin", "skill_manager"] },
+  { id: "manage-skills", label: "Управління навичками", view: viewManageSkills, roles: ["admin", "skill_manager"] },
   { id: "models", label: "Моделі", view: viewModels, roles: ["admin"] },
   { id: "groups", label: "Групи", view: viewGroups },
   { id: "users", label: "Користувачі", view: viewUsers, roles: ["admin"] },
@@ -422,7 +422,7 @@ async function viewChat() {
 function renderSkillRibbon(skills) {
   const skillIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>';
   const plusIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" fill="none"/></svg>';
-  // Плитка «додати скіл» (Каталог) — не виділена, з великим плюсом.
+  // Плитка «додати навичку» (Каталог) — не виділена, з великим плюсом.
   const tiles = [`<button class="ribbon-tile ribbon-add" data-catalog="1" title="Додати навичку з Каталогу">
       ${plusIcon}<span class="rt-name">Додати</span></button>`];
   (skills || []).forEach(s => {
@@ -575,15 +575,15 @@ async function openChatSession(sessionId) {
   };
 }
 
-// ---------- Мої скіли + запуск ----------
+// ---------- Мої навички + запуск ----------
 async function viewMySkills() {
   const skills = await api("/skills/mine");
   const view = $("#view");
   if (!skills.length) {
-    view.innerHTML = `<div class="card"><h2>Мої скіли</h2><p class="muted">Поки немає активних скілів. Перейдіть у «Каталог», щоб активувати.</p></div>`;
+    view.innerHTML = `<div class="card"><h2>Мої навички</h2><p class="muted">Поки немає активних навичок. Перейдіть у «Каталог», щоб активувати.</p></div>`;
     return;
   }
-  view.innerHTML = `<div class="card"><h2>Мої скіли</h2><div class="grid" id="my-grid"></div></div><div id="runner"></div>`;
+  view.innerHTML = `<div class="card"><h2>Мої навички</h2><div class="grid" id="my-grid"></div></div><div id="runner"></div>`;
   const grid = $("#my-grid");
   skills.forEach(s => {
     const c = el(`<div class="skill-card">
@@ -639,19 +639,21 @@ async function viewCatalog() {
   const published = all.filter(s => s.status === "published");
   const mineIds = new Set(mine.map(s => s.id));
   const view = $("#view");
-  view.innerHTML = `<div class="card"><h2>Каталог скілів</h2><div class="grid" id="cat-grid"></div></div>`;
+  view.innerHTML = `<div class="card"><h2>Каталог навичок</h2><div class="grid" id="cat-grid"></div></div>`;
   const grid = $("#cat-grid");
-  if (!published.length) grid.innerHTML = `<p class="muted">Немає опублікованих скілів.</p>`;
+  if (!published.length) grid.innerHTML = `<p class="muted">Немає опублікованих навичок.</p>`;
   published.forEach(s => {
     const active = mineIds.has(s.id);
     const c = el(`<div class="skill-card">
       <h3>${esc(s.name)}</h3>
+      <div style="margin-bottom:8px"><span class="badge">${esc(s.category || "Загальне")}</span>
+        <span class="muted" style="font-size:12px"> v${esc(s.version)} · ${esc(s.author || "—")}</span></div>
       <p>${esc(s.description)}</p>
       <span class="muted">Активацій: ${s.activations_count}</span><br><br>
       <button class="small" data-id="${s.id}" ${active ? "disabled" : ""}>${active ? "Активовано" : "Активувати"}</button>
     </div>`);
     if (!active) c.querySelector("button").addEventListener("click", async (e) => {
-      try { await api(`/skills/${s.id}/activate`, { method: "POST" }); toast("Скіл активовано"); openTab("catalog"); }
+      try { await api(`/skills/${s.id}/activate`, { method: "POST" }); toast("Навичку активовано"); openTab("catalog"); }
       catch (err) { toast(err.message, "err"); }
     });
     grid.appendChild(c);
@@ -698,7 +700,7 @@ async function viewFiles() {
   const body = $("#f-body");
   if (!files.length) body.innerHTML = `<tr><td colspan="5" class="muted">Файлів ще немає.</td></tr>`;
   files.forEach(f => {
-    const src = f.source === "skill_run" ? "скіл" : "завантажено";
+    const src = f.source === "skill_run" ? "навичка" : "завантажено";
     const date = f.created_at ? f.created_at.replace("T", " ").slice(0, 16) : "";
     const tr = el(`<tr>
       <td><a class="file-link inline" href="${fileUrl(f)}" target="_blank" rel="noopener">${esc(f.filename)}</a></td>
@@ -717,98 +719,172 @@ async function viewFiles() {
   });
 }
 
-// ---------- Управління скілами ----------
+// ---------- Управління навичками (каталог) ----------
+
+// Завантаження пакета: без skillId — НОВА навичка; зі skillId — нова ВЕРСІЯ наявної.
+async function uploadSkillPackage(file, skillId) {
+  const form = new FormData();
+  form.append("file", file);
+  const url = skillId ? `${API}/skills/${skillId}/upload` : `${API}/skills/upload`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${state.token}` },
+    body: form,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || "Помилка завантаження");
+  return data;
+}
+
+async function downloadSkillPackage(s) {
+  try {
+    const res = await fetch(`${API}/skills/${s.id}/download`, {
+      headers: { "Authorization": `Bearer ${state.token}` },
+    });
+    if (!res.ok) throw new Error("Не вдалося завантажити пакет");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `${s.name}-${s.version}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) { toast(err.message, "err"); }
+}
+
+const STATUS_LABEL = { published: "Опублікована" };
+function statusBadge(s) {
+  return s.status === "published"
+    ? `<span class="badge published">Опублікована</span>`
+    : `<span class="badge draft">Не опублікована</span>`;
+}
+
 async function viewManageSkills() {
-  const [skills, models] = await Promise.all([api("/skills"), api("/models")]);
+  const skills = await api("/skills");
   const view = $("#view");
-  const modelOpts = models.map(m => `<option value="${m.id}">${esc(m.name)} (${m.model_type})</option>`).join("");
   view.innerHTML = `
     <div class="card">
-      <h2>Завантажити скіл-пакет</h2>
-      <p class="muted">Архів <code>.zip</code> або <code>.skill</code> зі <code>skill.md</code>, кодом та файлами/папками. Python-код виконується системою.</p>
+      <h2>Завантажити нову навичку</h2>
+      <p class="muted">Архів <code>.zip</code> або <code>.skill</code> зі <code>skill.md</code> (назва, версія, автор, опис, категорія) та файлами. Нова навичка отримує статус <b>«Не опублікована»</b>.</p>
       <div class="row">
         <input type="file" id="sk-file" accept=".zip,.skill">
         <button id="sk-upload">Завантажити</button>
       </div>
     </div>
-    <div class="card">
-      <h2>Новий LLM-скіл</h2>
-      <div class="field"><label>Назва</label><input id="sk-name"></div>
-      <div class="field"><label>Опис</label><input id="sk-desc"></div>
-      <div class="field"><label>Модель</label><select id="sk-model">${modelOpts}</select></div>
-      <div class="field"><label>Prompt-шаблон (плейсхолдери {text})</label><textarea id="sk-prompt">{text}</textarea></div>
-      <div class="field"><label>Вхідні параметри (по одному в рядку: ім'я|обов'язковий 1/0)</label><textarea id="sk-inputs">text|1</textarea></div>
-      <button id="sk-create">Створити</button>
-    </div>
-    <div class="card"><h2>Усі скіли</h2><table><thead><tr><th>Назва</th><th>Тип</th><th>Версія</th><th>Статус</th><th>Активацій</th><th>Дії</th></tr></thead><tbody id="sk-body"></tbody></table></div>`;
+    <div id="sk-edit"></div>
+    <div class="card"><h2>Усі навички</h2><table><thead><tr><th>Назва</th><th>Версія</th><th>Автор</th><th>Категорія</th><th>Статус</th><th>Активацій</th><th>Дії</th></tr></thead><tbody id="sk-body"></tbody></table></div>`;
 
   $("#sk-upload").addEventListener("click", async () => {
     const file = $("#sk-file").files[0];
     if (!file) { toast("Оберіть файл архіву", "err"); return; }
-    const form = new FormData();
-    form.append("file", file);
     $("#sk-upload").disabled = true;
     try {
-      const res = await fetch(API + "/skills/upload", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${state.token}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Помилка завантаження");
-      toast(`Пакет «${data.name}» завантажено (чернетка)`); openTab("manage-skills");
+      const data = await uploadSkillPackage(file, null);
+      toast(`Навичку «${data.name}» завантажено (не опублікована)`);
+      openTab("manage-skills");
     } catch (err) { toast(err.message, "err"); }
     finally { $("#sk-upload").disabled = false; }
   });
 
-  $("#sk-create").addEventListener("click", async () => {
-    const inputs = $("#sk-inputs").value.split("\n").map(l => l.trim()).filter(Boolean).map((l, i) => {
-      const [name, req] = l.split("|");
-      return { name: name.trim(), is_required: (req || "1").trim() === "1", position: i };
-    });
-    try {
-      await api("/skills", { method: "POST", body: {
-        name: $("#sk-name").value, description: $("#sk-desc").value,
-        model_id: Number($("#sk-model").value), prompt_template: $("#sk-prompt").value, inputs,
-      }});
-      toast("Скіл створено"); openTab("manage-skills");
-    } catch (err) { toast(err.message, "err"); }
-  });
-
   const body = $("#sk-body");
   skills.forEach(s => {
-    const next = { draft: "testing", testing: "published", published: "delisted", delisted: "published" };
-    const kind = s.skill_kind === "package"
-      ? `<span class="badge" title="${esc(s.package_filename || "")}">📦 пакет</span>`
-      : `<span class="badge">💬 LLM</span>`;
+    const pubBtn = s.status === "published"
+      ? `<button class="small ghost" data-act="unpub">Зняти з публікації</button>`
+      : `<button class="small" data-act="pub">Опублікувати</button>`;
     const tr = el(`<tr>
-      <td>${esc(s.name)}</td><td>${kind}</td><td>${esc(s.version)}</td>
-      <td><span class="badge ${s.status}">${s.status}</span></td>
+      <td title="${esc(s.package_filename || "")}">${esc(s.name)}</td>
+      <td>${esc(s.version)}</td>
+      <td>${esc(s.author || "—")}</td>
+      <td>${esc(s.category || "—")}</td>
+      <td>${statusBadge(s)}</td>
       <td>${s.activations_count}</td>
       <td class="actions">
-        <button class="small" data-act="status" data-next="${next[s.status]}">→ ${next[s.status]}</button>
-        ${s.skill_kind === "package" ? `<button class="small ghost" data-act="files">Файли</button>` : ""}
+        ${pubBtn}
+        <button class="small ghost" data-act="edit">Редагувати</button>
+        ${s.has_package ? `<button class="small ghost" data-act="dl">Скачати</button>` : ""}
         <button class="small danger" data-act="del">Видалити</button>
       </td>
     </tr>`);
-    tr.querySelector("[data-act='status']").addEventListener("click", async (e) => {
-      try { await api(`/skills/${s.id}/status`, { method: "POST", body: { status: e.target.dataset.next } });
-        toast("Статус оновлено"); openTab("manage-skills"); }
+    const setStatus = async (status) => {
+      try { await api(`/skills/${s.id}/status`, { method: "POST", body: { status } });
+        toast(status === "published" ? "Навичку опубліковано" : "Публікацію скасовано");
+        openTab("manage-skills"); }
       catch (err) { toast(err.message, "err"); }
-    });
-    const filesBtn = tr.querySelector("[data-act='files']");
-    if (filesBtn) filesBtn.addEventListener("click", async () => {
-      try {
-        const files = await api(`/skills/${s.id}/files`);
-        alert(`Файли пакета «${s.name}»:\n\n` + files.map(f => `${f.name} (${f.size} Б)`).join("\n"));
-      } catch (err) { toast(err.message, "err"); }
-    });
+    };
+    const pb = tr.querySelector("[data-act='pub']");
+    if (pb) pb.addEventListener("click", () => setStatus("published"));
+    const upb = tr.querySelector("[data-act='unpub']");
+    if (upb) upb.addEventListener("click", () => setStatus("draft"));
+    tr.querySelector("[data-act='edit']").addEventListener("click", () => openSkillEditor(s.id));
+    const dlb = tr.querySelector("[data-act='dl']");
+    if (dlb) dlb.addEventListener("click", () => downloadSkillPackage(s));
     tr.querySelector("[data-act='del']").addEventListener("click", async () => {
-      if (!confirm(`Видалити скіл «${s.name}»?`)) return;
-      try { await api(`/skills/${s.id}`, { method: "DELETE" }); toast("Скіл видалено"); openTab("manage-skills"); }
+      if (!confirm(`Видалити навичку «${s.name}»?\n\nБудуть видалені всі її зв'язки з групами та користувачами — після повторного встановлення її доведеться активувати заново.`)) return;
+      try { await api(`/skills/${s.id}`, { method: "DELETE" });
+        toast("Навичку та її зв'язки видалено"); openTab("manage-skills"); }
       catch (err) { toast(err.message, "err"); }
     });
     body.appendChild(tr);
+  });
+}
+
+// Контекст навички: редагування атрибутів + завантаження нової версії.
+async function openSkillEditor(skillId) {
+  const s = await api(`/skills/${skillId}`);
+  const box = $("#sk-edit");
+  box.innerHTML = `
+    <div class="card">
+      <h2>Навичка: ${esc(s.name)} <span class="muted">v${esc(s.version)}</span></h2>
+      <div class="row">
+        <div class="field" style="flex:2"><label>Назва</label><input id="se-name" value="${esc(s.name)}"></div>
+        <div class="field" style="flex:1"><label>Версія</label><input id="se-version" value="${esc(s.version)}"></div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Автор</label><input id="se-author" value="${esc(s.author || "")}"></div>
+        <div class="field" style="flex:1"><label>Категорія</label><input id="se-category" value="${esc(s.category || "")}"></div>
+      </div>
+      <div class="field"><label>Опис</label><textarea id="se-desc">${esc(s.description || "")}</textarea></div>
+      <div class="row">
+        <button id="se-save">Зберегти</button>
+        <button id="se-close" class="ghost">Закрити</button>
+      </div>
+      <hr class="md-hr">
+      <h3>Нова версія</h3>
+      <p class="muted">Завантаження пакета тут оновить <b>цю саму</b> навичку (нова версія): активації та призначення групам збережуться.</p>
+      <div class="row">
+        <input type="file" id="se-file" accept=".zip,.skill">
+        <button id="se-upload">Завантажити нову версію</button>
+      </div>
+      <div id="se-files" class="muted" style="margin-top:10px"></div>
+    </div>`;
+  box.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  if (s.has_package) {
+    api(`/skills/${s.id}/files`).then(files => {
+      $("#se-files").textContent = "Файли пакета: " + files.map(f => f.name).join(", ");
+    }).catch(() => {});
+  }
+
+  $("#se-save").addEventListener("click", async () => {
+    try {
+      await api(`/skills/${s.id}`, { method: "PATCH", body: {
+        name: $("#se-name").value, version: $("#se-version").value,
+        author: $("#se-author").value, category: $("#se-category").value,
+        description: $("#se-desc").value,
+      }});
+      toast("Атрибути навички збережено"); openTab("manage-skills");
+    } catch (err) { toast(err.message, "err"); }
+  });
+  $("#se-close").addEventListener("click", () => { box.innerHTML = ""; });
+  $("#se-upload").addEventListener("click", async () => {
+    const file = $("#se-file").files[0];
+    if (!file) { toast("Оберіть файл архіву", "err"); return; }
+    $("#se-upload").disabled = true;
+    try {
+      const data = await uploadSkillPackage(file, s.id);
+      toast(`Нову версію «${data.name}» v${data.version} завантажено`);
+      openTab("manage-skills");
+    } catch (err) { toast(err.message, "err"); }
+    finally { $("#se-upload").disabled = false; }
   });
 }
 
@@ -923,7 +999,7 @@ async function renderGroupDetail(groupId) {
 
   container.innerHTML = `
     <table><thead><tr><th>Учасник</th><th>Роль</th><th></th></tr></thead><tbody>${members}</tbody></table>
-    <p><strong>Скіли групи:</strong> ${skillsHtml}</p>
+    <p><strong>Навички групи:</strong> ${skillsHtml}</p>
     <div class="row">
       <input placeholder="user_id" data-f="uid">
       <select data-f="role"><option value="member">member</option><option value="manager">manager</option></select>
@@ -931,7 +1007,7 @@ async function renderGroupDetail(groupId) {
     </div>
     <div class="row" style="margin-top:8px">
       <input placeholder="skill_id" data-f="sid">
-      <button data-act="add-skill">Призначити скіл</button>
+      <button data-act="add-skill">Призначити навичку</button>
     </div>`;
 
   const getF = (f) => container.querySelector(`[data-f="${f}"]`).value;
@@ -946,7 +1022,7 @@ async function renderGroupDetail(groupId) {
   });
   container.querySelector("[data-act='add-skill']").addEventListener("click", async () => {
     try { await api(`/groups/${groupId}/skills`, { method: "POST", body: { skill_id: Number(getF("sid")) }});
-      toast("Скіл призначено"); renderGroupDetail(groupId); }
+      toast("Навичку призначено"); renderGroupDetail(groupId); }
     catch (err) { toast(err.message, "err"); }
   });
 }

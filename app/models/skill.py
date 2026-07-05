@@ -43,7 +43,9 @@ class Skill(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
     description = db.Column(db.Text, nullable=False)
-    # 'prompt' — LLM-скіл; 'package' — архів зі skill.md та кодом, що виконується.
+    author = db.Column(db.String)        # автор навички (зі skill.md або редагується)
+    category = db.Column(db.String)      # категорія навички
+    # 'prompt' — LLM-навичка; 'package' — архів зі skill.md та кодом, що виконується.
     skill_kind = db.Column(db.String, nullable=False, default="prompt")
     model_id = db.Column(db.Integer, db.ForeignKey("models.id"))  # nullable: пакетам не потрібен
     prompt_template = db.Column(db.Text)
@@ -72,6 +74,8 @@ class Skill(db.Model):
             "id": self.id,
             "name": self.name,
             "description": self.description,
+            "author": self.author,
+            "category": self.category,
             "skill_kind": self.skill_kind or "prompt",
             "model_id": self.model_id,
             "model_name": self.model.name if self.model else None,

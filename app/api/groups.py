@@ -101,11 +101,11 @@ def assign_skill(group_id):
     if not skill_id:
         raise ApiError("Вкажіть skill_id", 400, "validation_error")
     count = skill_service.assign_to_group(group_id, skill_id, current_user().id)
-    return jsonify({"message": "Скіл призначено групі", "activations_count": count}), 201
+    return jsonify({"message": "Навичку призначено групі", "activations_count": count}), 201
 
 
 @bp.delete("/<int:group_id>/skills/<int:skill_id>")
 @require_group_role("manager")
 def remove_skill(group_id, skill_id):
     count = skill_service.remove_from_group(group_id, skill_id)
-    return jsonify({"message": "Скіл знято з групи", "activations_count": count})
+    return jsonify({"message": "Навичку знято з групи", "activations_count": count})

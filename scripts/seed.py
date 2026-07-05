@@ -114,6 +114,8 @@ def seed():
             Skill, name="Summarizer",
             defaults={
                 "description": "Стисло підсумовує наданий текст.",
+                "author": "Smart Digital Skills",
+                "category": "Текст",
                 "model_id": llm.id,
                 "prompt_template": "Зроби стислий підсумок тексту мовою {language}:\n\n{text}",
                 "parameters": json.dumps({"temperature": 0.3}),
@@ -192,6 +194,8 @@ def _seed_package_skill(admin):
 
     skill = Skill(
         name=meta["name"], description=meta["description"],
+        author=meta.get("author") or "Smart Digital Skills",
+        category=meta.get("category") or "Загальне",
         skill_kind="package", runtime=meta["runtime"], entrypoint=meta["entrypoint"],
         version=meta["version"], prompt_template=meta.get("instructions"),
         status="published", published_at=datetime.utcnow(),

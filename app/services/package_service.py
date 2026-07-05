@@ -179,6 +179,8 @@ def parse_package(file_bytes):
     return {
         "name": name,
         "description": description,
+        "author": (str(meta.get("author") or "").strip() or None),
+        "category": (str(meta.get("category") or "").strip() or None),
         "version": str(meta.get("version", "1.0.0")),
         "runtime": runtime,
         "entrypoint": entrypoint,
