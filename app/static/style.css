@@ -572,12 +572,19 @@ body.theme-light .chat-error b { color: #991b1b; }
   .chat-layout { grid-template-columns: 1fr; }
 }
 
-/* ===== Перемикач теми ===== */
-.theme-toggle {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; margin-bottom: 10px;
+/* ===== Перемикач теми (3 режими) ===== */
+.theme-seg {
+  display: flex; gap: 4px; margin-bottom: 10px;
+  background: var(--glass-2); border: 1px solid var(--glass-border);
+  border-radius: 12px; padding: 4px;
 }
-.theme-toggle svg { width: 16px; height: 16px; }
+.theme-seg button {
+  flex: 1; background: transparent; border: none; padding: 7px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer;
+}
+.theme-seg button svg { width: 16px; height: 16px; fill: currentColor; }
+.theme-seg button:hover:not(.active) { color: var(--text); background: rgba(127,127,127,0.12); }
+.theme-seg button.active { background: var(--accent); color: #fff; }
 
 /* Завжди білий текст у бульбашці користувача (обидві теми) */
 .msg.user { color: #fff; }
@@ -616,3 +623,87 @@ body.theme-light .ribbon-tile.pressed {
 }
 body.theme-light .ribbon-tile.pressed svg { fill: var(--accent); }
 body.theme-light .file-link { color: #4f46e5; }
+
+/* ===== Material Design (Google) — світлий режим ===== */
+body.theme-material {
+  --bg: #f1f3f4;
+  --panel: #ffffff;
+  --panel-2: #f8f9fa;
+  --border: #dadce0;
+  --text: #202124;
+  --muted: #5f6368;
+  --accent: #1a73e8;
+  --accent-2: #1a73e8;
+  --glass: #ffffff;
+  --glass-2: #f8f9fa;
+  --glass-strong: #ffffff;
+  --glass-border: #dadce0;
+  --shadow: 0 1px 2px rgba(60,64,67,0.10), 0 1px 3px 1px rgba(60,64,67,0.10);
+  --radius: 8px;
+  font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: var(--bg);
+}
+/* Прибрати скляний блюр — Material має суцільні поверхні */
+body.theme-material .card, body.theme-material .sidebar, body.theme-material .topbar,
+body.theme-material .modal, body.theme-material .quota, body.theme-material .ribbon-tile,
+body.theme-material .skill-card, body.theme-material .stat, body.theme-material .msg.assistant,
+body.theme-material .toast, body.theme-material input, body.theme-material select,
+body.theme-material textarea {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+body.theme-material .card { border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 8px; }
+body.theme-material .sidebar { background: #fff; border-right: 1px solid var(--border); }
+
+/* Синій верхній апбар (як на скріншоті) */
+body.theme-material .topbar {
+  background: #1a73e8; border-bottom: none; box-shadow: 0 1px 3px rgba(0,0,0,0.22);
+}
+body.theme-material .topbar .page-title,
+body.theme-material .topbar #user-name { color: #fff; }
+body.theme-material .topbar .roles { color: rgba(255,255,255,0.85); }
+body.theme-material .topbar .logout { color: #fff; border-color: rgba(255,255,255,0.55); }
+body.theme-material .topbar .logout:hover { background: rgba(255,255,255,0.16); }
+body.theme-material .btn-newchat { background: rgba(255,255,255,0.18); box-shadow: none; }
+body.theme-material .btn-newchat:hover { background: rgba(255,255,255,0.28); }
+
+/* Кнопки Material — великими літерами */
+body.theme-material button { border-radius: 6px; }
+body.theme-material button:not(.nav-item):not(.ribbon-tile):not(.session-del):not(.pw-toggle):not(.modal-x):not(.theme-seg button):not(.chat-send) {
+  text-transform: uppercase; letter-spacing: 0.4px; font-weight: 500;
+}
+body.theme-material .btn-primary { background: #1a73e8; box-shadow: var(--shadow); }
+body.theme-material .btn-primary:hover { background: #1765cc; }
+body.theme-material button.ghost { color: #1a73e8; border-color: #dadce0; }
+body.theme-material button.ghost:hover { background: #f1f6fe; }
+body.theme-material button.small { background: #1a73e8; color: #fff; }
+body.theme-material button.small.ghost { background: transparent; color: #1a73e8; }
+body.theme-material button.danger { background: #d93025; color: #fff; }
+
+/* Навігація Material */
+body.theme-material .nav-item { color: #5f6368; }
+body.theme-material .nav-item:hover { background: #f1f3f4; color: #202124; }
+body.theme-material .nav-item.active {
+  background: #e8f0fe; color: #1a73e8; border: 1px solid transparent; box-shadow: none;
+}
+body.theme-material .nav-item.active svg { fill: #1a73e8; }
+
+/* Плитки навичок */
+body.theme-material .ribbon-tile { border: 1px solid var(--border); box-shadow: var(--shadow); }
+body.theme-material .ribbon-tile.pressed { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; box-shadow: none; }
+body.theme-material .ribbon-tile.pressed svg { fill: #1a73e8; }
+body.theme-material .ribbon-tile.ribbon-add { border-style: dashed; }
+
+/* Чат */
+body.theme-material .msg.user { background: #1a73e8; }
+body.theme-material .msg.assistant { background: #fff; border: 1px solid var(--border); }
+body.theme-material .chat-log::-webkit-scrollbar-thumb { background: #bdc1c6; }
+body.theme-material .md-pre, body.theme-material .md-body code { background: #f1f3f4; }
+body.theme-material .chat-error { background: #fce8e6; border-color: #d93025; color: #c5221f; }
+body.theme-material .chat-error b { color: #a50e0e; }
+
+/* Дрібниці */
+body.theme-material .quota-bar { background: #e8eaed; }
+body.theme-material .theme-seg { background: #f1f3f4; border-color: #dadce0; }
+body.theme-material .theme-seg button.active { background: #1a73e8; }
+body.theme-material .modal-overlay { background: rgba(32,33,36,0.5); }
+body.theme-material .file-link { color: #1a73e8; }
