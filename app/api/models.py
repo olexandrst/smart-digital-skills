@@ -6,6 +6,7 @@ from app.core.permissions import require_auth, require_global_role
 from app.core.errors import ApiError
 from app.models import Model, Skill
 from app.integrations import SUPPORTED_PROVIDERS, normalize_provider
+from app.integrations import discovery
 
 bp = Blueprint("models", __name__)
 
@@ -31,6 +32,30 @@ def list_providers():
     """Канонічні провайдери для UI (без дублювання синонімів)."""
     canonical = sorted(set(SUPPORTED_PROVIDERS.values()))
     return jsonify(canonical)
+
+
+@bp.get("/available")
+@require_global_role("admin")
+def available_models():
+    """Динамічний список моделей/деплойментів, доступних у провайдера.
+
+    `?provider=` — провайдер (за замовч. azure_ai_foundry), `?model_type=llm|cv`.
+    Повертає {"provider", "source": "api|fallback", "models": [...]}.
+    """
+    provider = request.args.get("provider", "azure_ai_foundry")
+    if (provider or "").lower().strip() not in SUPPORTED_PROVIDERS:
+        raise ApiError("Невідомий provider", 400, "validation_error")
+    model_type = request.args.get("model_type", "llm")
+    try:
+        models, source = discovery.list_available_models(provider, model_type)
+    except Exception as exc:  # мережеві/авторизаційні помилки провайдера
+        raise ApiError(f"Не вдалося отримати список моделей: {exc}",
+                       502, "discovery_failed")
+    return jsonify({
+        "provider": normalize_provider(provider),
+        "source": source,
+        "models": models,
+    })
 
 
 @bp.post("")

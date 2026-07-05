@@ -1059,13 +1059,55 @@ async function viewModels() {
         <input id="m-name" placeholder="Назва">
         <select id="m-provider">${provOpts}</select>
         <select id="m-type"><option value="llm">llm</option><option value="cv">cv</option></select>
-        <input id="m-dep" placeholder="deployment / model name">
+      </div>
+      <div class="row" style="margin-top:12px">
+        <input id="m-dep" list="m-dep-list" autocomplete="off"
+               placeholder="Оберіть модель зі списку або введіть вручну">
+        <datalist id="m-dep-list"></datalist>
+        <button id="m-refresh" class="ghost" title="Оновити список моделей">↻ Оновити</button>
         <button id="m-add">Додати</button>
       </div>
-      <p class="muted" style="margin:8px 0 0">deployment / model name — ідентифікатор моделі у провайдера
-      (напр. <code>gpt-4o</code> для OpenAI/Azure, <code>gemini-1.5-pro</code> для Gemini).</p>
+      <p class="muted" id="m-dep-hint" style="margin:8px 0 0"></p>
     </div>
     <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам у чаті. <strong>Системна</strong> модель використовується платформою для службових задач (напр. іменування чатів).</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Тип</th><th>Деплоймент / модель</th><th>Статус</th><th>Системна</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
+
+  // Динамічний список доступних моделей у обраного провайдера.
+  async function loadAvailableModels() {
+    const dl = $("#m-dep-list");
+    const hint = $("#m-dep-hint");
+    const provider = $("#m-provider").value;
+    const model_type = $("#m-type").value;
+    hint.textContent = "Завантаження списку моделей…";
+    dl.innerHTML = "";
+    try {
+      const res = await api(`/models/available?provider=${encodeURIComponent(provider)}&model_type=${encodeURIComponent(model_type)}`);
+      dl.innerHTML = (res.models || []).map(m => `<option value="${esc(m)}"></option>`).join("");
+      const label = PROVIDER_LABELS[res.provider] || res.provider;
+      if (!res.models || !res.models.length) {
+        hint.textContent = "Список порожній — введіть назву моделі вручну.";
+      } else if (res.source === "fallback") {
+        hint.textContent = `${label}: показано типові моделі (демо-режим або не задано ключ). Можна ввести й вручну.`;
+      } else {
+        hint.textContent = `${label}: знайдено ${res.models.length} — оберіть зі списку або введіть вручну.`;
+      }
+    } catch (err) {
+      hint.textContent = `Не вдалося отримати список (${err.message}). Введіть назву вручну.`;
+    }
+  }
+  $("#m-provider").addEventListener("change", loadAvailableModels);
+  $("#m-type").addEventListener("change", loadAvailableModels);
+  $("#m-refresh").addEventListener("click", loadAvailableModels);
+  // Автопідстановка назви за обраною моделлю, якщо поле назви порожнє.
+  $("#m-dep").addEventListener("change", () => {
+    const name = $("#m-name");
+    const dep = $("#m-dep").value.trim();
+    if (dep && !name.value.trim()) {
+      const label = PROVIDER_LABELS[$("#m-provider").value] || $("#m-provider").value;
+      name.value = `${dep} (${label})`;
+    }
+  });
+  loadAvailableModels();
+
   $("#m-add").addEventListener("click", async () => {
     try {
       await api("/models", { method: "POST", body: {

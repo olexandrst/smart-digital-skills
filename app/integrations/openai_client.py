@@ -1,5 +1,5 @@
 """Адаптер до OpenAI API (api.openai.com або сумісний base_url)."""
-from app.integrations.base import LLMResponse, mock_chat_response
+from app.integrations.base import LLMResponse, mock_chat_response, build_http_client
 
 
 class OpenAIClient:
@@ -27,7 +27,8 @@ class OpenAIClient:
                 "або увімкніть LLM_MOCK=1."
             ) from exc
 
-        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url,
+                        http_client=build_http_client())
         resp = client.chat.completions.create(
             model=model_name,
             messages=messages,
