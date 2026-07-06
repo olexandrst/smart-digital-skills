@@ -17,6 +17,22 @@ class LLMResponse:
 FoundryResponse = LLMResponse
 
 
+def build_http_client():
+    """httpx-клієнт для openai SDK, що оминає несумісність із аргументом ``proxies``.
+
+    У httpx>=0.28 параметр ``proxies`` прибрано, тоді як деякі версії openai SDK
+    його ще передають — це спричиняє ``TypeError: got an unexpected keyword
+    argument 'proxies'``. Передаючи власний ``http_client``, ми змушуємо SDK не
+    будувати внутрішній клієнт із цим аргументом. Проксі з середовища
+    (HTTP_PROXY/HTTPS_PROXY) підхоплюються автоматично через ``trust_env=True``.
+    """
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover — httpx є залежністю openai
+        return None
+    return httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), trust_env=True)
+
+
 def estimate_tokens(text: str) -> int:
     """Груба оцінка: ~1.3 токена на слово (достатньо для базового обліку MVP/моку)."""
     if not text:

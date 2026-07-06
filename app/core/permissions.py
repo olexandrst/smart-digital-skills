@@ -33,11 +33,11 @@ def require_global_role(*codes):
     return decorator
 
 
-def require_group_role(role, group_id_arg="group_id"):
-    """Доступ лише менеджеру/мемберу конкретної групи (admin — завжди дозволено).
+def require_group_membership(group_id_arg="group_id"):
+    """Доступ лише активному члену конкретної групи (admin — завжди дозволено).
 
-    role: 'manager' або 'member'. 'manager' не вимагає окремо 'member'.
-    group_id береться з kwargs ендпоінта (за іменем group_id_arg).
+    Ролей у групах немає — усі члени рівноправні. group_id береться з kwargs
+    ендпоінта (за іменем group_id_arg).
     """
     def decorator(fn):
         @wraps(fn)
@@ -55,8 +55,6 @@ def require_group_role(role, group_id_arg="group_id"):
             ).first()
             if membership is None:
                 raise ApiError("Ви не є членом цієї групи", 403, "forbidden")
-            if role == "manager" and membership.role != "manager":
-                raise ApiError("Потрібні права менеджера групи", 403, "forbidden")
             return fn(*args, **kwargs)
         return wrapper
     return decorator

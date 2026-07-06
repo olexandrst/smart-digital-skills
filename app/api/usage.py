@@ -2,7 +2,7 @@
 from flask import Blueprint, jsonify, request
 from sqlalchemy import func
 from app.extensions import db
-from app.core.permissions import require_auth, require_global_role, require_group_role
+from app.core.permissions import require_auth, require_global_role, require_group_membership
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import TokenUsageLog, User, Model
@@ -53,7 +53,7 @@ def set_default_limit():
 
 
 @bp.get("/group/<int:group_id>")
-@require_group_role("manager")
+@require_group_membership()
 def group_usage(group_id):
     q = TokenUsageLog.query.filter_by(group_id=group_id, is_system=False)
     return jsonify(_aggregate(q))

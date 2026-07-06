@@ -3,7 +3,7 @@
 У MVP працює мок. Реальний клієнт підключається через openai SDK у режимі
 Azure, коли задано endpoint/ключ та вимкнено мок.
 """
-from app.integrations.base import LLMResponse, mock_chat_response
+from app.integrations.base import LLMResponse, mock_chat_response, build_http_client
 
 # Зворотна сумісність зі старим імпортом.
 FoundryResponse = LLMResponse
@@ -40,6 +40,7 @@ class AzureFoundryClient:
             azure_endpoint=self.endpoint,
             api_key=self.api_key,
             api_version=parameters.get("api_version", self.api_version),
+            http_client=build_http_client(),
         )
         resp = client.chat.completions.create(
             model=model_name,

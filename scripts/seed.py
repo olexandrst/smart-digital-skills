@@ -143,7 +143,7 @@ def seed():
         if group_created:
             db.session.add(GroupMembership(
                 group_id=group.id, user_id=admin.id,
-                role="manager", status="active"))
+                role="member", status="active"))
             db.session.add(GroupMembership(
                 group_id=group.id, user_id=member1.id,
                 role="member", status="active"))

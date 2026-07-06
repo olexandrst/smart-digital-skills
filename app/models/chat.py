@@ -1,4 +1,5 @@
 """Чат-сесії, повідомлення, облік токенів, ліміти та аудит."""
+import json
 from datetime import datetime
 from app.extensions import db
 
@@ -62,12 +63,28 @@ class ChatMessage(db.Model):
     total_tokens = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
+    def _linked_files(self):
+        """Файли, збережені у метаданих повідомлення (за id) — резолвимо наживо,
+        тож видалені з «Мої файли» файли автоматично зникають із чату."""
+        if not self.msg_metadata:
+            return []
+        try:
+            ids = (json.loads(self.msg_metadata) or {}).get("file_ids") or []
+        except (ValueError, TypeError):
+            return []
+        if not ids:
+            return []
+        from app.models.file import UserFile  # локальний імпорт уникає циклів
+        rows = {f.id: f for f in UserFile.query.filter(UserFile.id.in_(ids)).all()}
+        return [rows[i].to_dict() for i in ids if i in rows]
+
     def to_dict(self):
         return {
             "id": self.id,
             "role": self.role,
             "content": self.content,
             "skill_id": self.skill_id,
+            "files": self._linked_files(),
             "prompt_tokens": self.prompt_tokens or 0,
             "completion_tokens": self.completion_tokens or 0,
             "total_tokens": self.total_tokens or 0,

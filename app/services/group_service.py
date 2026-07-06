@@ -1,11 +1,12 @@
-"""GroupService — членство та правило «мінімум один менеджер у групі»."""
+"""GroupService — членство у групах (без ролей: усі члени рівноправні)."""
 from app.extensions import db
 from app.core.errors import ApiError
-from app.models import Group, GroupMembership, User
-from app.services import skill_service
+from app.models import Group, GroupMembership, GroupSkill, User
 
 
 def add_member(group_id, user_id, role="member", invited_by=None):
+    """Додає активного члена групи. `role` збережено для сумісності — не вживається."""
+    from app.services import skill_service  # локальний імпорт уникає циклів
     group = Group.query.get(group_id)
     if group is None:
         raise ApiError("Групу не знайдено", 404, "not_found")
@@ -19,10 +20,10 @@ def add_member(group_id, user_id, role="member", invited_by=None):
 
     if membership:
         membership.status = "active"
-        membership.role = role
+        membership.role = "member"
     else:
         membership = GroupMembership(
-            group_id=group_id, user_id=user_id, role=role,
+            group_id=group_id, user_id=user_id, role="member",
             status="active", invited_by=invited_by,
         )
         db.session.add(membership)
@@ -33,6 +34,7 @@ def add_member(group_id, user_id, role="member", invited_by=None):
 
 
 def remove_member(group_id, user_id):
+    from app.services import skill_service
     membership = GroupMembership.query.filter_by(
         group_id=group_id, user_id=user_id, status="active").first()
     if membership is None:
@@ -42,43 +44,39 @@ def remove_member(group_id, user_id):
     db.session.commit()
 
     skill_service.remove_member_skills(group_id, user_id)
-    _ensure_manager_exists(group_id)
     return True
 
 
-def change_role(group_id, user_id, role):
-    if role not in ("manager", "member"):
-        raise ApiError("Невідома роль", 400, "validation_error")
-    membership = GroupMembership.query.filter_by(
-        group_id=group_id, user_id=user_id, status="active").first()
-    if membership is None:
-        raise ApiError("Користувач не є активним членом групи", 404, "not_found")
-
-    membership.role = role
+def rename_group(group_id, name=None, description=None):
+    group = Group.query.get(group_id)
+    if group is None:
+        raise ApiError("Групу не знайдено", 404, "not_found")
+    if name is not None:
+        name = name.strip()
+        if not name:
+            raise ApiError("Назва групи не може бути порожньою", 400, "validation_error")
+        clash = Group.query.filter(Group.name == name, Group.id != group_id).first()
+        if clash:
+            raise ApiError("Група з такою назвою вже існує", 409, "conflict")
+        group.name = name
+    if description is not None:
+        group.description = description
     db.session.commit()
-    _ensure_manager_exists(group_id)
-    return membership
+    return group
 
 
-def _ensure_manager_exists(group_id):
-    """Бізнес-правило: якщо менеджерів не лишилось — системний admin стає менеджером."""
-    has_manager = GroupMembership.query.filter_by(
-        group_id=group_id, role="manager", status="active").first()
-    if has_manager:
-        return
+def delete_group(group_id):
+    """Видаляє групу: знімає доступ до її навичок у членів і видаляє зв'язки."""
+    from app.services import skill_service
+    group = Group.query.get(group_id)
+    if group is None:
+        raise ApiError("Групу не знайдено", 404, "not_found")
 
-    admin = User.query.filter_by(is_system_admin=True, is_active=True).first()
-    if admin is None:
-        return
+    # Деактивуємо доступ членів до навичок, що надавались саме цією групою.
+    for gs in GroupSkill.query.filter_by(group_id=group_id).all():
+        skill_service.remove_from_group(group_id, gs.skill_id)
+    GroupSkill.query.filter_by(group_id=group_id).delete(synchronize_session=False)
 
-    membership = GroupMembership.query.filter_by(
-        group_id=group_id, user_id=admin.id).first()
-    if membership:
-        membership.role = "manager"
-        membership.status = "active"
-    else:
-        db.session.add(GroupMembership(
-            group_id=group_id, user_id=admin.id, role="manager", status="active",
-        ))
+    db.session.delete(group)  # memberships — каскадом (relationship cascade)
     db.session.commit()
-    skill_service.sync_member_skills(group_id, admin.id, assigned_by=admin.id)
+    return True

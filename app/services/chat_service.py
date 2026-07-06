@@ -19,6 +19,31 @@ from app.services import package_service, quota_service
 # Скільки останніх повідомлень передавати моделі як контекст діалогу.
 HISTORY_LIMIT = 20
 
+# Markdown-посилання [текст](ціль).
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(\s*([^)\s]+)\s*\)")
+
+
+def _sanitize_reply_links(text):
+    """Знешкоджує вигадані моделлю посилання на файли.
+
+    Модель не може знати реального URL згенерованого файлу (він відомий лише
+    після збереження), тож будь-яке її посилання на локальний/відносний шлях
+    (напр. `[звіт.xlsx](звіт.xlsx)` чи `sandbox:/mnt/...`) не працює. Лишаємо
+    лише зовнішні http(s) та наші /files/ посилання; решту зводимо до тексту.
+    Робочі посилання платформа додає окремо (persist у метаданих повідомлення).
+    """
+    if not text:
+        return text
+
+    def repl(m):
+        label, href = m.group(1), m.group(2)
+        low = href.lower()
+        if low.startswith("http://") or low.startswith("https://") or href.startswith("/files/"):
+            return m.group(0)  # легітимне посилання лишаємо
+        return label  # мертве локальне/відносне посилання → просто текст
+
+    return _MD_LINK_RE.sub(repl, text)
+
 
 def _agent_max_steps():
     return int(current_app.config.get("SKILL_AGENT_MAX_STEPS", 6))
@@ -171,8 +196,10 @@ def create_session(user, model_id, title=None):
         raise ApiError("Модель не знайдено", 404, "not_found")
     if not model.is_active:
         raise ApiError("Модель неактивна та недоступна для чату", 400, "model_inactive")
+    # Назва без моделі (у списку чатів модель не показуємо); після першого
+    # обміну назву автоматично замінить короткий підсумок (_maybe_autoname).
     session = ChatSession(user_id=user.id, model_id=model_id,
-                          title=title or f"Чат · {model.name}")
+                          title=title or "Новий чат")
     db.session.add(session)
     db.session.commit()
     return session
@@ -233,7 +260,8 @@ def send_message(user, session_id, content, skill_id=None):
                  "completion_tokens": result.completion_tokens,
                  "total_tokens": result.total_tokens}
 
-    _store_exchange(session, user, model_id, skill_id, content, reply, usage)
+    reply = _sanitize_reply_links(reply)
+    _store_exchange(session, user, model_id, skill_id, content, reply, usage, files=files)
 
     if is_first_exchange:
         _maybe_autoname(session, content)
@@ -287,7 +315,9 @@ def run_skill(user, skill_id, inputs, session_id=None):
         user_content = _build_prompt(skill, inputs or {})
         log_model_id = skill.model_id
 
-    _store_exchange(session, user, log_model_id, skill_id, user_content, content, usage)
+    content = _sanitize_reply_links(content)
+    _store_exchange(session, user, log_model_id, skill_id, user_content, content, usage,
+                    files=files)
 
     return {
         "session_id": session.id,
@@ -297,15 +327,22 @@ def run_skill(user, skill_id, inputs, session_id=None):
     }
 
 
-def _store_exchange(session, user, model_id, skill_id, user_content, reply, usage):
+def _store_exchange(session, user, model_id, skill_id, user_content, reply, usage,
+                    files=None):
     db.session.add(ChatMessage(
         session_id=session.id, role="user", content=user_content, skill_id=skill_id,
         prompt_tokens=usage["prompt_tokens"], total_tokens=usage["prompt_tokens"],
     ))
-    db.session.add(ChatMessage(
+    assistant_msg = ChatMessage(
         session_id=session.id, role="assistant", content=reply,
         completion_tokens=usage["completion_tokens"], total_tokens=usage["completion_tokens"],
-    ))
+    )
+    # Прив'язуємо створені файли до повідомлення (id), щоб посилання
+    # переживали перевідкриття чату.
+    file_ids = [f["id"] for f in (files or []) if isinstance(f, dict) and f.get("id") is not None]
+    if file_ids:
+        assistant_msg.msg_metadata = json.dumps({"file_ids": file_ids})
+    db.session.add(assistant_msg)
     db.session.add(TokenUsageLog(
         user_id=user.id, group_id=session.group_id, skill_id=skill_id,
         model_id=model_id, session_id=session.id,
