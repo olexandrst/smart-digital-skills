@@ -14,7 +14,7 @@ from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
-    Skill, SkillInput, UserSkill, GroupSkill,
+    Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill,
     ChatSession, ChatMessage, TokenUsageLog, UserFile,
 )
 from app.services import skill_service, chat_service, package_service
@@ -64,7 +64,7 @@ def update_skill(skill_id):
     skill = Skill.query.get_or_404(skill_id)
     data = request.get_json(silent=True) or {}
     for field in ("name", "description", "version", "author", "category",
-                  "prompt_template"):
+                  "prompt_template", "input_spec", "output_spec", "starter_prompt"):
         if field in data:
             value = data[field]
             if field in ("name", "version") and not (value or "").strip():
@@ -112,6 +112,65 @@ def deactivate(skill_id):
     """Самостійне вилучення навички користувачем (знімає її з «встановлених»)."""
     count = skill_service.self_deactivate(current_user().id, skill_id)
     return jsonify({"message": "Навичку вилучено", "activations_count": count})
+
+
+# ----------------------------- Зворотний зв'язок -----------------------------
+
+@bp.post("/<int:skill_id>/feedback")
+@require_auth
+def submit_feedback(skill_id):
+    """Користувач надсилає повідомлення (фідбек) щодо навички."""
+    skill = Skill.query.get_or_404(skill_id)
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    if not message:
+        raise ApiError("Повідомлення не може бути порожнім", 400, "validation_error")
+    if len(message) > 5000:
+        raise ApiError("Повідомлення завелике (максимум 5000 символів)",
+                       400, "validation_error")
+    user = current_user()
+    fb = SkillFeedback(
+        skill_id=skill.id, skill_name=skill.name, skill_version=skill.version,
+        user_id=user.id, username=user.full_name or user.username, message=message,
+    )
+    db.session.add(fb)
+    db.session.commit()
+    return jsonify({"message": "Дякуємо! Повідомлення надіслано.", "id": fb.id}), 201
+
+
+@bp.get("/feedback")
+@require_global_role("admin", "skill_manager")
+def list_feedback():
+    """Перелік фідбеку. `?filter=new` — лише непрочитані."""
+    query = SkillFeedback.query
+    if request.args.get("filter") == "new":
+        query = query.filter_by(is_read=False)
+    items = query.order_by(SkillFeedback.created_at.desc()).all()
+    unread = SkillFeedback.query.filter_by(is_read=False).count()
+    return jsonify({"items": [f.to_dict() for f in items], "unread": unread})
+
+
+@bp.get("/feedback/unread-count")
+@require_global_role("admin", "skill_manager")
+def feedback_unread_count():
+    return jsonify({"unread": SkillFeedback.query.filter_by(is_read=False).count()})
+
+
+@bp.post("/feedback/<int:feedback_id>/read")
+@require_global_role("admin", "skill_manager")
+def mark_feedback_read(feedback_id):
+    fb = SkillFeedback.query.get_or_404(feedback_id)
+    fb.is_read = True
+    db.session.commit()
+    return jsonify(fb.to_dict())
+
+
+@bp.post("/feedback/read-all")
+@require_global_role("admin", "skill_manager")
+def mark_all_feedback_read():
+    SkillFeedback.query.filter_by(is_read=False).update({SkillFeedback.is_read: True})
+    db.session.commit()
+    return jsonify({"message": "Усі повідомлення позначено прочитаними"})
 
 
 @bp.post("/<int:skill_id>/run")
@@ -265,7 +324,8 @@ def delete_skill(skill_id):
 
     UserSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
     GroupSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
-    for model in (ChatSession, ChatMessage, TokenUsageLog, UserFile):
+    # Фідбек зберігаємо (знімок назви/версії), лише відв'язуємо від навички.
+    for model in (ChatSession, ChatMessage, TokenUsageLog, UserFile, SkillFeedback):
         model.query.filter_by(skill_id=skill_id).update(
             {model.skill_id: None}, synchronize_session=False)
 

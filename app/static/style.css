@@ -356,10 +356,11 @@ th { color: var(--muted); font-weight: 500; }
   -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%);
   border: 1px solid var(--glass-border);
   border-radius: 16px; padding: 22px 18px 18px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow); cursor: pointer;
   transition: transform .15s ease, box-shadow .15s ease;
 }
 .cat-card:hover { transform: translateY(-3px); box-shadow: 0 22px 50px rgba(0,0,0,0.5); }
+.cat-card:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
 
 .cat-logo {
   width: 64px; height: 64px; margin: 2px 0 12px;
@@ -377,9 +378,11 @@ th { color: var(--muted); font-weight: 500; }
 
 .cat-name { margin: 0 0 8px; font-size: 17px; font-weight: 700; line-height: 1.2; }
 .cat-meta {
-  display: flex; flex-direction: column; align-items: center; gap: 5px; margin-bottom: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 7px; margin-bottom: 12px;
 }
-.cat-meta .cat-sub { font-size: 12px; color: var(--muted); }
+/* «Версія: … / Автор: …» — два рядки */
+.cat-va { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--muted); }
+.cat-va b { color: var(--text); font-weight: 600; }
 
 .cat-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
 .cat-more {
@@ -412,6 +415,80 @@ body.theme-material .catalog-search input {
 body.theme-material .cat-install { background: #1a73e8; }
 body.theme-material .cat-install:hover { background: #1765cc; }
 body.theme-material .cat-remove { background: #d93025; }
+
+/* ===== Детальна картка навички (модалка) ===== */
+.sm-modal { max-width: 640px; max-height: 88vh; overflow-y: auto; display: flex; flex-direction: column; }
+.sm-head { align-items: flex-start; gap: 12px; }
+.sm-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.sm-title h2 { margin: 0 0 6px; }
+.sm-logo { flex: 0 0 auto; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; }
+.sm-logo-img { width: 52px; height: 52px; object-fit: contain; border-radius: 12px; }
+.sm-logo-default {
+  width: 52px; height: 52px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #7c5cff, #e35cc8);
+}
+.sm-logo-default svg { width: 26px; height: 26px; fill: #fff; }
+.sm-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 12.5px; }
+.sm-meta b { color: var(--text); }
+
+.sm-body { margin: 16px 0 6px; }
+.sm-desc { margin: 0 0 14px; line-height: 1.55; }
+.sm-attr {
+  display: grid; grid-template-columns: 160px 1fr; gap: 10px;
+  padding: 10px 0; border-top: 1px solid var(--border);
+}
+.sm-attr-k { font-weight: 600; font-size: 13.5px; color: var(--muted); }
+.sm-attr-v { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+@media (max-width: 560px) { .sm-attr { grid-template-columns: 1fr; gap: 3px; } }
+
+.sm-actions { margin: 8px 0 2px; }
+.sm-actions .cat-btn { width: 100%; margin-top: 0; }
+.sm-feedback h3 { margin: 4px 0 4px; }
+.sm-feedback textarea { min-height: 70px; }
+
+/* ===== Задача 2: синя смуга до лівого краю + адаптований логотип (Material) =====
+   (--bg темніший фон і .sidebar без правого бордера задано в основному блоці
+   теми Material нижче, щоб не перекривалися його ж правилами) */
+body.theme-material .topbar { height: 60px; }
+body.theme-material .side-brand {
+  height: 60px; margin: 0 -14px 12px; padding: 0 18px;
+  background: #1a73e8; color: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.22);
+}
+body.theme-material .side-brand span { color: #fff; }
+body.theme-material .side-brand .brand-mark path { stroke: #fff; }
+
+/* ===== Зворотний зв'язок (Управління навичками) ===== */
+.fb-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.fb-head h2 { margin: 0; display: flex; align-items: center; gap: 10px; }
+.fb-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
+  background: var(--danger); color: #fff; font-size: 12px; font-weight: 700;
+}
+.fb-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fb-tabs { display: flex; gap: 4px; background: var(--glass-2); border: 1px solid var(--glass-border); border-radius: 10px; padding: 3px; }
+.fb-tab { background: transparent; color: var(--muted); padding: 6px 14px; border-radius: 8px; font-size: 13px; }
+.fb-tab:hover { background: rgba(127,127,127,0.12); color: var(--text); }
+.fb-tab.active { background: var(--accent); color: #fff; }
+body.theme-material .fb-tab.active { background: #1a73e8; }
+
+.fb-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.fb-item {
+  border: 1px solid var(--border); border-left: 3px solid var(--border);
+  border-radius: 10px; padding: 12px 14px; background: var(--glass-2);
+}
+.fb-item.fb-new { border-left-color: var(--accent-2); background: rgba(99,102,241,0.08); }
+body.theme-material .fb-item.fb-new { background: #e8f0fe; border-left-color: #1a73e8; }
+.fb-line-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.fb-dt { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px; font-weight: 600; }
+.fb-tag { font-size: 11px; font-weight: 700; color: #fff; background: var(--accent-2); padding: 1px 8px; border-radius: 999px; }
+body.theme-material .fb-tag { background: #1a73e8; }
+.fb-sub { font-size: 13px; color: var(--muted); }
+.fb-sub b { color: var(--text); }
+.fb-text { margin-top: 8px; white-space: pre-wrap; line-height: 1.5; }
+.fb-item-actions { margin-top: 10px; }
 
 /* ===== Управління категоріями (чипси) ===== */
 .cat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -758,7 +835,7 @@ body.theme-light .file-link { color: #4f46e5; }
 
 /* ===== Material Design (Google) — світлий режим ===== */
 body.theme-material {
-  --bg: #f1f3f4;
+  --bg: #e6e8ec;  /* задача 1: сіруватий фон чуть темніший */
   --panel: #ffffff;
   --panel-2: #f8f9fa;
   --border: #dadce0;
@@ -784,7 +861,9 @@ body.theme-material textarea {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
 body.theme-material .card { border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 8px; }
-body.theme-material .sidebar { background: #fff; border-right: 1px solid var(--border); }
+/* задача 2: прибираємо правий бордер і верхній відступ, щоб синя смуга бренду
+   доходила до верху/лівого краю; розділення сайдбару — контрастом кольорів */
+body.theme-material .sidebar { background: #fff; border-right: none; padding-top: 0; }
 
 /* Синій верхній апбар (як на скріншоті) */
 body.theme-material .topbar {

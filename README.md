@@ -415,6 +415,10 @@ smart-digital-skills/
 | GET | `/skills/{id}/files` | Перелік файлів у пакеті | авторизовані |
 | DELETE | `/skills/{id}` | Видалення навички + всіх зв'язків з групами/користувачами | Admin/Skill Manager |
 | POST | `/skills/{id}/run` | Запуск навички (LLM або виконання коду) | авторизовані з доступом |
+| POST | `/skills/{id}/feedback` | Надіслати відгук про навичку | авторизовані |
+| GET | `/skills/feedback` | Перелік відгуків (`?filter=new`) + к-сть непрочитаних | Admin/Skill Manager |
+| POST | `/skills/feedback/{id}/read` | Позначити відгук прочитаним | Admin/Skill Manager |
+| POST | `/skills/feedback/read-all` | Позначити всі прочитаними | Admin/Skill Manager |
 | GET | `/categories` | Список категорій навичок | авторизовані |
 | POST | `/categories` | Створення категорії | Admin/Skill Manager |
 | DELETE | `/categories/{id}` | Видалення категорії | Admin/Skill Manager |

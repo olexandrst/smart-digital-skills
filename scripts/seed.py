@@ -120,6 +120,10 @@ def seed():
                 "model_id": llm.id,
                 "prompt_template": "Зроби стислий підсумок тексту мовою {language}:\n\n{text}",
                 "parameters": json.dumps({"temperature": 0.3}),
+                "input_spec": "Будь-який текст (стаття, лист, нотатки) та, опційно, "
+                              "мова відповіді.",
+                "output_spec": "Стислий підсумок наданого тексту в кілька речень.",
+                "starter_prompt": "Підсумуй, будь ласка, цей текст українською:",
                 "status": "published",
                 "published_at": datetime.utcnow(),
                 "version": "1.0.0",

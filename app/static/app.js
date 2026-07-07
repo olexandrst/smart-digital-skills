@@ -612,7 +612,8 @@ async function viewCatalog() {
   const [all, mine] = await Promise.all([api("/skills"), api("/skills/mine")]);
   const published = all
     .filter(s => s.status === "published")
-    .sort((a, b) => pubTime(b) - pubTime(a));  // новіші — зверху
+    // 1) за популярністю (активації), 2) за новизною (дата публікації).
+    .sort((a, b) => (b.activations_count - a.activations_count) || (pubTime(b) - pubTime(a)));
   catalogState.skills = published;
   catalogState.mineIds = new Set(mine.map(s => s.id));
   catalogState.expanded = new Set();
@@ -657,62 +658,151 @@ function renderCatalogGrid() {
   list.forEach(s => grid.appendChild(catalogCard(s)));
 }
 
+function skillLogo(s, cls) {
+  return s.has_icon
+    ? `<img class="${cls}-img" src="${esc(s.icon_url)}" alt="${esc(s.name)}">`
+    : `<span class="${cls}-default">${DEFAULT_SKILL_ICON}</span>`;
+}
+
+// Виконує встановлення/вилучення; оновлює стан і повертає новий статус.
+async function toggleInstall(s) {
+  const installed = catalogState.mineIds.has(s.id);
+  const action = installed ? "deactivate" : "activate";
+  const res = await api(`/skills/${s.id}/${action}`, { method: "POST" });
+  if (installed) catalogState.mineIds.delete(s.id);
+  else catalogState.mineIds.add(s.id);
+  const local = catalogState.skills.find(x => x.id === s.id);
+  if (local && res && typeof res.activations_count === "number") {
+    local.activations_count = res.activations_count;
+  }
+  return !installed;
+}
+
+function installBtnHtml(installed) {
+  return installed
+    ? `Вилучити`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4 6.3 11.7l1.4-1.4L11 13.6V3h1Zm-7 15h14v2H5v-2Z"/></svg>Встановити`;
+}
+
 function catalogCard(s) {
   const installed = catalogState.mineIds.has(s.id);
-  const logo = s.has_icon
-    ? `<img class="cat-logo-img" src="${esc(s.icon_url)}" alt="${esc(s.name)}">`
-    : `<span class="cat-logo-default">${DEFAULT_SKILL_ICON}</span>`;
+  const desc = s.description || "";
+  const shortDesc = desc.length > DESC_PREVIEW_LEN
+    ? desc.slice(0, DESC_PREVIEW_LEN).trimEnd() + "…" : desc;
 
-  const card = el(`<div class="cat-card">
-    <div class="cat-logo">${logo}</div>
+  const card = el(`<div class="cat-card" tabindex="0" role="button" title="Детальніше про навичку">
+    <div class="cat-logo">${skillLogo(s, "cat-logo")}</div>
     <h3 class="cat-name">${esc(s.name)}</h3>
     <div class="cat-meta">
       <span class="badge cat-cat">${esc(s.category || "Загальне")}</span>
-      <span class="cat-sub">v${esc(s.version)} · ${esc(s.author || "—")}</span>
+      <div class="cat-va">
+        <span>Версія: <b>${esc(s.version)}</b></span>
+        <span>Автор: <b>${esc(s.author || "—")}</b></span>
+      </div>
     </div>
-    <div class="cat-desc"></div>
-    <button class="cat-btn ${installed ? "cat-remove" : "cat-install"}" data-id="${s.id}">
-      ${installed
-        ? `Вилучити`
-        : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v10.6l3.3-3.3 1.4 1.4L12 17.4 6.3 11.7l1.4-1.4L11 13.6V3h1Zm-7 15h14v2H5v-2Z"/></svg>Встановити`}
-    </button>
+    <div class="cat-desc">${esc(shortDesc)}</div>
+    <button class="cat-btn ${installed ? "cat-remove" : "cat-install"}">${installBtnHtml(installed)}</button>
   </div>`);
 
-  renderCatDesc(card.querySelector(".cat-desc"), s);
-
-  card.querySelector(".cat-btn").addEventListener("click", async () => {
-    const action = installed ? "deactivate" : "activate";
+  const btn = card.querySelector(".cat-btn");
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();  // не відкривати модалку
     try {
-      const res = await api(`/skills/${s.id}/${action}`, { method: "POST" });
-      toast(installed ? "Навичку вилучено" : "Навичку встановлено");
-      if (installed) catalogState.mineIds.delete(s.id);
-      else catalogState.mineIds.add(s.id);
-      // Оновлюємо лічильник активацій локально й перемальовуємо картки.
-      const local = catalogState.skills.find(x => x.id === s.id);
-      if (local && res && typeof res.activations_count === "number") {
-        local.activations_count = res.activations_count;
-      }
+      const nowInstalled = await toggleInstall(s);
+      toast(nowInstalled ? "Навичку встановлено" : "Навичку вилучено");
       renderCatalogGrid();
     } catch (err) { toast(err.message, "err"); }
+  });
+  // Клік по плитці (не по кнопці) — відкриває детальну картку.
+  card.addEventListener("click", () => openSkillModal(s.id));
+  card.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openSkillModal(s.id); }
   });
   return card;
 }
 
-// Опис із «розумною» обрізкою + перемикач «докладніше/згорнути».
-function renderCatDesc(box, s) {
-  const full = s.description || "";
-  const isLong = full.length > DESC_PREVIEW_LEN;
-  const expanded = catalogState.expanded.has(s.id);
-  if (!isLong) { box.textContent = full; return; }
-  const shown = expanded ? full : full.slice(0, DESC_PREVIEW_LEN).trimEnd() + "…";
-  box.textContent = shown + " ";
-  const toggle = el(`<button class="cat-more">${expanded ? "згорнути" : "докладніше"}</button>`);
-  toggle.addEventListener("click", () => {
-    if (expanded) catalogState.expanded.delete(s.id);
-    else catalogState.expanded.add(s.id);
-    renderCatDesc(box, s);
+// Детальна картка навички: усі атрибути + форма зворотного зв'язку.
+async function openSkillModal(skillId) {
+  let s;
+  try { s = await api(`/skills/${skillId}`); }
+  catch (err) { toast(err.message, "err"); return; }
+  const installed = catalogState.mineIds.has(s.id);
+
+  const attr = (label, value) => value && value.trim()
+    ? `<div class="sm-attr"><div class="sm-attr-k">${esc(label)}</div><div class="sm-attr-v">${esc(value)}</div></div>`
+    : "";
+  const inputsList = (s.inputs && s.inputs.length)
+    ? `<div class="sm-attr"><div class="sm-attr-k">Параметри</div><div class="sm-attr-v">${
+        s.inputs.map(i => `<span class="badge">${esc(i.label || i.name)}${i.is_required ? " *" : ""}</span>`).join(" ")
+      }</div></div>` : "";
+
+  const overlay = el(`<div class="modal-overlay" id="skill-modal">
+    <div class="modal sm-modal">
+      <div class="modal-head sm-head">
+        <div class="sm-title">
+          <span class="sm-logo">${skillLogo(s, "sm-logo")}</span>
+          <div>
+            <h2>${esc(s.name)}</h2>
+            <div class="sm-meta">
+              <span class="badge">${esc(s.category || "Загальне")}</span>
+              <span class="muted">Версія: <b>${esc(s.version)}</b> · Автор: <b>${esc(s.author || "—")}</b></span>
+              <span class="muted">Активацій: ${s.activations_count}</span>
+            </div>
+          </div>
+        </div>
+        <button class="modal-x" id="sm-close" aria-label="Закрити">×</button>
+      </div>
+      <div class="sm-body">
+        <p class="sm-desc">${esc(s.description || "")}</p>
+        ${attr("Вхідні дані", s.input_spec)}
+        ${attr("Результат роботи", s.output_spec)}
+        ${attr("Стартовий промпт", s.starter_prompt)}
+        ${inputsList}
+      </div>
+      <div class="sm-actions">
+        <button class="cat-btn ${installed ? "cat-remove" : "cat-install"}" id="sm-install">${installBtnHtml(installed)}</button>
+      </div>
+      <hr class="md-hr">
+      <div class="sm-feedback">
+        <h3>Зворотний зв'язок</h3>
+        <p class="muted">Знайшли проблему чи маєте пропозицію? Напишіть — повідомлення отримає команда навичок.</p>
+        <textarea id="sm-fb-text" placeholder="Ваше повідомлення…" rows="3"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button id="sm-fb-send">Надіслати</button>
+        </div>
+      </div>
+    </div>
+  </div>`);
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector("#sm-close").addEventListener("click", close);
+
+  const installBtn = overlay.querySelector("#sm-install");
+  installBtn.addEventListener("click", async () => {
+    try {
+      const nowInstalled = await toggleInstall(s);
+      toast(nowInstalled ? "Навичку встановлено" : "Навичку вилучено");
+      installBtn.className = `cat-btn ${nowInstalled ? "cat-remove" : "cat-install"}`;
+      installBtn.innerHTML = installBtnHtml(nowInstalled);
+      renderCatalogGrid();
+    } catch (err) { toast(err.message, "err"); }
   });
-  box.appendChild(toggle);
+
+  const sendBtn = overlay.querySelector("#sm-fb-send");
+  sendBtn.addEventListener("click", async () => {
+    const text = overlay.querySelector("#sm-fb-text").value.trim();
+    if (!text) { toast("Введіть повідомлення", "err"); return; }
+    sendBtn.disabled = true;
+    try {
+      await api(`/skills/${s.id}/feedback`, { method: "POST", body: { message: text } });
+      toast("Дякуємо! Повідомлення надіслано.");
+      close();
+    } catch (err) { toast(err.message, "err"); sendBtn.disabled = false; }
+  });
 }
 
 // ---------- Файли користувача ----------
@@ -845,10 +935,71 @@ async function addCategory() {
   } catch (err) { toast(err.message, "err"); }
 }
 
+// Зворотний зв'язок: формат дати DD-MM-YYYY HH:MM.
+let manageFbFilter = "new";
+function fmtFeedbackDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function renderFeedback() {
+  const listEl = $("#fb-list");
+  if (!listEl) return;
+  let data;
+  try { data = await api(`/skills/feedback?filter=${manageFbFilter}`); }
+  catch (err) { listEl.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
+
+  const badge = $("#fb-unread");
+  badge.textContent = data.unread || "";
+  badge.classList.toggle("hidden", !data.unread);
+  document.querySelectorAll(".fb-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.f === manageFbFilter));
+
+  if (!data.items.length) {
+    listEl.innerHTML = `<p class="muted">${manageFbFilter === "new"
+      ? "Нових повідомлень немає." : "Повідомлень ще немає."}</p>`;
+    return;
+  }
+  listEl.innerHTML = "";
+  data.items.forEach(f => {
+    const item = el(`<div class="fb-item ${f.is_read ? "" : "fb-new"}">
+      <div class="fb-line-top">
+        <span class="fb-dt">${esc(fmtFeedbackDate(f.created_at))}</span>
+        ${f.is_read ? "" : `<span class="fb-tag">Нове</span>`}
+      </div>
+      <div class="fb-sub">Навичка: <b>${esc(f.skill_name)}</b>. Версія: ${esc(f.skill_version || "—")}</div>
+      <div class="fb-sub">Користувач: ${esc(f.username || "—")}</div>
+      <div class="fb-text">${esc(f.message)}</div>
+      ${f.is_read ? "" : `<div class="fb-item-actions"><button class="small ghost fb-mark">Позначити прочитаним</button></div>`}
+    </div>`);
+    const mark = item.querySelector(".fb-mark");
+    if (mark) mark.addEventListener("click", async () => {
+      try { await api(`/skills/feedback/${f.id}/read`, { method: "POST" }); renderFeedback(); }
+      catch (err) { toast(err.message, "err"); }
+    });
+    listEl.appendChild(item);
+  });
+}
+
 async function viewManageSkills() {
   const skills = await api("/skills");
   const view = $("#view");
   view.innerHTML = `
+    <div class="card" id="fb-card">
+      <div class="fb-head">
+        <h2>Зворотний зв'язок <span id="fb-unread" class="fb-badge hidden"></span></h2>
+        <div class="fb-controls">
+          <div class="fb-tabs">
+            <button class="fb-tab" data-f="new">Нові</button>
+            <button class="fb-tab" data-f="all">Усі</button>
+          </div>
+          <button class="small ghost" id="fb-read-all">Позначити всі прочитаними</button>
+        </div>
+      </div>
+      <div id="fb-list" class="fb-list"></div>
+    </div>
     <div class="card">
       <h2>Завантажити нову навичку</h2>
       <p class="muted">Архів <code>.zip</code> або <code>.skill</code> зі <code>skill.md</code> (назва, версія, автор, опис, категорія) та файлами. Нова навичка отримує статус <b>«Не опублікована»</b>.</p>
@@ -872,6 +1023,15 @@ async function viewManageSkills() {
   renderCategoryChips();
   $("#cat-add").addEventListener("click", addCategory);
   $("#cat-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCategory(); });
+
+  // Зворотний зв'язок від користувачів.
+  document.querySelectorAll(".fb-tab").forEach(b =>
+    b.addEventListener("click", () => { manageFbFilter = b.dataset.f; renderFeedback(); }));
+  $("#fb-read-all").addEventListener("click", async () => {
+    try { await api("/skills/feedback/read-all", { method: "POST" }); renderFeedback(); }
+    catch (err) { toast(err.message, "err"); }
+  });
+  renderFeedback();
 
   $("#sk-upload").addEventListener("click", async () => {
     const file = $("#sk-file").files[0];
@@ -981,6 +1141,9 @@ async function openSkillEditor(skillId) {
         </div>
       </div>
       <div class="field"><label>Опис</label><textarea id="se-desc">${esc(s.description || "")}</textarea></div>
+      <div class="field"><label>Вхідні дані</label><textarea id="se-input" placeholder="Що подавати на вхід навички">${esc(s.input_spec || "")}</textarea></div>
+      <div class="field"><label>Результат роботи</label><textarea id="se-output" placeholder="Що навичка повертає на виході">${esc(s.output_spec || "")}</textarea></div>
+      <div class="field"><label>Стартовий промпт</label><textarea id="se-starter" placeholder="Приклад стартового промпту для користувача">${esc(s.starter_prompt || "")}</textarea></div>
       <div class="row">
         <button id="se-save">Зберегти</button>
         <button id="se-close" class="ghost">Закрити</button>
@@ -1041,6 +1204,8 @@ async function openSkillEditor(skillId) {
         name: $("#se-name").value, version: $("#se-version").value,
         author: $("#se-author").value, category: $("#se-category").value,
         description: $("#se-desc").value,
+        input_spec: $("#se-input").value, output_spec: $("#se-output").value,
+        starter_prompt: $("#se-starter").value,
       }});
       toast("Атрибути навички збережено"); openTab("manage-skills");
     } catch (err) { toast(err.message, "err"); }
