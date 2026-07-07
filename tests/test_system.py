@@ -20,17 +20,6 @@ def test_set_system_model_unique(client):
     assert len(systems) == 1 and systems[0]["id"] == mid
 
 
-def test_set_system_requires_llm(client):
-    admin = login(client, "admin", "Admin123!")
-    # створимо cv-модель і спробуємо зробити системною
-    cv = client.post("/api/models", headers=auth(admin), json={
-        "name": "cv1", "provider": "azure_ai_foundry", "model_type": "cv",
-        "deployment_name": "cv1"}).get_json()
-    res = client.post(f"/api/models/{cv['id']}/system", headers=auth(admin),
-                      json={"is_system": True})
-    assert res.status_code == 400
-
-
 def test_chat_naming_and_system_accounting(client, app):
     admin = login(client, "admin", "Admin123!")
     mid = _llm_model_id()

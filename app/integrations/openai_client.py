@@ -5,10 +5,12 @@ from app.integrations.base import LLMResponse, mock_chat_response, build_http_cl
 class OpenAIClient:
     provider_label = "OpenAI"
 
-    def __init__(self, api_key="", base_url="", use_mock=True):
+    def __init__(self, api_key="", base_url="", use_mock=True, label=None):
         self.api_key = api_key
         self.base_url = base_url or None
         self.use_mock = use_mock or not api_key
+        if label:
+            self.provider_label = label
 
     def complete(self, model_name, prompt, parameters=None):
         return self.chat(model_name, [{"role": "user", "content": prompt}], parameters)

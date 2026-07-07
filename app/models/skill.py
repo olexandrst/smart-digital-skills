@@ -12,9 +12,11 @@ class Model(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String, nullable=False)
-    model_type = db.Column(db.String, nullable=False)  # llm | cv
+    model_type = db.Column(db.String, nullable=False, default="llm")  # завжди llm
     provider = db.Column(db.String, nullable=False, default="azure_ai_foundry")
     deployment_name = db.Column(db.String, nullable=False)
+    # Базовий URL API (для локальних моделей Ollama/LM Studio та OpenAI-сумісних).
+    base_url = db.Column(db.String)
     api_version = db.Column(db.String)
     context_window = db.Column(db.Integer)
     config = db.Column(db.Text)  # JSON
@@ -30,6 +32,7 @@ class Model(db.Model):
             "model_type": self.model_type,
             "provider": self.provider,
             "deployment_name": self.deployment_name,
+            "base_url": self.base_url,
             "is_system": self.is_system,
             "api_version": self.api_version,
             "context_window": self.context_window,

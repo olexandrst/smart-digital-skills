@@ -80,3 +80,46 @@ def test_azure_resource_base_normalizes_full_path():
     assert f(root) == root
     assert f("mih.openai.azure.com/openai/v1") == "https://mih.openai.azure.com"
     assert f("") == ""
+
+
+# ---------- Локальні моделі (Ollama / LM Studio) + прибраний тип ----------
+
+def test_local_provider_available_and_synonyms(client):
+    token = login(client, "admin", "Admin123!")
+    for prov in ("local", "ollama", "lmstudio"):
+        res = client.get(f"/api/models/available?provider={prov}", headers=auth(token))
+        assert res.status_code == 200
+        d = res.get_json()
+        assert d["provider"] == "local"
+        assert isinstance(d["models"], list) and d["models"]
+
+
+def test_create_local_model_with_base_url(client):
+    token = login(client, "admin", "Admin123!")
+    res = client.post("/api/models", headers=auth(token), json={
+        "name": "Local Llama", "provider": "ollama",
+        "deployment_name": "llama3.1", "base_url": "http://localhost:11434/v1"})
+    assert res.status_code == 201
+    d = res.get_json()
+    assert d["provider"] == "local"
+    assert d["base_url"] == "http://localhost:11434/v1"
+    assert d["model_type"] == "llm"
+
+    mdl = Model.query.get(d["id"])
+    from app.integrations import get_client_for_model
+    client_obj = get_client_for_model(mdl)  # має піднятися без помилок
+    assert client_obj is not None
+
+
+def test_create_model_without_type_defaults_llm(client):
+    token = login(client, "admin", "Admin123!")
+    res = client.post("/api/models", headers=auth(token), json={
+        "name": "NoType", "provider": "openai", "deployment_name": "gpt-4o"})
+    assert res.status_code == 201
+    assert res.get_json()["model_type"] == "llm"
+
+
+def test_providers_include_local(client):
+    token = login(client, "admin", "Admin123!")
+    provs = client.get("/api/models/providers", headers=auth(token)).get_json()
+    assert "local" in provs
