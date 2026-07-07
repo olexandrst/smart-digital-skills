@@ -51,6 +51,10 @@ class Skill(db.Model):
     model_id = db.Column(db.Integer, db.ForeignKey("models.id"))  # nullable: пакетам не потрібен
     prompt_template = db.Column(db.Text)
     parameters = db.Column(db.Text)  # JSON: temperature, top_p
+    # Описові атрибути для каталогу (показуються у детальній картці):
+    input_spec = db.Column(db.Text)      # «Вхідні дані»
+    output_spec = db.Column(db.Text)     # «Результат роботи»
+    starter_prompt = db.Column(db.Text)  # «Стартовий промпт»
     # Поля для скілів-пакетів:
     runtime = db.Column(db.String)          # напр. 'python'
     entrypoint = db.Column(db.String)       # шлях до файлу запуску відносно кореня пакета
@@ -89,6 +93,9 @@ class Skill(db.Model):
             # URL іконки з версійним параметром для скидання кешу браузера.
             "icon_url": (f"/api/skills/{self.id}/icon?v={icon_ver}"
                          if self.icon_path else None),
+            "input_spec": self.input_spec,
+            "output_spec": self.output_spec,
+            "starter_prompt": self.starter_prompt,
             "status": self.status,
             "version": self.version,
             "activations_count": self.activations_count,
@@ -111,6 +118,38 @@ class SkillCategory(db.Model):
 
     def to_dict(self):
         return {"id": self.id, "name": self.name}
+
+
+class SkillFeedback(db.Model):
+    """Зворотний зв'язок користувача щодо навички (надходить у «Управління навичками»).
+
+    Назву навички, версію та логін зберігаємо знімком, щоб повідомлення лишалось
+    читабельним навіть після зміни/видалення навички чи користувача.
+    """
+    __tablename__ = "skill_feedback"
+
+    id = db.Column(db.Integer, primary_key=True)
+    skill_id = db.Column(db.Integer, db.ForeignKey("skills.id", ondelete="SET NULL"))
+    skill_name = db.Column(db.String, nullable=False)
+    skill_version = db.Column(db.String)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    username = db.Column(db.String)
+    message = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "skill_id": self.skill_id,
+            "skill_name": self.skill_name,
+            "skill_version": self.skill_version,
+            "user_id": self.user_id,
+            "username": self.username,
+            "message": self.message,
+            "is_read": self.is_read,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
 
 
 class SkillInput(db.Model):
