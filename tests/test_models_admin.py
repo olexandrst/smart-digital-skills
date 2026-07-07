@@ -69,3 +69,14 @@ def test_available_models_requires_admin(client):
     token = login(client, "u1", "pass")
     res = client.get("/api/models/available?provider=openai", headers=auth(token))
     assert res.status_code == 403
+
+
+def test_azure_resource_base_normalizes_full_path():
+    """Повний URL запиту зводиться до кореня ресурсу (щоб не подвоювати шлях)."""
+    from app.integrations.base import azure_resource_base as f
+    root = "https://mih-we-cnt-iuic-d-oai-01.openai.azure.com"
+    assert f(root + "/openai/v1/chat/completions") == root
+    assert f(root + "/") == root
+    assert f(root) == root
+    assert f("mih.openai.azure.com/openai/v1") == "https://mih.openai.azure.com"
+    assert f("") == ""

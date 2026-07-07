@@ -9,7 +9,7 @@ fallback-список, щоб функція була корисною й без
 from flask import current_app
 
 from app.integrations import normalize_provider
-from app.integrations.base import build_http_client
+from app.integrations.base import build_http_client, azure_resource_base
 
 # Курований запасний список (мок / відсутній ключ).
 _FALLBACK = {
@@ -65,29 +65,40 @@ def _openai_models(api_key, base_url):
 
 
 def _azure_models(endpoint, api_key, api_version):
-    """Для Azure найкорисніші — назви деплойментів (саме їх треба у чаті).
+    """Список моделей/деплойментів Azure. Стійкий до різних поверхонь API.
 
-    Спершу пробуємо data-plane список деплойментів, а якщо не вдалося —
-    базові моделі ресурсу.
+    Endpoint зводимо до кореня ресурсу (щоб пастинг повного шляху не ламав URL)
+    і по черзі пробуємо: новий v1 API (`/openai/v1/models`), потім класичний
+    список деплойментів і базових моделей. Перший успіх повертаємо.
     """
-    base = endpoint.rstrip("/")
-    url = f"{base}/openai/deployments?api-version={api_version}"
+    base = azure_resource_base(endpoint)
+    headers = {"api-key": api_key}
+    candidates = [
+        f"{base}/openai/v1/models",                              # новий v1 API (GA)
+        f"{base}/openai/v1/models?api-version=preview",          # v1 (preview)
+        f"{base}/openai/deployments?api-version={api_version}",  # класичні деплойменти
+        f"{base}/openai/models?api-version={api_version}",       # базові моделі ресурсу
+    ]
     client = build_http_client()
     if client is not None:
         try:
-            resp = client.get(url, headers={"api-key": api_key})
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
-            ids = sorted({d.get("id") for d in data if d.get("id")})
-            if ids:
-                return ids
-        except Exception:
-            pass  # тихий фолбек на базові моделі ресурсу
+            for url in candidates:
+                try:
+                    resp = client.get(url, headers=headers)
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json().get("data", [])
+                    ids = sorted({d.get("id") for d in data if d.get("id")})
+                    if ids:
+                        return ids
+                except Exception:
+                    continue
         finally:
             client.close()
 
+    # Остаточний фолбек — через openai SDK (класичний Azure API).
     from openai import AzureOpenAI
-    az = AzureOpenAI(azure_endpoint=endpoint, api_key=api_key,
+    az = AzureOpenAI(azure_endpoint=base, api_key=api_key,
                      api_version=api_version, http_client=build_http_client())
     return sorted({m.id for m in az.models.list().data})
 

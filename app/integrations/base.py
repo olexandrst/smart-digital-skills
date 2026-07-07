@@ -1,5 +1,21 @@
 """Спільні примітиви для LLM-провайдерів."""
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+
+
+def azure_resource_base(endpoint):
+    """Зводить Azure endpoint до кореня ресурсу `https://<host>` (без шляху).
+
+    Користувачі часто вставляють повний URL запиту (напр.
+    `…/openai/v1/chat/completions`). Для openai SDK потрібен ЛИШЕ корінь ресурсу,
+    інакше шлях подвоюється й повертається 404 «Resource not found».
+    """
+    if not endpoint:
+        return endpoint
+    parts = urlsplit(endpoint if "://" in endpoint else "https://" + endpoint)
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return endpoint.rstrip("/")
 
 
 @dataclass
