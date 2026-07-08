@@ -6,7 +6,7 @@ from app.extensions import db
 from app.core.permissions import require_auth, require_global_role, require_group_membership
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.models import TokenUsageLog, User, Model, Skill
+from app.models import TokenUsageLog, User, Model, Skill, Group
 from app.services import quota_service
 
 bp = Blueprint("usage", __name__)
@@ -49,6 +49,56 @@ def _parse_dt(value, end=False):
 
 def _user_logs(user_id):
     return TokenUsageLog.query.filter_by(user_id=user_id, is_system=False)
+
+
+def _scope_money_logs(user):
+    """Базова вибірка логів для «Гроші» + опис області.
+
+    Звичайний користувач бачить лише власну статистику. Admin може дивитись
+    статистику будь-якого користувача (`?user_id=`) або цілої групи
+    (`?group_id=` — сума по активних учасниках). За замовчуванням — сам
+    поточний користувач.
+    """
+    is_admin = user.has_global_role("admin")
+    uid = request.args.get("user_id", type=int)
+    gid = request.args.get("group_id", type=int)
+
+    if not is_admin:
+        if gid or (uid and uid != user.id):
+            raise ApiError("Недостатньо прав для перегляду чужої статистики",
+                           403, "forbidden")
+        return (_user_logs(user.id),
+                {"type": "user", "user_id": user.id, "username": user.username})
+
+    if gid:
+        group = Group.query.get(gid)
+        if group is None:
+            raise ApiError("Групу не знайдено", 404, "not_found")
+        member_ids = [m.user_id for m in group.memberships if m.status == "active"]
+        base = TokenUsageLog.query.filter(
+            TokenUsageLog.is_system == False,  # noqa: E712
+            TokenUsageLog.user_id.in_(member_ids))
+        return base, {"type": "group", "group_id": group.id, "group": group.name,
+                      "members": len(member_ids)}
+
+    target = User.query.get(uid) if uid else user
+    if target is None:
+        raise ApiError("Користувача не знайдено", 404, "not_found")
+    return (_user_logs(target.id),
+            {"type": "user", "user_id": target.id, "username": target.username})
+
+
+@bp.get("/scope-options")
+@require_global_role("admin")
+def scope_options():
+    """Списки користувачів і груп для перемикача статистики «Гроші» (Admin)."""
+    users = User.query.order_by(User.username).all()
+    groups = Group.query.order_by(Group.name).all()
+    return jsonify({
+        "users": [{"id": u.id, "username": u.username, "full_name": u.full_name}
+                  for u in users],
+        "groups": [{"id": g.id, "name": g.name} for g in groups],
+    })
 
 
 @bp.get("/me")
@@ -100,16 +150,19 @@ def timeline():
 @bp.get("/money")
 @require_auth
 def money():
-    """Витрати ($) користувача: усього, за період, у розрізі моделей.
+    """Витрати ($): усього, за період, у розрізі моделей і навичок.
 
-    Період: `?from=&to=`; за замовчуванням — уся активність користувача.
+    Період: `?from=&to=`; за замовчуванням — уся активність.
+    Admin додатково: `?user_id=` (інший користувач) або `?group_id=`
+    (сума по учасниках групи). Звичайний користувач — лише власні дані.
     """
     user = current_user()
+    base, scope = _scope_money_logs(user)
     # Межі всієї активності (для дефолтного періоду в UI).
-    span = _user_logs(user.id).with_entities(
+    span = base.with_entities(
         func.min(TokenUsageLog.created_at), func.max(TokenUsageLog.created_at)).one()
 
-    q = _user_logs(user.id)
+    q = base
     dfrom, dto = _parse_dt(request.args.get("from")), _parse_dt(request.args.get("to"), end=True)
     if dfrom:
         q = q.filter(TokenUsageLog.created_at >= dfrom)
@@ -150,6 +203,7 @@ def money():
         "total_tokens": agg["total_tokens"],
         "by_model": by_model,
         "by_skill": by_skill,
+        "scope": scope,
         "activity_from": _iso(span[0]) if span[0] else None,
         "activity_to": _iso(span[1]) if span[1] else None,
     })

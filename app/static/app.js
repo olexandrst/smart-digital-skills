@@ -1687,6 +1687,9 @@ async function openUserEditor(userId) {
 // ---------- Токени ----------
 // ---------- Квота: вкладки «Токени» / «Гроші» ----------
 let moneyRange = { from: "", to: "" };
+// Область перегляду «Гроші» (лише для Admin): свій/інший користувач або група.
+let moneyScope = { mode: "user", userId: "", groupId: "" };
+let scopeOptions = null;  // кеш списків користувачів/груп для перемикача
 
 async function viewUsage() {
   const view = $("#view");
@@ -1743,7 +1746,9 @@ async function renderTokensPanel() {
 
 async function renderMoneyPanel() {
   const panel = $("#usage-panel");
+  const admin = hasRole("admin");
   panel.innerHTML = `
+    ${admin ? `<div class="card scope-card" id="scope-card"><p class="muted">Завантаження…</p></div>` : ""}
     <div class="card">
       <div class="money-head">
         <h2>Витрати</h2>
@@ -1768,14 +1773,77 @@ async function renderMoneyPanel() {
   $("#mr-reset").addEventListener("click", () => {
     moneyRange = { from: "", to: "" }; $("#mr-from").value = ""; $("#mr-to").value = ""; loadMoney();
   });
+  if (admin) await renderScopeSelector();
   loadMoney();
+}
+
+// Перемикач області (Admin): користувач ↔ група.
+async function renderScopeSelector() {
+  if (!scopeOptions) scopeOptions = await api("/usage/scope-options");
+  const card = $("#scope-card");
+  if (!card) return;
+  const isGroup = moneyScope.mode === "group";
+  card.innerHTML = `
+    <div class="scope-head">
+      <h2>Статистика для</h2>
+      <div class="seg scope-seg">
+        <button type="button" class="${isGroup ? "" : "active"}" data-mode="user">Користувача</button>
+        <button type="button" class="${isGroup ? "active" : ""}" data-mode="group">Групи</button>
+      </div>
+    </div>
+    <select id="scope-target">${scopeTargetOptions()}</select>
+    <div id="scope-info" class="muted scope-info"></div>`;
+  // Синхронізуємо стан із фактично обраним у списку значенням.
+  const sel = $("#scope-target");
+  if (isGroup) moneyScope.groupId = sel.value;
+  else moneyScope.userId = sel.value;
+
+  card.querySelectorAll(".scope-seg button").forEach(b =>
+    b.addEventListener("click", () => {
+      if (moneyScope.mode === b.dataset.mode) return;
+      moneyScope.mode = b.dataset.mode;
+      renderScopeSelector().then(loadMoney);
+    }));
+  sel.addEventListener("change", () => {
+    if (moneyScope.mode === "group") moneyScope.groupId = sel.value;
+    else moneyScope.userId = sel.value;
+    loadMoney();
+  });
+}
+
+function scopeTargetOptions() {
+  if (moneyScope.mode === "group") {
+    const groups = (scopeOptions && scopeOptions.groups) || [];
+    if (!groups.length) return `<option value="">— груп немає —</option>`;
+    const cur = moneyScope.groupId || String(groups[0].id);
+    return groups.map(g =>
+      `<option value="${g.id}" ${String(g.id) === String(cur) ? "selected" : ""}>${esc(g.name)}</option>`).join("");
+  }
+  const me = state.user && state.user.id;
+  const cur = moneyScope.userId || String(me);
+  return ((scopeOptions && scopeOptions.users) || []).map(u => {
+    const label = (u.full_name ? u.full_name + " · " : "") + u.username + (u.id === me ? " (я)" : "");
+    return `<option value="${u.id}" ${String(u.id) === String(cur) ? "selected" : ""}>${esc(label)}</option>`;
+  }).join("");
 }
 
 async function loadMoney() {
   const qs = [];
   if (moneyRange.from) qs.push("from=" + encodeURIComponent(moneyRange.from));
   if (moneyRange.to) qs.push("to=" + encodeURIComponent(moneyRange.to));
+  if (hasRole("admin")) {
+    if (moneyScope.mode === "group" && moneyScope.groupId)
+      qs.push("group_id=" + encodeURIComponent(moneyScope.groupId));
+    else if (moneyScope.userId)
+      qs.push("user_id=" + encodeURIComponent(moneyScope.userId));
+  }
   const m = await api("/usage/money" + (qs.length ? "?" + qs.join("&") : ""));
+  const si = $("#scope-info");
+  if (si && m.scope) {
+    si.textContent = m.scope.type === "group"
+      ? `Група «${m.scope.group}» · учасників: ${fmtInt(m.scope.members)}`
+      : `Користувач: ${m.scope.username}`;
+  }
   // Порожній період — за замовчуванням підставляємо межі всієї активності.
   if (!moneyRange.from && m.activity_from) $("#mr-from").value = m.activity_from.slice(0, 10);
   if (!moneyRange.to && m.activity_to) $("#mr-to").value = m.activity_to.slice(0, 10);

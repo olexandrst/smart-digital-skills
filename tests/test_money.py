@@ -1,5 +1,5 @@
 """Тести цін моделей, обліку вартості (USD) та аналітики (timeline / money)."""
-from app.models import Model, Skill, TokenUsageLog
+from app.models import Model, Skill, User, TokenUsageLog
 from app.services import quota_service
 from tests.conftest import login, auth
 
@@ -116,3 +116,78 @@ def test_money_period_filter_excludes_future(client):
     assert res["cost_total"] == 0
     # Але межі всієї активності лишаються заповненими.
     assert res["activity_from"] is not None
+
+
+# ---------- Область статистики (Admin): користувач / група ----------
+
+def _make_group(client, admin_token, name, member_usernames):
+    gid = client.post("/api/groups", headers=auth(admin_token),
+                      json={"name": name}).get_json()["id"]
+    for uname in member_usernames:
+        uid = User.query.filter_by(username=uname).first().id
+        client.post(f"/api/groups/{gid}/members", headers=auth(admin_token),
+                    json={"user_id": uid})
+    return gid
+
+
+def test_money_scope_defaults_to_self(client):
+    admin = login(client, "admin", "Admin123!")
+    _chat_once(client, admin)
+    res = client.get("/api/usage/money", headers=auth(admin)).get_json()
+    assert res["scope"] == {"type": "user", "user_id":
+                            User.query.filter_by(username="admin").first().id,
+                            "username": "admin"}
+
+
+def test_admin_can_scope_to_other_user(client):
+    admin = login(client, "admin", "Admin123!")
+    u1 = login(client, "u1", "pass")
+    _chat_once(client, u1)
+    uid = User.query.filter_by(username="u1").first().id
+    res = client.get(f"/api/usage/money?user_id={uid}", headers=auth(admin)).get_json()
+    assert res["scope"]["type"] == "user" and res["scope"]["username"] == "u1"
+    assert res["cost_total"] > 0
+
+
+def test_admin_can_scope_to_group_sum(client):
+    admin = login(client, "admin", "Admin123!")
+    u1, u2 = login(client, "u1", "pass"), login(client, "u2", "pass")
+    _chat_once(client, u1)
+    _chat_once(client, u2)
+    _chat_once(client, u2)
+    gid = _make_group(client, admin, "Команда", ["u1", "u2"])
+
+    grp = client.get(f"/api/usage/money?group_id={gid}", headers=auth(admin)).get_json()
+    assert grp["scope"] == {"type": "group", "group_id": gid,
+                            "group": "Команда", "members": 2}
+    # Сума статистик по учасниках дорівнює груповій.
+    c1 = client.get(f"/api/usage/money?user_id={User.query.filter_by(username='u1').first().id}",
+                    headers=auth(admin)).get_json()["cost_total"]
+    c2 = client.get(f"/api/usage/money?user_id={User.query.filter_by(username='u2').first().id}",
+                    headers=auth(admin)).get_json()["cost_total"]
+    assert abs(grp["cost_total"] - (c1 + c2)) < 1e-9
+    assert grp["requests"] == 3
+
+
+def test_non_admin_cannot_scope_others(client):
+    u1 = login(client, "u1", "pass")
+    other = User.query.filter_by(username="u2").first().id
+    assert client.get(f"/api/usage/money?user_id={other}",
+                      headers=auth(u1)).status_code == 403
+    assert client.get("/api/usage/money?group_id=1",
+                      headers=auth(u1)).status_code == 403
+    # Але власний user_id дозволено (це «сам користувач»).
+    me = User.query.filter_by(username="u1").first().id
+    assert client.get(f"/api/usage/money?user_id={me}",
+                      headers=auth(u1)).status_code == 200
+
+
+def test_scope_options_admin_only(client):
+    admin = login(client, "admin", "Admin123!")
+    _make_group(client, admin, "Група А", ["u1"])
+    opts = client.get("/api/usage/scope-options", headers=auth(admin)).get_json()
+    assert any(u["username"] == "u1" for u in opts["users"])
+    assert any(g["name"] == "Група А" for g in opts["groups"])
+
+    u1 = login(client, "u1", "pass")
+    assert client.get("/api/usage/scope-options", headers=auth(u1)).status_code == 403

@@ -1054,3 +1054,17 @@ body.theme-material .quota:hover { background: #f1f6fe; border-color: #1a73e8; }
   .su-head { display: none; }
   .su-runs { display: none; }
 }
+
+/* Перемикач області статистики «Гроші» (Admin) */
+.scope-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.scope-head h2 { margin: 0; }
+.scope-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px;
+  background: var(--panel-2, rgba(127,127,127,0.10)); border: 1px solid var(--border); }
+.scope-seg button { background: transparent; color: var(--muted); padding: 6px 16px;
+  border-radius: 7px; font-size: 13px; font-weight: 600; }
+.scope-seg button:hover:not(.active) { color: var(--text); background: rgba(127,127,127,0.12); }
+.scope-seg button.active { background: var(--accent); color: #fff; }
+body.theme-material .scope-seg button.active { background: #1a73e8; }
+.scope-card select { width: 100%; }
+.scope-info { margin-top: 8px; font-size: 12.5px; }
