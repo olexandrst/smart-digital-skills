@@ -37,17 +37,18 @@ def list_providers():
 @bp.get("/available")
 @require_global_role("admin")
 def available_models():
-    """Динамічний список моделей/деплойментів, доступних у провайдера.
+    """Динамічний список моделей, доступних у провайдера.
 
-    `?provider=` — провайдер (за замовч. azure_ai_foundry), `?model_type=llm|cv`.
+    `?provider=` — провайдер (за замовч. azure_ai_foundry),
+    `?base_url=` — для локальних/OpenAI-сумісних серверів (Ollama, LM Studio).
     Повертає {"provider", "source": "api|fallback", "models": [...]}.
     """
     provider = request.args.get("provider", "azure_ai_foundry")
     if (provider or "").lower().strip() not in SUPPORTED_PROVIDERS:
         raise ApiError("Невідомий provider", 400, "validation_error")
-    model_type = request.args.get("model_type", "llm")
+    base_url = (request.args.get("base_url") or "").strip() or None
     try:
-        models, source = discovery.list_available_models(provider, model_type)
+        models, source = discovery.list_available_models(provider, base_url=base_url)
     except Exception as exc:  # мережеві/авторизаційні помилки провайдера
         raise ApiError(f"Не вдалося отримати список моделей: {exc}",
                        502, "discovery_failed")
@@ -63,13 +64,10 @@ def available_models():
 def create_model():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
-    model_type = data.get("model_type")
     deployment_name = (data.get("deployment_name") or "").strip()
     provider = data.get("provider", "azure_ai_foundry")
     if not name or not deployment_name:
         raise ApiError("Вкажіть name та deployment_name", 400, "validation_error")
-    if model_type not in ("llm", "cv"):
-        raise ApiError("model_type має бути 'llm' або 'cv'", 400, "validation_error")
     if (provider or "").lower().strip() not in SUPPORTED_PROVIDERS:
         raise ApiError(
             "Невідомий provider. Дозволені: " + ", ".join(sorted(SUPPORTED_PROVIDERS)),
@@ -77,9 +75,10 @@ def create_model():
 
     model = Model(
         name=name,
-        model_type=model_type,
+        model_type="llm",  # тип моделей прибрано — усі llm
         provider=normalize_provider(provider),
         deployment_name=deployment_name,
+        base_url=(data.get("base_url") or "").strip() or None,
         api_version=data.get("api_version"),
         context_window=data.get("context_window"),
         config=json.dumps(data.get("config", {})),
@@ -94,7 +93,7 @@ def create_model():
 def update_model(model_id):
     model = Model.query.get_or_404(model_id)
     data = request.get_json(silent=True) or {}
-    for field in ("name", "deployment_name", "api_version", "context_window"):
+    for field in ("name", "deployment_name", "base_url", "api_version", "context_window"):
         if field in data:
             setattr(model, field, data[field])
     if "provider" in data:

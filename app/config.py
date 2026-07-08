@@ -43,6 +43,12 @@ class BaseConfig:
     # Google Gemini API
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+    # Локальні / OpenAI-сумісні моделі (Ollama, LM Studio — локально чи віддалено).
+    # Базовий URL береться з поля моделі; ці значення — дефолти/фолбек.
+    LOCAL_BASE_URL = os.getenv("LOCAL_BASE_URL", "http://localhost:11434/v1")
+    # Локальні сервери зазвичай не потребують ключа; openai SDK вимагає непорожній.
+    LOCAL_API_KEY = os.getenv("LOCAL_API_KEY", "local")
+
     # --- Скіли-пакети (виконання коду) ---
     # Каталог зі збереженими архівами скілів.
     SKILL_PACKAGES_DIR = os.getenv(

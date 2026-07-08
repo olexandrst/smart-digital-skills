@@ -11,7 +11,7 @@ from flask import current_app
 from app.integrations import normalize_provider
 from app.integrations.base import build_http_client, azure_resource_base
 
-# Курований запасний список (мок / відсутній ключ).
+# Курований запасний список (мок / відсутній ключ / недоступний сервер).
 _FALLBACK = {
     "azure_ai_foundry": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
                           "o4-mini", "o3-mini"],
@@ -19,29 +19,33 @@ _FALLBACK = {
                "o4-mini", "o3-mini"],
     "gemini": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash",
                "gemini-1.5-pro", "gemini-1.5-flash"],
-}
-_CV_FALLBACK = {
-    "azure_ai_foundry": ["gpt-4o", "gpt-4.1"],
-    "openai": ["gpt-4o", "gpt-4.1"],
-    "gemini": ["gemini-2.5-pro", "gemini-1.5-pro"],
+    "local": ["llama3.1", "llama3.2", "qwen2.5", "mistral", "phi3", "gemma2"],
 }
 
 
-def list_available_models(provider, model_type="llm"):
-    """Повертає (models, source): список назв моделей та джерело ('api'|'fallback')."""
+def list_available_models(provider, model_type="llm", base_url=None):
+    """Повертає (models, source): список назв моделей та джерело ('api'|'fallback').
+
+    `base_url` — для локальних/OpenAI-сумісних серверів (Ollama, LM Studio).
+    """
     cfg = current_app.config
     canonical = normalize_provider(provider)
     mock = cfg.get("LLM_MOCK", True)
 
     def fallback():
-        table = _CV_FALLBACK if model_type == "cv" else _FALLBACK
-        return table.get(canonical, []), "fallback"
+        return _FALLBACK.get(canonical, []), "fallback"
+
+    if canonical == "local":
+        url = base_url or cfg.get("LOCAL_BASE_URL", "")
+        if mock or not url:
+            return fallback()
+        return _openai_models(cfg.get("LOCAL_API_KEY", "local") or "local", url), "api"
 
     if canonical == "openai":
         key = cfg.get("OPENAI_API_KEY", "")
         if mock or not key:
             return fallback()
-        return _openai_models(key, cfg.get("OPENAI_BASE_URL", "") or None), "api"
+        return _openai_models(key, base_url or cfg.get("OPENAI_BASE_URL", "") or None), "api"
 
     if canonical == "gemini":
         key = cfg.get("GEMINI_API_KEY", "")

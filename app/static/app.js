@@ -181,38 +181,28 @@ $("#login-form").addEventListener("submit", async (e) => {
 });
 $("#logout-btn").addEventListener("click", logout);
 
-// ---------- Вендор моделі → колір ----------
-const VENDOR_LABELS = {
-  openai: "OpenAI", azure: "Azure OpenAI", gemini: "Gemini",
-  claude: "Claude", default: "Модель",
-};
-function vendorOf(model) {
-  const p = (model.provider || model.model_provider || "").toLowerCase();
-  const nm = ((model.name || model.deployment_name || model.model_name || "") + "").toLowerCase();
-  if (nm.includes("claude") || p === "anthropic") return "claude";
-  if (p === "azure_ai_foundry" || p === "azure_openai" || p === "azure") return "azure";
-  if (p === "openai") return "openai";
-  if (p === "gemini" || p === "google") return "gemini";
-  return "default";
+// ---------- Модальне вікно вибору моделі ----------
+// Провайдер моделі → підпис (без кольорового маркування — усі однакові).
+function providerLabel(m) {
+  return PROVIDER_LABELS[m.provider] || "Модель";
 }
 
-// ---------- Модальне вікно вибору моделі ----------
 async function openModelModal() {
   const overlay = $("#model-modal");
   const tiles = $("#model-tiles");
   tiles.innerHTML = `<p class="muted">Завантаження…</p>`;
   overlay.classList.remove("hidden");
   try {
-    const models = (await api("/models?active=1")).filter(m => m.model_type === "llm");
+    const models = await api("/models?active=1");
     if (!models.length) {
-      tiles.innerHTML = `<p class="muted">Немає активних LLM-моделей. Зверніться до адміністратора.</p>`;
+      tiles.innerHTML = `<p class="muted">Немає активних моделей. Додайте модель у вкладці «Моделі».</p>`;
       return;
     }
     tiles.innerHTML = "";
     models.forEach(m => {
-      const v = vendorOf(m);
-      const tile = el(`<button class="model-tile vendor-${v}">
-        <span class="tile-vendor">${esc(VENDOR_LABELS[v])}</span>
+      // Усі плитки — одним системним кольором (vendor-default).
+      const tile = el(`<button class="model-tile vendor-default">
+        <span class="tile-vendor">${esc(providerLabel(m))}</span>
         <span class="tile-name">${esc(m.name)}</span>
         <span class="tile-dep">${esc(m.deployment_name || "")}</span>
       </button>`);
@@ -381,8 +371,8 @@ async function openTab(id) {
 let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null };
 
 function sessionItemHtml(s, activeId) {
-  const v = vendorOf(s);
-  return `<div class="session-item vendor-${v} ${s.id === activeId ? "active" : ""}" data-sid="${s.id}">
+  // Без кольорового маркування за вендором — усі чати одним системним кольором.
+  return `<div class="session-item vendor-default ${s.id === activeId ? "active" : ""}" data-sid="${s.id}">
       <span class="session-title">${esc(s.title || "Без назви")}</span>
       <button class="session-del small ghost" data-del="${s.id}" title="Видалити">×</button>
     </div>`;
@@ -1229,7 +1219,9 @@ const PROVIDER_LABELS = {
   azure_ai_foundry: "Azure OpenAI",
   openai: "OpenAI",
   gemini: "Gemini",
+  local: "Локальна (Ollama/LM Studio)",
 };
+const LOCAL_DEFAULT_BASE = "http://localhost:11434/v1";
 
 async function viewModels() {
   const [models, providers] = await Promise.all([api("/models"), api("/models/providers")]);
@@ -1242,7 +1234,10 @@ async function viewModels() {
       <div class="row">
         <input id="m-name" placeholder="Назва">
         <select id="m-provider">${provOpts}</select>
-        <select id="m-type"><option value="llm">llm</option><option value="cv">cv</option></select>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <input id="m-base" autocomplete="off"
+               placeholder="Базовий URL — для локальних Ollama/LM Studio (напр. http://localhost:11434/v1)">
       </div>
       <div class="row" style="margin-top:12px">
         <input id="m-dep" list="m-dep-list" autocomplete="off"
@@ -1253,24 +1248,30 @@ async function viewModels() {
       </div>
       <p class="muted" id="m-dep-hint" style="margin:8px 0 0"></p>
     </div>
-    <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам у чаті. <strong>Системна</strong> модель використовується платформою для службових задач (напр. іменування чатів).</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Тип</th><th>Деплоймент / модель</th><th>Статус</th><th>Системна</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
+    <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам у чаті. <strong>Системна</strong> модель використовується платформою для службових задач (напр. іменування чатів). Локальні моделі (Ollama, LM Studio) підключаються через <strong>Базовий URL</strong> — локально чи віддалено.</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Модель / базовий URL</th><th>Статус</th><th>Системна</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
+
+  const isLocal = () => $("#m-provider").value === "local";
 
   // Динамічний список доступних моделей у обраного провайдера.
   async function loadAvailableModels() {
     const dl = $("#m-dep-list");
     const hint = $("#m-dep-hint");
     const provider = $("#m-provider").value;
-    const model_type = $("#m-type").value;
+    const baseUrl = $("#m-base").value.trim();
     hint.textContent = "Завантаження списку моделей…";
     dl.innerHTML = "";
+    let url = `/models/available?provider=${encodeURIComponent(provider)}`;
+    if (baseUrl) url += `&base_url=${encodeURIComponent(baseUrl)}`;
     try {
-      const res = await api(`/models/available?provider=${encodeURIComponent(provider)}&model_type=${encodeURIComponent(model_type)}`);
+      const res = await api(url);
       dl.innerHTML = (res.models || []).map(m => `<option value="${esc(m)}"></option>`).join("");
       const label = PROVIDER_LABELS[res.provider] || res.provider;
       if (!res.models || !res.models.length) {
         hint.textContent = "Список порожній — введіть назву моделі вручну.";
       } else if (res.source === "fallback") {
-        hint.textContent = `${label}: показано типові моделі (демо-режим або не задано ключ). Можна ввести й вручну.`;
+        hint.textContent = provider === "local"
+          ? `${label}: показано типові назви. Вкажіть Базовий URL і натисніть «Оновити», щоб отримати реальний список із сервера.`
+          : `${label}: показано типові моделі (демо-режим або не задано ключ). Можна ввести й вручну.`;
       } else {
         hint.textContent = `${label}: знайдено ${res.models.length} — оберіть зі списку або введіть вручну.`;
       }
@@ -1278,8 +1279,12 @@ async function viewModels() {
       hint.textContent = `Не вдалося отримати список (${err.message}). Введіть назву вручну.`;
     }
   }
-  $("#m-provider").addEventListener("change", loadAvailableModels);
-  $("#m-type").addEventListener("change", loadAvailableModels);
+  $("#m-provider").addEventListener("change", () => {
+    // Для локального провайдера підставляємо типовий Ollama-URL, якщо поле порожнє.
+    if (isLocal() && !$("#m-base").value.trim()) $("#m-base").value = LOCAL_DEFAULT_BASE;
+    loadAvailableModels();
+  });
+  $("#m-base").addEventListener("change", loadAvailableModels);
   $("#m-refresh").addEventListener("click", loadAvailableModels);
   // Автопідстановка назви за обраною моделлю, якщо поле назви порожнє.
   $("#m-dep").addEventListener("change", () => {
@@ -1296,7 +1301,7 @@ async function viewModels() {
     try {
       await api("/models", { method: "POST", body: {
         name: $("#m-name").value, provider: $("#m-provider").value,
-        model_type: $("#m-type").value, deployment_name: $("#m-dep").value }});
+        deployment_name: $("#m-dep").value, base_url: $("#m-base").value.trim() || null }});
       toast("Модель додано"); openTab("models");
     } catch (err) { toast(err.message, "err"); }
   });
@@ -1307,14 +1312,14 @@ async function viewModels() {
       : `<span class="badge delisted">неактивна</span>`;
     const sysCell = m.is_system
       ? `<span class="badge published">системна</span>`
-      : (m.model_type === "llm"
-          ? `<button class="small ghost" data-act="sys">Зробити системною</button>`
-          : `<span class="muted">—</span>`);
+      : `<button class="small ghost" data-act="sys">Зробити системною</button>`;
+    const target = m.base_url
+      ? `${esc(m.deployment_name)} <span class="muted">· ${esc(m.base_url)}</span>`
+      : esc(m.deployment_name);
     const tr = el(`<tr>
       <td>${esc(m.name)}</td>
       <td><span class="badge">${esc(PROVIDER_LABELS[m.provider] || m.provider)}</span></td>
-      <td>${m.model_type}</td>
-      <td>${esc(m.deployment_name)}</td>
+      <td>${target}</td>
       <td>${status}</td>
       <td>${sysCell}</td>
       <td class="actions">

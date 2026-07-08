@@ -22,6 +22,12 @@ SUPPORTED_PROVIDERS = {
     "openai": "openai",
     "gemini": "gemini",
     "google": "gemini",
+    # Локальні / OpenAI-сумісні сервери (локально чи віддалено).
+    "local": "local",
+    "ollama": "local",
+    "lmstudio": "local",
+    "lm_studio": "local",
+    "openai_compatible": "local",
 }
 
 
@@ -30,15 +36,22 @@ def normalize_provider(provider):
                                    "azure_ai_foundry")
 
 
-def get_client_for_provider(provider):
+def get_client_for_provider(provider, base_url=None):
+    """LLM-клієнт за провайдером. `base_url` перекриває дефолт (локальні/OpenAI)."""
     cfg = current_app.config
     mock = cfg.get("LLM_MOCK", True)
     canonical = normalize_provider(provider)
 
+    if canonical == "local":
+        return OpenAIClient(
+            api_key=cfg.get("LOCAL_API_KEY", "local") or "local",
+            base_url=(base_url or cfg.get("LOCAL_BASE_URL", "http://localhost:11434/v1")),
+            use_mock=mock, label="Локальна модель",
+        )
     if canonical == "openai":
         return OpenAIClient(
             api_key=cfg.get("OPENAI_API_KEY", ""),
-            base_url=cfg.get("OPENAI_BASE_URL", ""),
+            base_url=(base_url or cfg.get("OPENAI_BASE_URL", "")),
             use_mock=mock,
         )
     if canonical == "gemini":
@@ -55,5 +68,6 @@ def get_client_for_provider(provider):
 
 
 def get_client_for_model(model):
-    """Повертає LLM-клієнт для конкретної моделі (за її provider)."""
-    return get_client_for_provider(getattr(model, "provider", None))
+    """Повертає LLM-клієнт для конкретної моделі (за її provider та base_url)."""
+    return get_client_for_provider(getattr(model, "provider", None),
+                                   base_url=getattr(model, "base_url", None) or None)

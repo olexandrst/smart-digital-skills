@@ -399,7 +399,7 @@ smart-digital-skills/
 | POST | `/models/{id}/activate` | Активація / деактивація моделі | Admin |
 | DELETE | `/models/{id}` | Видалення моделі (якщо не вживається скілами) | Admin |
 | GET | `/models/providers` | Доступні LLM-провайдери | авторизовані |
-| GET | `/models/available` | Динамічний список моделей провайдера (`?provider=&model_type=`) | Admin |
+| GET | `/models/available` | Динамічний список моделей провайдера (`?provider=&base_url=`; локальні Ollama/LM Studio) | Admin |
 | GET | `/skills` | Каталог навичок | авторизовані |
 | GET | `/skills/mine` | Активні навички користувача | авторизовані |
 | PATCH | `/skills/{id}` | Редагування атрибутів (назва, версія, автор, опис, категорія) | Admin/Skill Manager |

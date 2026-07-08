@@ -60,4 +60,4 @@ def test_providers_endpoint(client):
     res = client.get("/api/models/providers", headers=auth(token))
     assert res.status_code == 200
     provs = res.get_json()
-    assert set(provs) == {"azure_ai_foundry", "openai", "gemini"}
+    assert set(provs) == {"azure_ai_foundry", "openai", "gemini", "local"}
