@@ -1,12 +1,18 @@
-"""Реєстр моделей (Azure OpenAI / локальні). Реєструвати — лише Admin."""
+"""Реєстр моделей (Azure OpenAI / локальні). Реєструвати — лише Admin.
+
+Доступ користувачів до моделей — через матрицю «групи × моделі» (вкладка
+«Доступи»); системна модель доступна всім.
+"""
 import json
 from flask import Blueprint, request, jsonify
 from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
+from app.core.security import current_user
 from app.core.errors import ApiError
-from app.models import Model, Skill
+from app.models import Model, Skill, Group, GroupModel
 from app.integrations import SUPPORTED_PROVIDERS, normalize_provider
 from app.integrations import discovery
+from app.services import model_access_service
 
 bp = Blueprint("models", __name__)
 
@@ -37,6 +43,54 @@ def list_models():
         query = query.filter_by(is_active=True)
     models = query.order_by(Model.id).all()
     return jsonify([m.to_dict() for m in models])
+
+
+@bp.get("/mine")
+@require_auth
+def my_models():
+    """Моделі, доступні поточному користувачу (для вибору в чаті), + типова.
+
+    Порядок: системна → alphanumeric. `default_id` — модель за замовчуванням.
+    """
+    user = current_user()
+    models = model_access_service.accessible_models(user)
+    return jsonify({
+        "models": [m.to_dict() for m in models],
+        "default_id": models[0].id if models else None,
+    })
+
+
+@bp.get("/access-matrix")
+@require_global_role("admin")
+def access_matrix():
+    """Матриця доступів: групи (рядки) × моделі (колонки) + наявні призначення."""
+    groups = Group.query.order_by(Group.name).all()
+    models = Model.query.order_by(Model.name).all()
+    grants = [f"{gm.group_id}:{gm.model_id}" for gm in GroupModel.query.all()]
+    return jsonify({
+        "groups": [{"id": g.id, "name": g.name} for g in groups],
+        "models": [{"id": m.id, "name": m.name, "is_system": m.is_system,
+                    "is_active": m.is_active} for m in models],
+        "grants": grants,
+    })
+
+
+@bp.post("/access")
+@require_global_role("admin")
+def set_access():
+    """Вмикає/вимикає доступ групи до моделі (чекбокс матриці)."""
+    data = request.get_json(silent=True) or {}
+    gid, mid = data.get("group_id"), data.get("model_id")
+    if not gid or not mid:
+        raise ApiError("Вкажіть group_id та model_id", 400, "validation_error")
+    model = Model.query.get_or_404(mid)
+    if model.is_system:
+        raise ApiError("Системна модель доступна всім без призначення",
+                       400, "system_model")
+    Group.query.get_or_404(gid)
+    granted = model_access_service.set_group_model(
+        gid, mid, bool(data.get("granted")), assigned_by=current_user().id)
+    return jsonify({"group_id": gid, "model_id": mid, "granted": granted})
 
 
 @bp.get("/providers")

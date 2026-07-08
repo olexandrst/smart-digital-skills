@@ -14,7 +14,7 @@ from app.models import (
     Skill, UserSkill, Model, ChatSession, ChatMessage, TokenUsageLog,
 )
 from app.integrations import get_client_for_model
-from app.services import package_service, quota_service
+from app.services import package_service, quota_service, model_access_service
 
 # Скільки останніх повідомлень передавати моделі як контекст діалогу.
 HISTORY_LIMIT = 20
@@ -190,17 +190,42 @@ def _get_owned_session(user, session_id):
 
 # ----------------------------- Чат -----------------------------
 
-def create_session(user, model_id, title=None):
+def _resolve_chat_model(user, model_id):
+    """Перевіряє/визначає модель для чату. `model_id=None` → типова для користувача."""
+    if model_id is None:
+        model = model_access_service.default_model(user)
+        if model is None:
+            raise ApiError("Немає доступних моделей. Зверніться до адміністратора.",
+                           400, "no_models")
+        return model
     model = Model.query.get(model_id)
     if model is None:
         raise ApiError("Модель не знайдено", 404, "not_found")
     if not model.is_active:
         raise ApiError("Модель неактивна та недоступна для чату", 400, "model_inactive")
+    if not model_access_service.is_accessible(user, model.id):
+        raise ApiError("Модель недоступна для вашого облікового запису",
+                       403, "model_forbidden")
+    return model
+
+
+def create_session(user, model_id=None, title=None):
+    """Створює чат. Модель обирається автоматично (типова), якщо не задано."""
+    model = _resolve_chat_model(user, model_id)
     # Назва без моделі (у списку чатів модель не показуємо); після першого
     # обміну назву автоматично замінить короткий підсумок (_maybe_autoname).
-    session = ChatSession(user_id=user.id, model_id=model_id,
+    session = ChatSession(user_id=user.id, model_id=model.id,
                           title=title or "Новий чат")
     db.session.add(session)
+    db.session.commit()
+    return session
+
+
+def set_session_model(user, session_id, model_id):
+    """Змінює модель існуючого чату (перевіряє доступність для користувача)."""
+    session = _get_owned_session(user, session_id)
+    model = _resolve_chat_model(user, model_id)
+    session.model_id = model.id
     db.session.commit()
     return session
 

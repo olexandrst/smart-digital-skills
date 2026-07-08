@@ -59,8 +59,9 @@ def _seed_minimal():
     _db.session.add(UserRole(user_id=sm.id, role_id=sm_role.id))
 
     # Ціни, щоб у тестах нараховувалась вартість (USD за 1M токенів).
+    # Системна → доступна всім користувачам у чаті без призначення груп.
     model = Model(name="gpt-4o", model_type="llm", deployment_name="gpt-4o",
-                  price_in=1000.0, price_out=1000.0)
+                  price_in=1000.0, price_out=1000.0, is_system=True)
     _db.session.add(model)
     _db.session.flush()
 

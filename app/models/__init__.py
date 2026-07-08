@@ -2,7 +2,8 @@
 from app.models.user import User, Role, UserRole, RefreshToken
 from app.models.group import Group, GroupMembership, Invitation
 from app.models.skill import (
-    Model, Skill, SkillCategory, SkillInput, SkillFeedback, GroupSkill, UserSkill,
+    Model, Skill, SkillCategory, SkillInput, SkillFeedback,
+    GroupSkill, GroupModel, UserSkill,
 )
 from app.models.chat import (
     ChatSession,
@@ -28,6 +29,7 @@ __all__ = [
     "SkillInput",
     "SkillFeedback",
     "GroupSkill",
+    "GroupModel",
     "UserSkill",
     "ChatSession",
     "ChatMessage",
