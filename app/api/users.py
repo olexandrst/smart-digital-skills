@@ -40,8 +40,9 @@ def search_users():
 
 def _with_quota(user):
     d = user.to_dict()
-    d["token_used"] = quota_service.get_used(user.id)            # за поточний тиждень
-    d["custom_limit"] = quota_service.get_user_custom_limit(user.id)  # персональна або None
+    # Квота — у грошах (USD): витрачено за тиждень, персональний та ефективний ліміт.
+    d["used_cost"] = quota_service.get_used(user.id)
+    d["custom_limit"] = quota_service.get_user_custom_limit(user.id)  # $ або None
     d["effective_limit"] = quota_service.effective_limit(user.id)
     return d
 

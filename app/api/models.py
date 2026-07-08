@@ -15,6 +15,19 @@ def _truthy(value):
     return str(value).lower() in ("1", "true", "yes")
 
 
+def _parse_price(value):
+    """Ціна у USD за 1M токенів: приймає число/рядок ('10.58'); '' → None."""
+    if value is None or value == "":
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        raise ApiError("Ціна має бути числом (напр. 10.58)", 400, "validation_error")
+    if price < 0:
+        raise ApiError("Ціна не може бути відʼємною", 400, "validation_error")
+    return price
+
+
 @bp.get("")
 @require_auth
 def list_models():
@@ -81,6 +94,8 @@ def create_model():
         base_url=(data.get("base_url") or "").strip() or None,
         api_version=data.get("api_version"),
         context_window=data.get("context_window"),
+        price_in=_parse_price(data.get("price_in")),
+        price_out=_parse_price(data.get("price_out")),
         config=json.dumps(data.get("config", {})),
     )
     db.session.add(model)
@@ -96,6 +111,9 @@ def update_model(model_id):
     for field in ("name", "deployment_name", "base_url", "api_version", "context_window"):
         if field in data:
             setattr(model, field, data[field])
+    for field in ("price_in", "price_out"):
+        if field in data:
+            setattr(model, field, _parse_price(data[field]))
     if "provider" in data:
         if (data["provider"] or "").lower().strip() not in SUPPORTED_PROVIDERS:
             raise ApiError("Невідомий provider", 400, "validation_error")

@@ -343,17 +343,23 @@ def _store_exchange(session, user, model_id, skill_id, user_content, reply, usag
     if file_ids:
         assistant_msg.msg_metadata = json.dumps({"file_ids": file_ids})
     db.session.add(assistant_msg)
+
+    # Рахуємо вартість (USD) за цінами моделі та логуємо разом із токенами.
+    mdl = Model.query.get(model_id) if model_id else None
+    cost_in, cost_out, cost_total = quota_service.compute_cost(
+        mdl, usage["prompt_tokens"], usage["completion_tokens"])
     db.session.add(TokenUsageLog(
         user_id=user.id, group_id=session.group_id, skill_id=skill_id,
         model_id=model_id, session_id=session.id,
         prompt_tokens=usage["prompt_tokens"],
         completion_tokens=usage["completion_tokens"],
         total_tokens=usage["total_tokens"],
+        cost_in=cost_in, cost_out=cost_out, cost_total=cost_total,
         feature="chat", is_system=False,
     ))
     db.session.commit()
-    # Оновлюємо тижневий лічильник квоти (лише користувацьке використання).
-    quota_service.record_usage(user.id, usage["total_tokens"])
+    # Тижневий лічильник квоти — у грошах (лише користувацьке використання).
+    quota_service.record_usage(user.id, cost_total)
 
 
 # ----------------------- Системна модель: іменування чатів -----------------------
@@ -394,12 +400,15 @@ def _autoname_worker(app, session_id, user_id, model_id, message):
             title = (res.content or "").strip().strip('"').splitlines()[0][:80]
             if title:
                 sess.title = title
-            # Окремий СИСТЕМНИЙ облік токенів (фіча "chat_naming").
+            # Окремий СИСТЕМНИЙ облік токенів + вартості (фіча "chat_naming").
+            c_in, c_out, c_tot = quota_service.compute_cost(
+                model, res.prompt_tokens, res.completion_tokens)
             db.session.add(TokenUsageLog(
                 user_id=user_id, model_id=model_id, session_id=session_id,
                 prompt_tokens=res.prompt_tokens,
                 completion_tokens=res.completion_tokens,
                 total_tokens=res.total_tokens,
+                cost_in=c_in, cost_out=c_out, cost_total=c_tot,
                 feature="chat_naming", is_system=True,
             ))
             db.session.commit()

@@ -47,6 +47,18 @@ function toast(msg, type = "ok") {
 function hasRole(code) { return state.user && state.user.roles.includes(code); }
 function esc(s) { return (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function fmtSize(n) { if (n < 1024) return `${n} Б`; if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`; return `${(n / 1024 / 1024).toFixed(1)} МБ`; }
+// Гроші (USD): дрібні суми показуємо з більшою точністю.
+function fmtMoney(v) {
+  v = Number(v) || 0;
+  const a = Math.abs(v);
+  if (a === 0) return "$0.00";
+  if (a < 0.01) return "$" + v.toFixed(4);
+  if (a < 1) return "$" + v.toFixed(3);
+  return "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtInt(n) { return (Number(n) || 0).toLocaleString("uk-UA"); }
+let usageSubTab = "tokens";  // активна вкладка «Квоти»: tokens | money
+function openUsageTab(sub) { usageSubTab = sub || "tokens"; openTab("usage"); }
 
 // ---------- Мінімальний Markdown → HTML (вхід вже екранований) ----------
 function mdInline(s) {
@@ -180,6 +192,8 @@ $("#login-form").addEventListener("submit", async (e) => {
   }
 });
 $("#logout-btn").addEventListener("click", logout);
+// Клік по індикатору квоти (внизу зліва) → «Квота» → вкладка «Гроші».
+$("#quota").addEventListener("click", () => openUsageTab("money"));
 
 // ---------- Модальне вікно вибору моделі ----------
 // Провайдер моделі → підпис (без кольорового маркування — усі однакові).
@@ -293,10 +307,9 @@ async function showApp() {
 async function refreshQuota() {
   try {
     const u = await api("/usage/me");
-    const q = u.quota || { used: u.total_tokens || 0, limit: 0, percent: 0 };
-    const fmt = (n) => (n || 0).toLocaleString("uk-UA");
-    $("#quota-used").textContent = fmt(q.used);
-    $("#quota-limit").textContent = q.limit ? fmt(q.limit) : "∞";
+    const q = u.quota || { used: 0, limit: 0, percent: 0 };
+    $("#quota-used").textContent = fmtMoney(q.used);
+    $("#quota-limit").textContent = q.limit ? fmtMoney(q.limit) : "∞";
     const pct = Math.max(0, Math.min(100, q.percent || 0));
     const fill = $("#quota-fill");
     fill.style.width = pct + "%";
@@ -306,9 +319,9 @@ async function refreshQuota() {
     $("#quota").classList.toggle("quota-full", pct >= 100);
     const resets = q.resets_at ? new Date(q.resets_at).toLocaleString("uk-UA") : "";
     $("#quota").title =
-      `Тижнева квота: ${fmt(q.used)} / ${q.limit ? fmt(q.limit) : "∞"} токенів (${pct}%)` +
+      `Тижнева квота: ${fmtMoney(q.used)} / ${q.limit ? fmtMoney(q.limit) : "∞"} (${pct}%)` +
       (q.custom ? " · персональна" : " · системна") +
-      (resets ? `\nСкидання: ${resets}` : "");
+      (resets ? `\nСкидання: ${resets}` : "") + "\n(клік — відкрити «Квота» → «Гроші»)";
   } catch (e) { /* ignore */ }
 }
 
@@ -333,7 +346,7 @@ const TABS = [
   { id: "models", label: "Моделі", view: viewModels, roles: ["admin"] },
   { id: "groups", label: "Групи", view: viewGroups },
   { id: "users", label: "Користувачі", view: viewUsers, roles: ["admin"] },
-  { id: "usage", label: "Токени", view: viewUsage },
+  { id: "usage", label: "Квота", view: viewUsage },
 ];
 
 function visibleTabs() {
@@ -1244,11 +1257,15 @@ async function viewModels() {
                placeholder="Оберіть модель зі списку або введіть вручну">
         <datalist id="m-dep-list"></datalist>
         <button id="m-refresh" class="ghost" title="Оновити список моделей">↻ Оновити</button>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <input id="m-pin" type="text" inputmode="decimal" placeholder="Вартість $ за 1М вхідних токенів (напр. 10.58)">
+        <input id="m-pout" type="text" inputmode="decimal" placeholder="Вартість $ за 1М вихідних токенів">
         <button id="m-add">Додати</button>
       </div>
       <p class="muted" id="m-dep-hint" style="margin:8px 0 0"></p>
     </div>
-    <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам у чаті. <strong>Системна</strong> модель використовується платформою для службових задач (напр. іменування чатів). Локальні моделі (Ollama, LM Studio) підключаються через <strong>Базовий URL</strong> — локально чи віддалено.</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Модель / базовий URL</th><th>Статус</th><th>Системна</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
+    <div class="card"><h2>Реєстр моделей</h2><p class="muted">Лише <strong>активні</strong> моделі доступні користувачам у чаті. <strong>Системна</strong> модель — для службових задач (іменування чатів). Ціни задаються у USD за 1 мільйон токенів і використовуються для обліку витрат.</p><table><thead><tr><th>Назва</th><th>Провайдер</th><th>Модель / базовий URL</th><th>Ціна $/1М (вх · вих)</th><th>Статус</th><th>Системна</th><th>Дії</th></tr></thead><tbody id="m-body"></tbody></table></div>`;
 
   const isLocal = () => $("#m-provider").value === "local";
 
@@ -1301,7 +1318,9 @@ async function viewModels() {
     try {
       await api("/models", { method: "POST", body: {
         name: $("#m-name").value, provider: $("#m-provider").value,
-        deployment_name: $("#m-dep").value, base_url: $("#m-base").value.trim() || null }});
+        deployment_name: $("#m-dep").value, base_url: $("#m-base").value.trim() || null,
+        price_in: $("#m-pin").value.trim() || null,
+        price_out: $("#m-pout").value.trim() || null }});
       toast("Модель додано"); openTab("models");
     } catch (err) { toast(err.message, "err"); }
   });
@@ -1316,10 +1335,14 @@ async function viewModels() {
     const target = m.base_url
       ? `${esc(m.deployment_name)} <span class="muted">· ${esc(m.base_url)}</span>`
       : esc(m.deployment_name);
+    const priceCell = (m.price_in != null || m.price_out != null)
+      ? `${m.price_in != null ? fmtMoney(m.price_in) : "—"} · ${m.price_out != null ? fmtMoney(m.price_out) : "—"}`
+      : `<span class="muted">не задано</span>`;
     const tr = el(`<tr>
       <td>${esc(m.name)}</td>
       <td><span class="badge">${esc(PROVIDER_LABELS[m.provider] || m.provider)}</span></td>
       <td>${target}</td>
+      <td>${priceCell}</td>
       <td>${status}</td>
       <td>${sysCell}</td>
       <td class="actions">
@@ -1511,10 +1534,10 @@ async function viewUsers() {
     `<option value="${o.v}" ${o.v === sel ? "selected" : ""}>${esc(o.label)}</option>`).join("");
   view.innerHTML = `
     <div class="card">
-      <h2>Системна тижнева квота</h2>
-      <p class="muted">Діє для всіх користувачів без персональної квоти. Скидання — щопонеділка 00:05 UTC.</p>
+      <h2>Системна тижнева квота ($)</h2>
+      <p class="muted">Тижневий ліміт витрат у доларах для всіх користувачів без персональної квоти. Скидання — щопонеділка 00:05 UTC.</p>
       <div class="row">
-        <input id="sys-limit" type="number" min="0" value="${def.limit}">
+        <input id="sys-limit" type="number" min="0" step="0.01" value="${def.limit}">
         <button id="sys-save">Зберегти</button>
       </div>
     </div>
@@ -1530,7 +1553,7 @@ async function viewUsers() {
       </div>
     </div>
     <div id="u-detail"></div>
-    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Email</th><th>Ролі</th><th>Тижнева квота (використано / ліміт)</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
+    <div class="card"><h2>Користувачі</h2><table><thead><tr><th>ID</th><th>Логін</th><th>Ім'я</th><th>Email</th><th>Ролі</th><th>Тижнева квота $ (витрачено / ліміт)</th><th>Активний</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
 
   $("#sys-save").addEventListener("click", async () => {
     try { await api("/usage/default-limit", { method: "POST", body: { limit: Number($("#sys-limit").value) }});
@@ -1548,8 +1571,8 @@ async function viewUsers() {
 
   const body = $("#u-body");
   users.forEach(u => {
-    const used = (u.token_used || 0).toLocaleString("uk-UA");
-    const eff = (u.effective_limit || 0).toLocaleString("uk-UA");
+    const used = fmtMoney(u.used_cost || 0);
+    const eff = fmtMoney(u.effective_limit || 0);
     const custom = u.custom_limit != null
       ? `<span class="badge published" title="Персональна квота">власна</span>`
       : `<span class="badge" title="Системна квота">системна</span>`;
@@ -1572,7 +1595,7 @@ async function viewUsers() {
     </tr>`);
     tr.querySelector("[data-act='edit']").addEventListener("click", () => openUserEditor(u.id));
     tr.querySelector("[data-act='limit']").addEventListener("click", async () => {
-      const v = prompt(`Персональна тижнева квота для «${u.username}» (токенів):`,
+      const v = prompt(`Персональна тижнева квота для «${u.username}» ($, напр. 1 або 0.5):`,
                        u.custom_limit != null ? u.custom_limit : u.effective_limit);
       if (v === null) return;
       try { await api(`/users/${u.id}/token-limit`, { method: "POST", body: { limit: Number(v) }});
@@ -1664,38 +1687,198 @@ async function openUserEditor(userId) {
 }
 
 // ---------- Токени ----------
+// ---------- Квота: вкладки «Токени» / «Гроші» ----------
+let moneyRange = { from: "", to: "" };
+
 async function viewUsage() {
   const view = $("#view");
-  const mine = await api("/usage/me");
+  view.innerHTML = `
+    <div class="usage-tabs">
+      <button class="u-tab" data-u="tokens">Токени</button>
+      <button class="u-tab" data-u="money">Гроші</button>
+    </div>
+    <div id="usage-panel"></div>`;
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.addEventListener("click", () => { usageSubTab = b.dataset.u; paintUsageSub(); }));
+  paintUsageSub();
+}
+
+function paintUsageSub() {
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.u === usageSubTab));
+  if (usageSubTab === "money") renderMoneyPanel();
+  else renderTokensPanel();
+}
+
+async function renderTokensPanel() {
+  const panel = $("#usage-panel");
+  panel.innerHTML = `<p class="muted">Завантаження…</p>`;
+  const [mine, tl] = await Promise.all([api("/usage/me"), api("/usage/timeline")]);
   let html = `<div class="card"><h2>Мої токени</h2><div class="stat-grid">
-    <div class="stat"><div class="num">${mine.total_tokens}</div><div class="label">Усього токенів</div></div>
-    <div class="stat"><div class="num">${mine.requests}</div><div class="label">Запитів</div></div>
-    <div class="stat"><div class="num">${mine.prompt_tokens}</div><div class="label">Prompt</div></div>
-    <div class="stat"><div class="num">${mine.completion_tokens}</div><div class="label">Completion</div></div>
-  </div></div>`;
+      <div class="stat"><div class="num">${fmtInt(mine.total_tokens)}</div><div class="label">Усього токенів</div></div>
+      <div class="stat"><div class="num">${fmtInt(mine.requests)}</div><div class="label">Запитів</div></div>
+      <div class="stat"><div class="num">${fmtInt(mine.prompt_tokens)}</div><div class="label">Вхідні</div></div>
+      <div class="stat"><div class="num">${fmtInt(mine.completion_tokens)}</div><div class="label">Вихідні</div></div>
+    </div></div>
+    <div class="card">
+      <h2>Використання токенів за часом</h2>
+      <div class="ch-legend"><span class="ch-key"><i style="background:var(--chart-in)"></i>Вхідні</span><span class="ch-key"><i style="background:var(--chart-out)"></i>Вихідні</span></div>
+      <div id="tok-chart"></div>
+    </div>`;
+  panel.innerHTML = html;
+  renderTokenChart($("#tok-chart"), tl);
 
   if (hasRole("admin")) {
     const [g, sys] = await Promise.all([api("/usage/global"), api("/usage/system")]);
-    const rows = g.by_user.map(u => `<tr><td>${esc(u.username)}</td><td>${u.total_tokens}</td><td>${u.requests}</td></tr>`).join("");
-    html += `<div class="card"><h2>Глобальне споживання користувачів (Admin)</h2>
-      <div class="stat-grid"><div class="stat"><div class="num">${g.total_tokens}</div><div class="label">Усього токенів</div></div>
-      <div class="stat"><div class="num">${g.requests}</div><div class="label">Запитів</div></div></div>
-      <table style="margin-top:16px"><thead><tr><th>Користувач</th><th>Токенів</th><th>Запитів</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-
+    const rows = g.by_user.map(u => `<tr><td>${esc(u.username)}</td><td>${fmtInt(u.total_tokens)}</td><td>${fmtMoney(u.cost_total)}</td><td>${u.requests}</td></tr>`).join("");
     const sysRows = (sys.breakdown || []).map(b =>
-      `<tr><td>${esc(b.model)}</td><td><span class="badge">${esc(b.feature)}</span></td><td>${b.prompt_tokens}</td><td>${b.completion_tokens}</td><td>${b.total_tokens}</td><td>${b.requests}</td></tr>`).join("")
+      `<tr><td>${esc(b.model)}</td><td><span class="badge">${esc(b.feature)}</span></td><td>${fmtInt(b.prompt_tokens)}</td><td>${fmtInt(b.completion_tokens)}</td><td>${fmtInt(b.total_tokens)}</td><td>${b.requests}</td></tr>`).join("")
       || `<tr><td colspan="6" class="muted">Системного використання ще не було.</td></tr>`;
-    html += `<div class="card"><h2>Системне використання (Admin)</h2>
-      <p class="muted">Окремий облік токенів, які витрачає платформа (поза квотами користувачів).</p>
-      <div class="stat-grid">
-        <div class="stat"><div class="num">${sys.total_tokens}</div><div class="label">Усього (система)</div></div>
-        <div class="stat"><div class="num">${sys.prompt_tokens}</div><div class="label">Вхідні</div></div>
-        <div class="stat"><div class="num">${sys.completion_tokens}</div><div class="label">Вихідні</div></div>
-        <div class="stat"><div class="num">${sys.requests}</div><div class="label">Запитів</div></div>
-      </div>
-      <table style="margin-top:16px"><thead><tr><th>Модель</th><th>Фіча</th><th>Вхідні</th><th>Вихідні</th><th>Усього</th><th>Запитів</th></tr></thead><tbody>${sysRows}</tbody></table></div>`;
+    panel.insertAdjacentHTML("beforeend", `
+      <div class="card"><h2>Глобальне споживання (Admin)</h2>
+        <table><thead><tr><th>Користувач</th><th>Токенів</th><th>Витрачено</th><th>Запитів</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="card"><h2>Системне використання (Admin)</h2>
+        <p class="muted">Окремий облік токенів платформи (поза квотами користувачів).</p>
+        <table><thead><tr><th>Модель</th><th>Фіча</th><th>Вхідні</th><th>Вихідні</th><th>Усього</th><th>Запитів</th></tr></thead><tbody>${sysRows}</tbody></table></div>`);
   }
-  view.innerHTML = html;
+}
+
+async function renderMoneyPanel() {
+  const panel = $("#usage-panel");
+  panel.innerHTML = `
+    <div class="card">
+      <div class="money-head">
+        <h2>Витрати</h2>
+        <div class="money-range">
+          <label>Від <input type="date" id="mr-from" value="${esc(moneyRange.from)}"></label>
+          <label>До <input type="date" id="mr-to" value="${esc(moneyRange.to)}"></label>
+          <button class="small ghost" id="mr-reset">За весь час</button>
+        </div>
+      </div>
+      <div id="money-total"><p class="muted">Завантаження…</p></div>
+    </div>
+    <div class="card">
+      <h2>Витрати за моделями</h2>
+      <div class="money-split"><div id="money-pie"></div><div id="money-list"></div></div>
+    </div>`;
+  $("#mr-from").addEventListener("change", () => { moneyRange.from = $("#mr-from").value; loadMoney(); });
+  $("#mr-to").addEventListener("change", () => { moneyRange.to = $("#mr-to").value; loadMoney(); });
+  $("#mr-reset").addEventListener("click", () => {
+    moneyRange = { from: "", to: "" }; $("#mr-from").value = ""; $("#mr-to").value = ""; loadMoney();
+  });
+  loadMoney();
+}
+
+async function loadMoney() {
+  const qs = [];
+  if (moneyRange.from) qs.push("from=" + encodeURIComponent(moneyRange.from));
+  if (moneyRange.to) qs.push("to=" + encodeURIComponent(moneyRange.to));
+  const m = await api("/usage/money" + (qs.length ? "?" + qs.join("&") : ""));
+  // Порожній період — за замовчуванням підставляємо межі всієї активності.
+  if (!moneyRange.from && m.activity_from) $("#mr-from").value = m.activity_from.slice(0, 10);
+  if (!moneyRange.to && m.activity_to) $("#mr-to").value = m.activity_to.slice(0, 10);
+  $("#money-total").innerHTML = `<div class="stat-grid">
+      <div class="stat"><div class="num">${fmtMoney(m.cost_total)}</div><div class="label">Усього витрачено</div></div>
+      <div class="stat"><div class="num">${fmtMoney(m.cost_in)}</div><div class="label">За вхідні токени</div></div>
+      <div class="stat"><div class="num">${fmtMoney(m.cost_out)}</div><div class="label">За вихідні токени</div></div>
+      <div class="stat"><div class="num">${fmtInt(m.requests)}</div><div class="label">Запитів</div></div>
+    </div>`;
+  renderMoneyPie($("#money-pie"), $("#money-list"), m.by_model);
+}
+
+// ---------- Діаграми (inline SVG, тема-залежні) ----------
+function fmtBucketLabel(iso, gran) {
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2, "0");
+  if (gran === "hour") return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:00`;
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}`;
+}
+
+function renderTokenChart(container, tl) {
+  const buckets = tl.buckets || [];
+  if (!buckets.length) { container.innerHTML = `<p class="muted">Немає використання за цей період.</p>`; return; }
+  const W = 820, H = 280, padL = 56, padR = 12, padT = 12, padB = 38;
+  const plotW = W - padL - padR, plotH = H - padT - padB, baseY = padT + plotH;
+  const n = buckets.length, slot = plotW / n, gap = 2;
+  const bw = Math.max(1, slot - gap);
+  const maxV = Math.max(1, ...buckets.map(b => (b.prompt_tokens || 0) + (b.completion_tokens || 0)));
+  const h = v => (v / maxV) * plotH;
+
+  let grid = "";
+  [0, maxV / 2, maxV].forEach(v => {
+    const y = baseY - h(v);
+    grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" class="ch-grid"/>`;
+    grid += `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" class="ch-axis" text-anchor="end">${fmtInt(Math.round(v))}</text>`;
+  });
+
+  const every = Math.ceil(n / 7);
+  let bars = "", labels = "";
+  buckets.forEach((b, i) => {
+    const x = padL + i * slot + gap / 2;
+    const pin = b.prompt_tokens || 0, pout = b.completion_tokens || 0;
+    const hIn = h(pin), hOut = h(pout);
+    const title = esc(`${fmtBucketLabel(b.t, tl.granularity)} · вхідні ${fmtInt(pin)} · вихідні ${fmtInt(pout)}`);
+    let g = `<g class="ch-bar"><title>${title}</title>`;
+    if (hIn > 0.5) g += `<rect x="${x.toFixed(1)}" y="${(baseY - hIn).toFixed(1)}" width="${bw.toFixed(1)}" height="${hIn.toFixed(1)}" rx="2" fill="var(--chart-in)"/>`;
+    if (hOut > 0.5) {
+      const yOut = baseY - hIn - (hIn > 0 ? gap : 0) - hOut;
+      g += `<rect x="${x.toFixed(1)}" y="${Math.max(padT, yOut).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1, hOut).toFixed(1)}" rx="2" fill="var(--chart-out)"/>`;
+    }
+    bars += g + `</g>`;
+    if (i % every === 0 || i === n - 1) {
+      const cx = padL + i * slot + slot / 2;
+      labels += `<text x="${cx.toFixed(1)}" y="${(baseY + 16).toFixed(1)}" class="ch-axis" text-anchor="middle">${esc(fmtBucketLabel(b.t, tl.granularity))}</text>`;
+    }
+  });
+  container.innerHTML =
+    `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet" role="img">
+       ${grid}<line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" class="ch-axis-line"/>${bars}${labels}</svg>`;
+}
+
+const PIE_HUES = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
+function _polar(cx, cy, r, a) { return [cx + r * Math.cos(a), cy + r * Math.sin(a)]; }
+function _arc(cx, cy, r, rin, a1, a2) {
+  const large = (a2 - a1) > Math.PI ? 1 : 0;
+  const [x1, y1] = _polar(cx, cy, r, a1), [x2, y2] = _polar(cx, cy, r, a2);
+  const [x3, y3] = _polar(cx, cy, rin, a2), [x4, y4] = _polar(cx, cy, rin, a1);
+  return `M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} `
+    + `L${x3.toFixed(2)} ${y3.toFixed(2)} A${rin} ${rin} 0 ${large} 0 ${x4.toFixed(2)} ${y4.toFixed(2)} Z`;
+}
+
+function renderMoneyPie(pieEl, listEl, byModel) {
+  const items = (byModel || []).filter(m => m.cost > 0);
+  if (!items.length) {
+    pieEl.innerHTML = `<p class="muted">Немає витрат за обраний період.</p>`;
+    listEl.innerHTML = ""; return;
+  }
+  // Понад 8 моделей — решту згортаємо в «Інші».
+  let data = items;
+  if (items.length > 8) {
+    const other = items.slice(7).reduce((s, m) => s + m.cost, 0);
+    data = items.slice(0, 7).concat([{ model: "Інші", cost: other, _other: true }]);
+  }
+  const total = data.reduce((s, m) => s + m.cost, 0);
+  const colorOf = (m, i) => m._other ? "var(--muted)" : PIE_HUES[i % 8];
+  const cx = 110, cy = 110, r = 96, rin = 58;
+
+  let segs = "", ang = -Math.PI / 2;
+  if (data.length === 1) {
+    segs = `<circle cx="${cx}" cy="${cy}" r="${(r + rin) / 2}" fill="none" stroke="${colorOf(data[0], 0)}" stroke-width="${r - rin}"><title>${esc(data[0].model)}: ${fmtMoney(data[0].cost)} (100%)</title></circle>`;
+  } else {
+    data.forEach((m, i) => {
+      const a2 = ang + (m.cost / total) * 2 * Math.PI;
+      segs += `<path d="${_arc(cx, cy, r, rin, ang, a2)}" fill="${colorOf(m, i)}" class="pie-seg"><title>${esc(m.model)}: ${fmtMoney(m.cost)} (${(m.cost / total * 100).toFixed(1)}%)</title></path>`;
+      ang = a2;
+    });
+  }
+  pieEl.innerHTML = `<svg viewBox="0 0 220 220" class="pie-svg" role="img">${segs}
+     <text x="110" y="105" text-anchor="middle" class="pie-total-l">Разом</text>
+     <text x="110" y="128" text-anchor="middle" class="pie-total-v">${fmtMoney(total)}</text></svg>`;
+  listEl.innerHTML = data.map((m, i) =>
+    `<div class="mm-row"><span class="mm-sw" style="background:${colorOf(m, i)}"></span>
+       <span class="mm-name">${esc(m.model)}</span>
+       <span class="mm-val">${fmtMoney(m.cost)}</span>
+       <span class="mm-pct muted">${(m.cost / total * 100).toFixed(1)}%</span></div>`).join("");
 }
 
 // ---------- Старт ----------

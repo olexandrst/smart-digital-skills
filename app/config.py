@@ -66,10 +66,8 @@ class BaseConfig:
     # Тимчасова тека для виконання скілів — усередині застосунку (не /tmp).
     SKILL_RUN_DIR = os.getenv("SKILL_RUN_DIR", os.path.join(INSTANCE_DIR, "run_tmp"))
 
-    # Системна ТИЖНЕВА квота токенів за замовчуванням (Admin може змінити).
-    DEFAULT_WEEKLY_TOKEN_LIMIT = int(
-        os.getenv("DEFAULT_WEEKLY_TOKEN_LIMIT",
-                  os.getenv("DEFAULT_USER_TOKEN_LIMIT", "2000")))
+    # Системна ТИЖНЕВА квота у ГРОШАХ (USD) за замовчуванням — $1 (Admin може змінити).
+    DEFAULT_WEEKLY_MONEY_LIMIT = float(os.getenv("DEFAULT_WEEKLY_MONEY_LIMIT", "1.0"))
     # Планувальник тижневого скидання лічильників (понеділок 00:05 UTC).
     ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "1") == "1"
     # Чи дозволено реально виконувати код зі скілів-пакетів.

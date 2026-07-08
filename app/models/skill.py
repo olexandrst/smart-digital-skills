@@ -19,6 +19,9 @@ class Model(db.Model):
     base_url = db.Column(db.String)
     api_version = db.Column(db.String)
     context_window = db.Column(db.Integer)
+    # Вартість у USD за 1 мільйон токенів (вхідних / вихідних). nullable = не задано.
+    price_in = db.Column(db.Float)
+    price_out = db.Column(db.Float)
     config = db.Column(db.Text)  # JSON
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     is_system = db.Column(db.Boolean, nullable=False, default=False)  # системна модель
@@ -36,6 +39,8 @@ class Model(db.Model):
             "is_system": self.is_system,
             "api_version": self.api_version,
             "context_window": self.context_window,
+            "price_in": self.price_in,
+            "price_out": self.price_out,
             "is_active": self.is_active,
         }
 

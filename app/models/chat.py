@@ -104,6 +104,10 @@ class TokenUsageLog(db.Model):
     prompt_tokens = db.Column(db.Integer, nullable=False, default=0)
     completion_tokens = db.Column(db.Integer, nullable=False, default=0)
     total_tokens = db.Column(db.Integer, nullable=False, default=0)
+    # Вартість у USD (рахується з цін моделі під час логування).
+    cost_in = db.Column(db.Float, nullable=False, default=0.0)
+    cost_out = db.Column(db.Float, nullable=False, default=0.0)
+    cost_total = db.Column(db.Float, nullable=False, default=0.0)
     feature = db.Column(db.String, nullable=False, default="chat")  # chat | chat_naming | ...
     is_system = db.Column(db.Boolean, nullable=False, default=False)  # використання системою
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
@@ -117,7 +121,8 @@ class TokenLimit(db.Model):
     scope_type = db.Column(db.String, nullable=False)  # global | group | user
     scope_id = db.Column(db.Integer)
     period = db.Column(db.String, nullable=False, default="weekly")
-    limit_tokens = db.Column(db.Integer, nullable=False)
+    limit_tokens = db.Column(db.Integer, nullable=False, default=0)  # застаріле (квота — у грошах)
+    limit_cost = db.Column(db.Float)  # тижневий ліміт у USD
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
@@ -129,7 +134,8 @@ class TokenCounter(db.Model):
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
                         primary_key=True)
-    used_tokens = db.Column(db.Integer, nullable=False, default=0)
+    used_tokens = db.Column(db.Integer, nullable=False, default=0)  # застаріле
+    used_cost = db.Column(db.Float, nullable=False, default=0.0)    # витрачено USD за тиждень
     period_start = db.Column(db.DateTime)  # початок поточного тижневого періоду (UTC)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
 

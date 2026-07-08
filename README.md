@@ -429,11 +429,13 @@ smart-digital-skills/
 | PATCH/DELETE | `/groups/{id}` | Перейменування / видалення групи | Admin |
 | POST/DELETE | `/groups/{id}/members[/{uid}]` | Керування учасниками (без ролей) | Admin |
 | POST/DELETE | `/groups/{id}/skills[/{sid}]` | Призначення навичок групі | Admin |
-| GET | `/usage/me` | Власні токени | авторизовані |
+| GET | `/usage/me` | Власні токени + вартість ($) + квота | авторизовані |
+| GET | `/usage/timeline` | Часова шкала токенів (`?from=&to=`, авто-гранулярність) | авторизовані |
+| GET | `/usage/money` | Витрати ($) усього + за моделями (`?from=&to=`) | авторизовані |
 | GET | `/usage/group/{id}` | Токени групи | член групи / Admin |
-| GET | `/usage/global` | Глобальні токени | Admin |
-| GET/POST | `/usage/default-limit` | Системна тижнева квота | Admin |
-| POST/DELETE | `/users/{id}/token-limit` | Персональна квота: задати/оновити / видалити | Admin |
+| GET | `/usage/global` | Глобальні токени + витрати | Admin |
+| GET/POST | `/usage/default-limit` | Системна тижнева квота ($, дефолт $1) | Admin |
+| POST/DELETE | `/users/{id}/token-limit` | Персональна квота ($): задати/оновити / видалити | Admin |
 | GET/POST | `/api/files` | Перелік / завантаження файлів | власник |
 | GET | `/api/files/{id}/download` | Звантаження файлу (через JWT) | власник |
 | DELETE | `/api/files/{id}` | Видалення файлу | власник |
