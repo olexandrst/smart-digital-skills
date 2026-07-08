@@ -68,43 +68,47 @@ def _openai_models(api_key, base_url):
     return sorted({m.id for m in client.models.list().data})
 
 
-def _azure_models(endpoint, api_key, api_version):
-    """Список моделей/деплойментів Azure. Стійкий до різних поверхонь API.
+# Авторинг-версії data-plane, що повертають список ДЕПЛОЙМЕНТІВ (не весь каталог).
+_AZURE_DEPLOYMENT_API_VERSIONS = [
+    "2024-05-01-preview", "2023-10-01-preview", "2023-03-15-preview", "2022-12-01",
+]
 
-    Endpoint зводимо до кореня ресурсу (щоб пастинг повного шляху не ламав URL)
-    і по черзі пробуємо: новий v1 API (`/openai/v1/models`), потім класичний
-    список деплойментів і базових моделей. Перший успіх повертаємо.
+
+def _azure_models(endpoint, api_key, api_version):
+    """Список ДЕПЛОЙМЕНТІВ ресурсу (саме їх треба у чаті), а НЕ весь каталог.
+
+    `/openai/v1/models` та `/openai/models` повертають десятки базових моделей
+    регіону — це не те, що розгорнув користувач. Деплойменти віддає авторинг-
+    ендпоінт `/openai/deployments`; пробуємо кілька сумісних api-version.
+    Якщо не вдалося — повертаємо порожньо (користувач введе назву вручну), а не
+    сотні зайвих моделей.
     """
     base = azure_resource_base(endpoint)
     headers = {"api-key": api_key}
-    candidates = [
-        f"{base}/openai/v1/models",                              # новий v1 API (GA)
-        f"{base}/openai/v1/models?api-version=preview",          # v1 (preview)
-        f"{base}/openai/deployments?api-version={api_version}",  # класичні деплойменти
-        f"{base}/openai/models?api-version={api_version}",       # базові моделі ресурсу
-    ]
+    versions = ([api_version] if api_version else []) + _AZURE_DEPLOYMENT_API_VERSIONS
+    seen = set()
     client = build_http_client()
-    if client is not None:
-        try:
-            for url in candidates:
-                try:
-                    resp = client.get(url, headers=headers)
-                    if resp.status_code != 200:
-                        continue
-                    data = resp.json().get("data", [])
-                    ids = sorted({d.get("id") for d in data if d.get("id")})
-                    if ids:
-                        return ids
-                except Exception:
+    if client is None:
+        return []
+    try:
+        for ver in versions:
+            if not ver or ver in seen:
+                continue
+            seen.add(ver)
+            url = f"{base}/openai/deployments?api-version={ver}"
+            try:
+                resp = client.get(url, headers=headers)
+                if resp.status_code != 200:
                     continue
-        finally:
-            client.close()
-
-    # Остаточний фолбек — через openai SDK (класичний Azure API).
-    from openai import AzureOpenAI
-    az = AzureOpenAI(azure_endpoint=base, api_key=api_key,
-                     api_version=api_version, http_client=build_http_client())
-    return sorted({m.id for m in az.models.list().data})
+                data = resp.json().get("data", [])
+                ids = sorted({d.get("id") for d in data if d.get("id")})
+                if ids:
+                    return ids
+            except Exception:
+                continue
+    finally:
+        client.close()
+    return []
 
 
 def _gemini_models(api_key):

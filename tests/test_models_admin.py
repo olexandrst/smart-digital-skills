@@ -123,3 +123,26 @@ def test_providers_include_local(client):
     token = login(client, "admin", "Admin123!")
     provs = client.get("/api/models/providers", headers=auth(token)).get_json()
     assert "local" in provs
+
+
+def test_azure_v1_base_builds_v1_surface():
+    """Azure v1 (New Foundry): базовий URL із трейлінг-слешем для OpenAI SDK."""
+    from app.integrations.base import azure_v1_base
+    host = "https://mih-we-cnt-iuic-d-oai-01.openai.azure.com"
+    assert azure_v1_base(host + "/openai/v1") == host + "/openai/v1/"
+    assert azure_v1_base(host + "/openai/v1/chat/completions") == host + "/openai/v1/"
+    assert azure_v1_base(host) == host + "/openai/v1/"
+    assert azure_v1_base("") == ""
+
+
+def test_azure_chat_uses_v1_url(app):
+    """Реальний Azure-чат б'є саме у v1 URL (перевіряємо побудову запиту)."""
+    from openai import OpenAI
+    from openai._models import FinalRequestOptions
+    from app.integrations.base import azure_v1_base, build_http_client
+    with app.app_context():
+        base = azure_v1_base("https://res.openai.azure.com/openai/v1")
+        c = OpenAI(base_url=base, api_key="k", http_client=build_http_client())
+        req = c._build_request(FinalRequestOptions.construct(
+            method="post", url="/chat/completions", json_data={"model": "gpt-4o"}))
+        assert str(req.url) == "https://res.openai.azure.com/openai/v1/chat/completions"
