@@ -65,3 +65,23 @@ def test_providers_endpoint(client):
     res = client.get("/api/models/providers", headers=auth(token))
     assert res.status_code == 200
     assert set(res.get_json()) == {"azure_ai_foundry", "local"}
+
+
+def test_llm_timeout_default_and_override(monkeypatch):
+    from app.integrations import base
+    monkeypatch.delenv("LLM_TIMEOUT", raising=False)
+    assert base.llm_timeout() == 1800.0            # 30 хв за замовчуванням
+    monkeypatch.setenv("LLM_TIMEOUT", "45")
+    assert base.llm_timeout() == 45.0
+    monkeypatch.setenv("LLM_TIMEOUT", "bad")        # некоректне → дефолт
+    assert base.llm_timeout() == 1800.0
+
+
+def test_http_client_uses_long_timeout(monkeypatch):
+    from app.integrations import base
+    monkeypatch.delenv("LLM_TIMEOUT", raising=False)
+    client = base.build_http_client()
+    assert client is not None
+    assert client.timeout.read == 1800.0
+    # Перелік моделей — короткий таймаут.
+    assert base.build_http_client(timeout=20.0).timeout.read == 20.0

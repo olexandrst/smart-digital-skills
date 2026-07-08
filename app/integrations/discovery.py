@@ -48,7 +48,9 @@ def list_available_models(provider, model_type="llm", base_url=None):
 
 def _openai_models(api_key, base_url):
     from openai import OpenAI
-    client = OpenAI(api_key=api_key, base_url=base_url, http_client=build_http_client())
+    # Перелік моделей має бути швидким — короткий таймаут (не 30 хв, як у чаті).
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=20.0,
+                    http_client=build_http_client(timeout=20.0))
     return sorted({m.id for m in client.models.list().data})
 
 

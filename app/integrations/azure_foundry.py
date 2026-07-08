@@ -5,7 +5,7 @@
 api-version. У MVP працює мок.
 """
 from app.integrations.base import (
-    LLMResponse, mock_chat_response, build_http_client, azure_v1_base,
+    LLMResponse, mock_chat_response, build_http_client, azure_v1_base, llm_timeout,
 )
 
 # Зворотна сумісність зі старим імпортом.
@@ -44,6 +44,7 @@ class AzureFoundryClient:
         client = OpenAI(
             base_url=azure_v1_base(self.endpoint),
             api_key=self.api_key,
+            timeout=llm_timeout(),
             http_client=build_http_client(),
         )
         resp = client.chat.completions.create(

@@ -1039,21 +1039,18 @@ body.theme-material .pie-seg { stroke: #fff; }
 .quota:hover { background: var(--glass); border-color: var(--accent-2); }
 body.theme-material .quota:hover { background: #f1f6fe; border-color: #1a73e8; }
 
-/* Використання Навичок (розподіл вартості) */
-.su-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px 22px; align-items: center;
-  padding: 9px 2px; border-bottom: 1px solid var(--border); }
-.su-row:last-child { border-bottom: none; }
-.su-head { color: var(--muted); font-size: 12.5px; font-weight: 600; }
-.su-head span:not(:first-child), .su-row span:not(.su-name) { text-align: right; }
-.su-name { font-weight: 600; font-size: 14px; }
-.su-runs { color: var(--muted); font-variant-numeric: tabular-nums; }
-.su-total { font-weight: 700; font-variant-numeric: tabular-nums; }
-.su-avg { font-variant-numeric: tabular-nums; }
-@media (max-width: 560px) {
-  .su-row { grid-template-columns: 1fr auto; gap: 4px 12px; }
-  .su-head { display: none; }
-  .su-runs { display: none; }
-}
+/* Використання Навичок (розподіл вартості) — таблиця з рівними колонками */
+.su-table { width: 100%; border-collapse: collapse; }
+.su-table th, .su-table td { padding: 9px 4px; border-bottom: 1px solid var(--border); }
+.su-table tbody tr:last-child td { border-bottom: none; }
+.su-table th { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.su-table th.su-name, .su-table td.su-name { text-align: left; }
+.su-table th.su-num, .su-table td.su-num { text-align: right; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+.su-table td.su-name { font-weight: 600; font-size: 14px; }
+.su-table td.su-num { color: var(--text); }
+.su-table td:nth-child(2) { color: var(--muted); }   /* колонка «Запусків» */
+.su-table td:nth-child(3) { font-weight: 700; }       /* колонка «Загальна вартість» */
 
 /* Перемикач області статистики «Гроші» (Admin) */
 .scope-head { display: flex; align-items: center; justify-content: space-between;
@@ -1068,6 +1065,14 @@ body.theme-material .quota:hover { background: #f1f6fe; border-color: #1a73e8; }
 body.theme-material .scope-seg button.active { background: #1a73e8; }
 .scope-card select { width: 100%; }
 .scope-info { margin-top: 8px; font-size: 12.5px; }
+/* Вбудований швидкий пошук користувача/групи */
+.scope-search-wrap { position: relative; margin-bottom: 8px; }
+.scope-search-ic { position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; fill: var(--muted); pointer-events: none; }
+.scope-search { width: 100%; padding-left: 34px; }
+.scope-select { width: 100%; }
+.scope-select option { padding: 6px 8px; }
+.scope-select option:disabled { color: var(--muted); }
 
 /* Перемикач моделі у верхній панелі */
 .model-picker { display: inline-flex; align-items: center; gap: 8px; }
@@ -1079,6 +1084,13 @@ body.theme-material .scope-seg button.active { background: #1a73e8; }
   font-size: 13.5px; font-weight: 600; }
 .mp-none { font-size: 12.5px; color: var(--danger); }
 @media (max-width: 720px) { .mp-label { display: none; } }
+/* Синій Material-апбар: назва моделі має бути білою (інакше зливається з фоном) */
+body.theme-material .topbar .mp-label { color: rgba(255,255,255,0.9); }
+body.theme-material .topbar .mp-single { color: #fff;
+  background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
+body.theme-material .topbar .mp-select { color: #fff;
+  background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.5); }
+body.theme-material .topbar .mp-select option { color: #202124; background: #fff; }
 
 /* Матриця доступів «групи × моделі» */
 .am-wrap { overflow-x: auto; margin-top: 6px; }
