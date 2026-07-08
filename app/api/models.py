@@ -1,4 +1,4 @@
-"""Реєстр моделей (Azure OpenAI / OpenAI / Gemini). Реєструвати — лише Admin."""
+"""Реєстр моделей (Azure OpenAI / локальні). Реєструвати — лише Admin."""
 import json
 from flask import Blueprint, request, jsonify
 from app.extensions import db

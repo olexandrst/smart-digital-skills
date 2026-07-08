@@ -1230,8 +1230,6 @@ async function openSkillEditor(skillId) {
 // ---------- Моделі (Admin) ----------
 const PROVIDER_LABELS = {
   azure_ai_foundry: "Azure OpenAI",
-  openai: "OpenAI",
-  gemini: "Gemini",
   local: "Локальна (Ollama/LM Studio)",
 };
 const LOCAL_DEFAULT_BASE = "http://localhost:11434/v1";

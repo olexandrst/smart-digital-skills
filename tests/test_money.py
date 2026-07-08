@@ -17,7 +17,7 @@ def _chat_once(client, token, content="привіт світ"):
 def test_model_price_attributes(client):
     admin = login(client, "admin", "Admin123!")
     res = client.post("/api/models", headers=auth(admin), json={
-        "name": "Priced", "provider": "openai", "deployment_name": "gpt-4o",
+        "name": "Priced", "provider": "azure", "deployment_name": "gpt-4o",
         "price_in": "10.58", "price_out": "42.0"})
     assert res.status_code == 201
     d = res.get_json()
@@ -30,7 +30,7 @@ def test_model_price_attributes(client):
 
     # Некоректна ціна — помилка.
     assert client.post("/api/models", headers=auth(admin), json={
-        "name": "Bad", "provider": "openai", "deployment_name": "x",
+        "name": "Bad", "provider": "azure", "deployment_name": "x",
         "price_in": "abc"}).status_code == 400
 
 

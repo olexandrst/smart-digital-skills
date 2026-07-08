@@ -2,8 +2,7 @@
 
 Підтримувані провайдери (поле models.provider):
   - azure_ai_foundry / azure_openai → Azure OpenAI
-  - openai                          → OpenAI API
-  - gemini / google                 → Google Gemini API
+  - local (Ollama / LM Studio / OpenAI-сумісний сервер)
 
 У режимі моку (LLM_MOCK=1) або за відсутності ключа повертається мок-клієнт,
 тож застосунок працює без зовнішніх ключів.
@@ -12,16 +11,12 @@ from flask import current_app
 
 from app.integrations.azure_foundry import AzureFoundryClient
 from app.integrations.openai_client import OpenAIClient
-from app.integrations.gemini_client import GeminiClient
 
 # Канонічні значення провайдерів та їх синоніми.
 SUPPORTED_PROVIDERS = {
     "azure_ai_foundry": "azure_ai_foundry",
     "azure_openai": "azure_ai_foundry",
     "azure": "azure_ai_foundry",
-    "openai": "openai",
-    "gemini": "gemini",
-    "google": "gemini",
     # Локальні / OpenAI-сумісні сервери (локально чи віддалено).
     "local": "local",
     "ollama": "local",
@@ -47,17 +42,6 @@ def get_client_for_provider(provider, base_url=None):
             api_key=cfg.get("LOCAL_API_KEY", "local") or "local",
             base_url=(base_url or cfg.get("LOCAL_BASE_URL", "http://localhost:11434/v1")),
             use_mock=mock, label="Локальна модель",
-        )
-    if canonical == "openai":
-        return OpenAIClient(
-            api_key=cfg.get("OPENAI_API_KEY", ""),
-            base_url=(base_url or cfg.get("OPENAI_BASE_URL", "")),
-            use_mock=mock,
-        )
-    if canonical == "gemini":
-        return GeminiClient(
-            api_key=cfg.get("GEMINI_API_KEY", ""),
-            use_mock=mock,
         )
     return AzureFoundryClient(
         endpoint=cfg.get("AZURE_FOUNDRY_ENDPOINT", ""),
