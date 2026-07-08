@@ -15,7 +15,8 @@ def _uid(username):
 def test_default_weekly_limit(client):
     token = login(client, "u1", "pass")
     q = client.get("/api/usage/me", headers=auth(token)).get_json()["quota"]
-    assert q["limit"] == 2000        # DEFAULT_WEEKLY_TOKEN_LIMIT
+    assert q["limit"] == 1.0         # DEFAULT_WEEKLY_MONEY_LIMIT = $1
+    assert q["currency"] == "USD"
     assert q["period"] == "weekly"
     assert q["custom"] is False
     assert q["used"] == 0
@@ -63,7 +64,7 @@ def test_delete_custom_limit_falls_back(client):
 
     token = login(client, "u1", "pass")
     q = client.get("/api/usage/me", headers=auth(token)).get_json()["quota"]
-    assert q["custom"] is False and q["limit"] == 2000
+    assert q["custom"] is False and q["limit"] == 1.0
 
 
 def test_users_list_shows_quota_fields(client):
@@ -71,8 +72,8 @@ def test_users_list_shows_quota_fields(client):
     users = client.get("/api/users", headers=auth(admin)).get_json()
     u1 = next(u for u in users if u["username"] == "u1")
     assert u1["custom_limit"] is None
-    assert u1["effective_limit"] == 2000
-    assert "token_used" in u1
+    assert u1["effective_limit"] == 1.0
+    assert "used_cost" in u1
 
 
 # ---------- Лічильник і енфорсмент ----------
@@ -80,7 +81,8 @@ def test_users_list_shows_quota_fields(client):
 def test_counter_grows_and_enforces(client):
     admin = login(client, "admin", "Admin123!")
     uid = _uid("u1")
-    client.post(f"/api/users/{uid}/token-limit", headers=auth(admin), json={"limit": 1})
+    # Дуже мала грошова квота ($0.01) — вичерпається з першого повідомлення.
+    client.post(f"/api/users/{uid}/token-limit", headers=auth(admin), json={"limit": 0.01})
 
     token = login(client, "u1", "pass")
     mid = Model.query.filter_by(name="gpt-4o").first().id
