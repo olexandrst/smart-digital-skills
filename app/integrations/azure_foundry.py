@@ -1,10 +1,11 @@
 """Адаптер до Azure OpenAI / Azure AI Foundry.
 
-У MVP працює мок. Реальний клієнт підключається через openai SDK у режимі
-Azure, коли задано endpoint/ключ та вимкнено мок.
+Використовує v1 (New Foundry) OpenAI-сумісну поверхню: чат викликається як
+звичайний OpenAI проти `https://<host>/openai/v1/` з `model=<деплоймент>`, БЕЗ
+api-version. У MVP працює мок.
 """
 from app.integrations.base import (
-    LLMResponse, mock_chat_response, build_http_client, azure_resource_base,
+    LLMResponse, mock_chat_response, build_http_client, azure_v1_base,
 )
 
 # Зворотна сумісність зі старим імпортом.
@@ -31,18 +32,18 @@ class AzureFoundryClient:
 
     def _real_chat(self, model_name, messages, parameters):
         try:
-            from openai import AzureOpenAI
+            from openai import OpenAI
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "Пакет openai не встановлено. Виконайте `pip install openai` "
                 "або увімкніть LLM_MOCK=1."
             ) from exc
 
-        client = AzureOpenAI(
-            # Корінь ресурсу (без шляху) — інакше подвоєння шляху дає 404.
-            azure_endpoint=azure_resource_base(self.endpoint),
+        # v1 (New Foundry) — OpenAI-сумісна поверхня: model = назва деплойменту,
+        # ключ передається як Bearer (Azure v1 це приймає), api-version не потрібна.
+        client = OpenAI(
+            base_url=azure_v1_base(self.endpoint),
             api_key=self.api_key,
-            api_version=parameters.get("api_version", self.api_version),
             http_client=build_http_client(),
         )
         resp = client.chat.completions.create(

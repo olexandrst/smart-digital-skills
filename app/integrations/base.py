@@ -18,6 +18,17 @@ def azure_resource_base(endpoint):
     return endpoint.rstrip("/")
 
 
+def azure_v1_base(endpoint):
+    """Базовий URL v1 API Azure OpenAI: `https://<host>/openai/v1/`.
+
+    v1 — OpenAI-сумісна поверхня (New Foundry): чат викликається як звичайний
+    OpenAI (`model=<деплоймент>`), БЕЗ api-version. Це знімає прив'язку до
+    конкретної версії API й уникає 404 на класичному шляху `/openai/deployments`.
+    """
+    root = azure_resource_base(endpoint)
+    return f"{root}/openai/v1/" if root else root
+
+
 @dataclass
 class LLMResponse:
     content: str
