@@ -1760,6 +1760,10 @@ async function renderMoneyPanel() {
     <div class="card">
       <h2>Витрати за моделями</h2>
       <div class="money-split"><div id="money-pie"></div><div id="money-list"></div></div>
+    </div>
+    <div class="card">
+      <h2>Використання Навичок</h2>
+      <div id="skill-usage"></div>
     </div>`;
   $("#mr-from").addEventListener("change", () => { moneyRange.from = $("#mr-from").value; loadMoney(); });
   $("#mr-to").addEventListener("change", () => { moneyRange.to = $("#mr-to").value; loadMoney(); });
@@ -1784,6 +1788,26 @@ async function loadMoney() {
       <div class="stat"><div class="num">${fmtInt(m.requests)}</div><div class="label">Запитів</div></div>
     </div>`;
   renderMoneyPie($("#money-pie"), $("#money-list"), m.by_model);
+  renderSkillUsage($("#skill-usage"), m.by_skill);
+}
+
+// Розподіл вартості по навичках: загальна та середня за запуск.
+function renderSkillUsage(box, bySkill) {
+  const items = (bySkill || []).filter(s => s.runs > 0);
+  if (!items.length) {
+    box.innerHTML = `<p class="muted">За обраний період навички не запускались.</p>`;
+    return;
+  }
+  box.innerHTML =
+    `<div class="su-row su-head">
+       <span>Навичка</span><span>Запусків</span><span>Загальна вартість</span><span>Середня / запуск</span>
+     </div>` +
+    items.map(s => `<div class="su-row">
+       <span class="su-name">${esc(s.skill)}</span>
+       <span class="su-runs">${fmtInt(s.runs)}</span>
+       <span class="su-total">${fmtMoney(s.cost)}</span>
+       <span class="su-avg">${fmtMoney(s.avg)}</span>
+     </div>`).join("");
 }
 
 // ---------- Діаграми (inline SVG, тема-залежні) ----------

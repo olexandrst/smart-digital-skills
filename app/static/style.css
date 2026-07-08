@@ -1038,3 +1038,19 @@ body.theme-material .pie-seg { stroke: #fff; }
 .quota { text-align: left; font: inherit; }
 .quota:hover { background: var(--glass); border-color: var(--accent-2); }
 body.theme-material .quota:hover { background: #f1f6fe; border-color: #1a73e8; }
+
+/* Використання Навичок (розподіл вартості) */
+.su-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px 22px; align-items: center;
+  padding: 9px 2px; border-bottom: 1px solid var(--border); }
+.su-row:last-child { border-bottom: none; }
+.su-head { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.su-head span:not(:first-child), .su-row span:not(.su-name) { text-align: right; }
+.su-name { font-weight: 600; font-size: 14px; }
+.su-runs { color: var(--muted); font-variant-numeric: tabular-nums; }
+.su-total { font-weight: 700; font-variant-numeric: tabular-nums; }
+.su-avg { font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .su-row { grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .su-head { display: none; }
+  .su-runs { display: none; }
+}

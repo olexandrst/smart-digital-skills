@@ -1,5 +1,5 @@
 """Тести цін моделей, обліку вартості (USD) та аналітики (timeline / money)."""
-from app.models import Model, TokenUsageLog
+from app.models import Model, Skill, TokenUsageLog
 from app.services import quota_service
 from tests.conftest import login, auth
 
@@ -85,6 +85,26 @@ def test_money_breakdown_by_model(client):
     assert res["cost_total"] > 0
     assert res["activity_from"] and res["activity_to"]
     assert any(m["model"] == "gpt-4o" and m["cost"] > 0 for m in res["by_model"])
+
+
+def test_money_breakdown_by_skill(client):
+    token = login(client, "u1", "pass")
+    skill = Skill.query.filter_by(name="Summarizer").first()
+    # Активуємо навичку для користувача, потім запускаємо її у чаті.
+    assert client.post(f"/api/skills/{skill.id}/activate",
+                       headers=auth(token)).status_code == 200
+    mid = Model.query.filter_by(name="gpt-4o").first().id
+    sid = client.post("/api/chat/sessions", headers=auth(token),
+                      json={"model_id": mid}).get_json()["id"]
+    assert client.post(f"/api/chat/sessions/{sid}/messages", headers=auth(token),
+                       json={"content": "стисни це", "skill_id": skill.id}).status_code == 200
+
+    res = client.get("/api/usage/money", headers=auth(token)).get_json()
+    row = next((s for s in res["by_skill"] if s["skill"] == "Summarizer"), None)
+    assert row is not None
+    assert row["runs"] >= 1
+    assert row["cost"] > 0
+    assert abs(row["avg"] - row["cost"] / row["runs"]) < 1e-9
 
 
 def test_money_period_filter_excludes_future(client):

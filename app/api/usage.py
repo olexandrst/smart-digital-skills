@@ -6,7 +6,7 @@ from app.extensions import db
 from app.core.permissions import require_auth, require_global_role, require_group_membership
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.models import TokenUsageLog, User, Model
+from app.models import TokenUsageLog, User, Model, Skill
 from app.services import quota_service
 
 bp = Blueprint("usage", __name__)
@@ -130,11 +130,26 @@ def money():
          for r in rows],
         key=lambda x: x["cost"], reverse=True)
 
+    # Розподіл вартості по НАВИЧКАХ (лише запуски з застосованою навичкою).
+    srows = (q.filter(TokenUsageLog.skill_id.isnot(None))
+             .with_entities(TokenUsageLog.skill_id,
+                            func.coalesce(func.sum(TokenUsageLog.cost_total), 0.0),
+                            func.count(TokenUsageLog.id))
+             .group_by(TokenUsageLog.skill_id).all())
+    skill_names = {s.id: s.name for s in Skill.query.all()}
+    by_skill = sorted(
+        [{"skill_id": r[0], "skill": skill_names.get(r[0], "—"),
+          "cost": float(r[1]), "runs": int(r[2]),
+          "avg": (float(r[1]) / r[2]) if r[2] else 0.0}
+         for r in srows],
+        key=lambda x: x["cost"], reverse=True)
+
     return jsonify({
         "cost_in": agg["cost_in"], "cost_out": agg["cost_out"],
         "cost_total": agg["cost_total"], "requests": agg["requests"],
         "total_tokens": agg["total_tokens"],
         "by_model": by_model,
+        "by_skill": by_skill,
         "activity_from": _iso(span[0]) if span[0] else None,
         "activity_to": _iso(span[1]) if span[1] else None,
     })
