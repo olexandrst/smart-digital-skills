@@ -195,42 +195,59 @@ $("#logout-btn").addEventListener("click", logout);
 // Клік по індикатору квоти (внизу зліва) → «Квота» → вкладка «Гроші».
 $("#quota").addEventListener("click", () => openUsageTab("money"));
 
-// ---------- Модальне вікно вибору моделі ----------
-// Провайдер моделі → підпис (без кольорового маркування — усі однакові).
-function providerLabel(m) {
-  return PROVIDER_LABELS[m.provider] || "Модель";
-}
-
-async function openModelModal() {
-  const overlay = $("#model-modal");
-  const tiles = $("#model-tiles");
-  tiles.innerHTML = `<p class="muted">Завантаження…</p>`;
-  overlay.classList.remove("hidden");
+// ---------- Модель у верхній панелі (перемикач + автовибір) ----------
+// Завантажує доступні користувачу моделі та типову; малює перемикач.
+async function loadModelPicker() {
   try {
-    const models = await api("/models?active=1");
-    if (!models.length) {
-      tiles.innerHTML = `<p class="muted">Немає активних моделей. Додайте модель у вкладці «Моделі».</p>`;
-      return;
+    const res = await api("/models/mine");
+    chatState.models = res.models || [];
+    const ids = new Set(chatState.models.map(m => m.id));
+    if (chatState.activeModelId == null || !ids.has(chatState.activeModelId)) {
+      chatState.activeModelId = res.default_id;
     }
-    tiles.innerHTML = "";
-    models.forEach(m => {
-      // Усі плитки — одним системним кольором (vendor-default).
-      const tile = el(`<button class="model-tile vendor-default">
-        <span class="tile-vendor">${esc(providerLabel(m))}</span>
-        <span class="tile-name">${esc(m.name)}</span>
-        <span class="tile-dep">${esc(m.deployment_name || "")}</span>
-      </button>`);
-      tile.addEventListener("click", () => createChatWithModel(m.id));
-      tiles.appendChild(tile);
-    });
-  } catch (err) { tiles.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+  } catch (e) { chatState.models = []; }
+  renderModelPicker();
 }
-function closeModelModal() { $("#model-modal").classList.add("hidden"); }
 
-async function createChatWithModel(modelId) {
+function renderModelPicker() {
+  const box = $("#model-picker");
+  if (!box) return;
+  const models = chatState.models || [];
+  if (!models.length) {
+    box.innerHTML = `<span class="mp-none">Немає доступних моделей</span>`;
+    return;
+  }
+  if (models.length === 1) {
+    box.innerHTML = `<span class="mp-label">Модель:</span>` +
+      `<span class="mp-single">${esc(models[0].name)}</span>`;
+    return;
+  }
+  const cur = chatState.activeModelId;
+  const opts = models.map(m =>
+    `<option value="${m.id}" ${m.id === cur ? "selected" : ""}>${esc(m.name)}${m.is_system ? " (системна)" : ""}</option>`).join("");
+  box.innerHTML = `<span class="mp-label">Модель:</span>` +
+    `<select id="mp-select" class="mp-select" title="Модель для чату">${opts}</select>`;
+  $("#mp-select").addEventListener("change", () => pickModel(Number($("#mp-select").value)));
+}
+
+// Вибір моделі: застосовуємо до відкритого чату (як і до наступних нових).
+async function pickModel(id) {
+  chatState.activeModelId = id;
+  if (!chatState.sessionId) return;
   try {
-    const s = await api("/chat/sessions", { method: "POST", body: { model_id: Number(modelId) } });
-    closeModelModal();
+    await api(`/chat/sessions/${chatState.sessionId}`, { method: "PATCH", body: { model_id: id } });
+    const nm = (chatState.models.find(m => m.id === id) || {}).name || "";
+    const label = $("#chat-model");
+    if (label) label.textContent = "· " + nm;
+    refreshSessionList();
+  } catch (err) { toast(err.message, "err"); renderModelPicker(); }
+}
+
+// «Новий чат» — модель обирається автоматично (поточна активна / типова).
+async function createNewChat() {
+  try {
+    const body = chatState.activeModelId ? { model_id: chatState.activeModelId } : {};
+    const s = await api("/chat/sessions", { method: "POST", body });
     chatState.selectedSkill = null;  // новий чат — відтискаємо обрану навичку
     chatState.openAfter = s.id;
     if (document.querySelector("#nav .nav-item.active")?.dataset.tab === "chat") {
@@ -241,11 +258,7 @@ async function createChatWithModel(modelId) {
   } catch (err) { toast(err.message, "err"); }
 }
 
-$("#new-chat-btn").addEventListener("click", openModelModal);
-$("#model-modal-close").addEventListener("click", closeModelModal);
-$("#model-modal").addEventListener("click", (e) => {
-  if (e.target.id === "model-modal") closeModelModal();
-});
+$("#new-chat-btn").addEventListener("click", createNewChat);
 
 // ---------- Тема (Темна glass / Світла / Material), лише всередині застосунку ----------
 const T_MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
@@ -302,6 +315,7 @@ async function showApp() {
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
   refreshQuota();
+  loadModelPicker();
 }
 
 async function refreshQuota() {
@@ -381,7 +395,8 @@ async function openTab(id) {
 }
 
 // ---------- Чат з обраною моделлю ----------
-let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null };
+let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null,
+                  models: [], activeModelId: null };
 
 function sessionItemHtml(s, activeId) {
   // Без кольорового маркування за вендором — усі чати одним системним кольором.
@@ -396,6 +411,7 @@ async function viewChat() {
     api("/skills/mine"), api("/chat/sessions"),
   ]);
   chatState.skills = skills;
+  loadModelPicker();  // оновлюємо перелік моделей (доступи могли змінитись)
   const view = $("#view");
 
   const sessionItems = sessions.map(s => sessionItemHtml(s, chatState.sessionId)).join("")
@@ -535,8 +551,10 @@ function renderChatNote(text) {
 async function openChatSession(sessionId) {
   chatState.sessionId = sessionId;
   const session = await api(`/chat/sessions/${sessionId}`);
+  // Перемикач у верхній панелі відображає модель відкритого чату.
+  if (session.model_id) { chatState.activeModelId = session.model_id; renderModelPicker(); }
   $("#chat-header").innerHTML =
-    `<strong>${esc(session.title || "Чат")}</strong> <span class="muted">· ${esc(session.model_name || "—")}</span>`;
+    `<strong>${esc(session.title || "Чат")}</strong> <span class="muted" id="chat-model">· ${esc(session.model_name || "—")}</span>`;
   const log = $("#chat-log");
   log.innerHTML = "";
   session.messages.forEach(renderChatMessage);
@@ -1230,18 +1248,38 @@ async function openSkillEditor(skillId) {
 // ---------- Моделі (Admin) ----------
 const PROVIDER_LABELS = {
   azure_ai_foundry: "Azure OpenAI",
-  openai: "OpenAI",
-  gemini: "Gemini",
   local: "Локальна (Ollama/LM Studio)",
 };
 const LOCAL_DEFAULT_BASE = "http://localhost:11434/v1";
 
+let modelsSubTab = "config";  // активна вкладка «Моделі»: config | access
+
 async function viewModels() {
-  const [models, providers] = await Promise.all([api("/models"), api("/models/providers")]);
   const view = $("#view");
+  view.innerHTML = `
+    <div class="usage-tabs">
+      <button class="u-tab" data-mt="config">Конфіг</button>
+      <button class="u-tab" data-mt="access">Доступи</button>
+    </div>
+    <div id="models-panel"></div>`;
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.addEventListener("click", () => { modelsSubTab = b.dataset.mt; paintModelsSub(); }));
+  paintModelsSub();
+}
+
+function paintModelsSub() {
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.mt === modelsSubTab));
+  if (modelsSubTab === "access") renderModelAccess();
+  else renderModelConfig();
+}
+
+async function renderModelConfig() {
+  const [models, providers] = await Promise.all([api("/models"), api("/models/providers")]);
+  const panel = $("#models-panel");
   const provOpts = providers.map(p =>
     `<option value="${p}">${esc(PROVIDER_LABELS[p] || p)}</option>`).join("");
-  view.innerHTML = `
+  panel.innerHTML = `
     <div class="card">
       <h2>Підключити модель</h2>
       <div class="row">
@@ -1321,7 +1359,7 @@ async function viewModels() {
         deployment_name: $("#m-dep").value, base_url: $("#m-base").value.trim() || null,
         price_in: $("#m-pin").value.trim() || null,
         price_out: $("#m-pout").value.trim() || null }});
-      toast("Модель додано"); openTab("models");
+      toast("Модель додано"); renderModelConfig();
     } catch (err) { toast(err.message, "err"); }
   });
   const body = $("#m-body");
@@ -1353,21 +1391,74 @@ async function viewModels() {
     const sysBtn = tr.querySelector("[data-act='sys']");
     if (sysBtn) sysBtn.addEventListener("click", async () => {
       try { await api(`/models/${m.id}/system`, { method: "POST", body: { is_system: true } });
-        toast(`«${m.name}» — системна модель`); openTab("models"); }
+        toast(`«${m.name}» — системна модель`); renderModelConfig(); }
       catch (err) { toast(err.message, "err"); }
     });
     tr.querySelector("[data-act='toggle']").addEventListener("click", async () => {
       try { await api(`/models/${m.id}/activate`, { method: "POST", body: { is_active: !m.is_active } });
-        toast("Статус оновлено"); openTab("models"); }
+        toast("Статус оновлено"); renderModelConfig(); }
       catch (err) { toast(err.message, "err"); }
     });
     tr.querySelector("[data-act='del']").addEventListener("click", async () => {
       if (!confirm(`Видалити модель «${m.name}»?`)) return;
-      try { await api(`/models/${m.id}`, { method: "DELETE" }); toast("Модель видалено"); openTab("models"); }
+      try { await api(`/models/${m.id}`, { method: "DELETE" }); toast("Модель видалено"); renderModelConfig(); }
       catch (err) { toast(err.message, "err"); }
     });
     body.appendChild(tr);
   });
+}
+
+// Матриця доступів: групи (рядки) × моделі (колонки), чекбокси у комірках.
+async function renderModelAccess() {
+  const panel = $("#models-panel");
+  panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
+  const mx = await api("/models/access-matrix");
+  if (!mx.models.length) {
+    panel.innerHTML = `<div class="card"><p class="muted">Спершу додайте моделі у вкладці «Конфіг».</p></div>`;
+    return;
+  }
+  if (!mx.groups.length) {
+    panel.innerHTML = `<div class="card"><p class="muted">Спершу створіть групи у вкладці «Групи», щоб надавати їм доступ до моделей.</p></div>`;
+    return;
+  }
+  const grants = new Set(mx.grants);
+  const head = mx.models.map(m => {
+    const tags = (m.is_system ? `<span class="am-tag">системна</span>` : "")
+      + (m.is_active ? "" : `<span class="am-tag am-off">неактивна</span>`);
+    return `<th class="am-col${m.is_system ? " am-sys" : ""}"><span class="am-mname">${esc(m.name)}</span>${tags}</th>`;
+  }).join("");
+  const rows = mx.groups.map(g => {
+    const cells = mx.models.map(m => {
+      if (m.is_system) {
+        return `<td class="am-cell"><input type="checkbox" checked disabled title="Системна модель доступна всім"></td>`;
+      }
+      const on = grants.has(`${g.id}:${m.id}`);
+      return `<td class="am-cell"><input type="checkbox" data-g="${g.id}" data-m="${m.id}"${on ? " checked" : ""}></td>`;
+    }).join("");
+    return `<tr><th class="am-row" scope="row">${esc(g.name)}</th>${cells}</tr>`;
+  }).join("");
+  panel.innerHTML = `
+    <div class="card">
+      <h2>Матриця доступів</h2>
+      <p class="muted">Позначте, які <strong>групи</strong> мають доступ до яких <strong>моделей</strong>. Користувач бачить у чаті моделі своїх груп. <strong>Системна</strong> модель доступна всім і не потребує призначення.</p>
+      <div class="am-wrap">
+        <table class="am-table">
+          <thead><tr><th class="am-corner">Група \\ Модель</th>${head}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+  panel.querySelectorAll(".am-cell input[data-g]").forEach(cb =>
+    cb.addEventListener("change", async () => {
+      cb.disabled = true;
+      try {
+        await api("/models/access", { method: "POST", body: {
+          group_id: Number(cb.dataset.g), model_id: Number(cb.dataset.m), granted: cb.checked } });
+      } catch (err) {
+        cb.checked = !cb.checked;  // відкат на помилці
+        toast(err.message, "err");
+      } finally { cb.disabled = false; }
+    }));
 }
 
 // ---------- Групи ----------
@@ -1689,6 +1780,9 @@ async function openUserEditor(userId) {
 // ---------- Токени ----------
 // ---------- Квота: вкладки «Токени» / «Гроші» ----------
 let moneyRange = { from: "", to: "" };
+// Область перегляду «Гроші» (лише для Admin): свій/інший користувач або група.
+let moneyScope = { mode: "user", userId: "", groupId: "" };
+let scopeOptions = null;  // кеш списків користувачів/груп для перемикача
 
 async function viewUsage() {
   const view = $("#view");
@@ -1745,7 +1839,9 @@ async function renderTokensPanel() {
 
 async function renderMoneyPanel() {
   const panel = $("#usage-panel");
+  const admin = hasRole("admin");
   panel.innerHTML = `
+    ${admin ? `<div class="card scope-card" id="scope-card"><p class="muted">Завантаження…</p></div>` : ""}
     <div class="card">
       <div class="money-head">
         <h2>Витрати</h2>
@@ -1760,20 +1856,87 @@ async function renderMoneyPanel() {
     <div class="card">
       <h2>Витрати за моделями</h2>
       <div class="money-split"><div id="money-pie"></div><div id="money-list"></div></div>
+    </div>
+    <div class="card">
+      <h2>Використання Навичок</h2>
+      <div id="skill-usage"></div>
     </div>`;
   $("#mr-from").addEventListener("change", () => { moneyRange.from = $("#mr-from").value; loadMoney(); });
   $("#mr-to").addEventListener("change", () => { moneyRange.to = $("#mr-to").value; loadMoney(); });
   $("#mr-reset").addEventListener("click", () => {
     moneyRange = { from: "", to: "" }; $("#mr-from").value = ""; $("#mr-to").value = ""; loadMoney();
   });
+  if (admin) await renderScopeSelector();
   loadMoney();
+}
+
+// Перемикач області (Admin): користувач ↔ група.
+async function renderScopeSelector() {
+  if (!scopeOptions) scopeOptions = await api("/usage/scope-options");
+  const card = $("#scope-card");
+  if (!card) return;
+  const isGroup = moneyScope.mode === "group";
+  card.innerHTML = `
+    <div class="scope-head">
+      <h2>Статистика для</h2>
+      <div class="seg scope-seg">
+        <button type="button" class="${isGroup ? "" : "active"}" data-mode="user">Користувача</button>
+        <button type="button" class="${isGroup ? "active" : ""}" data-mode="group">Групи</button>
+      </div>
+    </div>
+    <select id="scope-target">${scopeTargetOptions()}</select>
+    <div id="scope-info" class="muted scope-info"></div>`;
+  // Синхронізуємо стан із фактично обраним у списку значенням.
+  const sel = $("#scope-target");
+  if (isGroup) moneyScope.groupId = sel.value;
+  else moneyScope.userId = sel.value;
+
+  card.querySelectorAll(".scope-seg button").forEach(b =>
+    b.addEventListener("click", () => {
+      if (moneyScope.mode === b.dataset.mode) return;
+      moneyScope.mode = b.dataset.mode;
+      renderScopeSelector().then(loadMoney);
+    }));
+  sel.addEventListener("change", () => {
+    if (moneyScope.mode === "group") moneyScope.groupId = sel.value;
+    else moneyScope.userId = sel.value;
+    loadMoney();
+  });
+}
+
+function scopeTargetOptions() {
+  if (moneyScope.mode === "group") {
+    const groups = (scopeOptions && scopeOptions.groups) || [];
+    if (!groups.length) return `<option value="">— груп немає —</option>`;
+    const cur = moneyScope.groupId || String(groups[0].id);
+    return groups.map(g =>
+      `<option value="${g.id}" ${String(g.id) === String(cur) ? "selected" : ""}>${esc(g.name)}</option>`).join("");
+  }
+  const me = state.user && state.user.id;
+  const cur = moneyScope.userId || String(me);
+  return ((scopeOptions && scopeOptions.users) || []).map(u => {
+    const label = (u.full_name ? u.full_name + " · " : "") + u.username + (u.id === me ? " (я)" : "");
+    return `<option value="${u.id}" ${String(u.id) === String(cur) ? "selected" : ""}>${esc(label)}</option>`;
+  }).join("");
 }
 
 async function loadMoney() {
   const qs = [];
   if (moneyRange.from) qs.push("from=" + encodeURIComponent(moneyRange.from));
   if (moneyRange.to) qs.push("to=" + encodeURIComponent(moneyRange.to));
+  if (hasRole("admin")) {
+    if (moneyScope.mode === "group" && moneyScope.groupId)
+      qs.push("group_id=" + encodeURIComponent(moneyScope.groupId));
+    else if (moneyScope.userId)
+      qs.push("user_id=" + encodeURIComponent(moneyScope.userId));
+  }
   const m = await api("/usage/money" + (qs.length ? "?" + qs.join("&") : ""));
+  const si = $("#scope-info");
+  if (si && m.scope) {
+    si.textContent = m.scope.type === "group"
+      ? `Група «${m.scope.group}» · учасників: ${fmtInt(m.scope.members)}`
+      : `Користувач: ${m.scope.username}`;
+  }
   // Порожній період — за замовчуванням підставляємо межі всієї активності.
   if (!moneyRange.from && m.activity_from) $("#mr-from").value = m.activity_from.slice(0, 10);
   if (!moneyRange.to && m.activity_to) $("#mr-to").value = m.activity_to.slice(0, 10);
@@ -1784,6 +1947,26 @@ async function loadMoney() {
       <div class="stat"><div class="num">${fmtInt(m.requests)}</div><div class="label">Запитів</div></div>
     </div>`;
   renderMoneyPie($("#money-pie"), $("#money-list"), m.by_model);
+  renderSkillUsage($("#skill-usage"), m.by_skill);
+}
+
+// Розподіл вартості по навичках: загальна та середня за запуск.
+function renderSkillUsage(box, bySkill) {
+  const items = (bySkill || []).filter(s => s.runs > 0);
+  if (!items.length) {
+    box.innerHTML = `<p class="muted">За обраний період навички не запускались.</p>`;
+    return;
+  }
+  box.innerHTML =
+    `<div class="su-row su-head">
+       <span>Навичка</span><span>Запусків</span><span>Загальна вартість</span><span>Середня / запуск</span>
+     </div>` +
+    items.map(s => `<div class="su-row">
+       <span class="su-name">${esc(s.skill)}</span>
+       <span class="su-runs">${fmtInt(s.runs)}</span>
+       <span class="su-total">${fmtMoney(s.cost)}</span>
+       <span class="su-avg">${fmtMoney(s.avg)}</span>
+     </div>`).join("");
 }
 
 // ---------- Діаграми (inline SVG, тема-залежні) ----------

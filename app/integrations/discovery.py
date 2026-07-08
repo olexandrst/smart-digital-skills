@@ -15,10 +15,6 @@ from app.integrations.base import build_http_client, azure_resource_base
 _FALLBACK = {
     "azure_ai_foundry": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
                           "o4-mini", "o3-mini"],
-    "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini",
-               "o4-mini", "o3-mini"],
-    "gemini": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash",
-               "gemini-1.5-pro", "gemini-1.5-flash"],
     "local": ["llama3.1", "llama3.2", "qwen2.5", "mistral", "phi3", "gemma2"],
 }
 
@@ -40,18 +36,6 @@ def list_available_models(provider, model_type="llm", base_url=None):
         if mock or not url:
             return fallback()
         return _openai_models(cfg.get("LOCAL_API_KEY", "local") or "local", url), "api"
-
-    if canonical == "openai":
-        key = cfg.get("OPENAI_API_KEY", "")
-        if mock or not key:
-            return fallback()
-        return _openai_models(key, base_url or cfg.get("OPENAI_BASE_URL", "") or None), "api"
-
-    if canonical == "gemini":
-        key = cfg.get("GEMINI_API_KEY", "")
-        if mock or not key:
-            return fallback()
-        return _gemini_models(key), "api"
 
     # Azure OpenAI
     endpoint = cfg.get("AZURE_FOUNDRY_ENDPOINT", "")
@@ -109,14 +93,3 @@ def _azure_models(endpoint, api_key, api_version):
     finally:
         client.close()
     return []
-
-
-def _gemini_models(api_key):
-    import google.generativeai as genai
-    genai.configure(api_key=api_key)
-    out = []
-    for m in genai.list_models():
-        methods = getattr(m, "supported_generation_methods", []) or []
-        if "generateContent" in methods:
-            out.append(m.name.split("/")[-1])
-    return sorted(set(out))

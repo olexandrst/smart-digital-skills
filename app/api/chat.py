@@ -21,13 +21,23 @@ def list_sessions():
 @bp.post("/sessions")
 @require_auth
 def create_session():
+    """Створює чат. `model_id` необовʼязковий — модель обирається автоматично."""
+    data = request.get_json(silent=True) or {}
+    session = chat_service.create_session(
+        current_user(), model_id=data.get("model_id"), title=data.get("title"))
+    return jsonify(session.to_dict()), 201
+
+
+@bp.patch("/sessions/<int:session_id>")
+@require_auth
+def update_session(session_id):
+    """Зміна моделі чату (перемикач моделі у верхній панелі)."""
     data = request.get_json(silent=True) or {}
     model_id = data.get("model_id")
     if not model_id:
         raise ApiError("Вкажіть model_id", 400, "validation_error")
-    session = chat_service.create_session(
-        current_user(), model_id, title=data.get("title"))
-    return jsonify(session.to_dict()), 201
+    session = chat_service.set_session_model(current_user(), session_id, model_id)
+    return jsonify(session.to_dict())
 
 
 @bp.get("/sessions/<int:session_id>")

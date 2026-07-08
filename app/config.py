@@ -36,13 +36,6 @@ class BaseConfig:
     AZURE_FOUNDRY_API_VERSION = os.getenv("AZURE_FOUNDRY_API_VERSION",
                                           "2024-02-15-preview")
 
-    # OpenAI API
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
-
-    # Google Gemini API
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-
     # Локальні / OpenAI-сумісні моделі (Ollama, LM Studio — локально чи віддалено).
     # Базовий URL береться з поля моделі; ці значення — дефолти/фолбек.
     LOCAL_BASE_URL = os.getenv("LOCAL_BASE_URL", "http://localhost:11434/v1")

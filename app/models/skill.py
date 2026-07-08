@@ -202,6 +202,24 @@ class GroupSkill(db.Model):
     assigned_at = db.Column(db.DateTime, nullable=False, default=_now)
 
 
+class GroupModel(db.Model):
+    """Доступ групи до моделі (матриця доступів «групи × моделі»).
+
+    Наявність рядка = група має доступ до моделі. Ефективний доступ користувача
+    обчислюється динамічно з його активних членств (плюс системна модель — усім).
+    """
+    __tablename__ = "group_models"
+    __table_args__ = (db.UniqueConstraint("group_id", "model_id"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey("groups.id", ondelete="CASCADE"),
+                         nullable=False)
+    model_id = db.Column(db.Integer, db.ForeignKey("models.id", ondelete="CASCADE"),
+                         nullable=False)
+    assigned_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    assigned_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+
 class UserSkill(db.Model):
     """Матеріалізований ефективний доступ користувача до скіла."""
     __tablename__ = "user_skills"

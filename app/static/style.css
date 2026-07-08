@@ -1038,3 +1038,67 @@ body.theme-material .pie-seg { stroke: #fff; }
 .quota { text-align: left; font: inherit; }
 .quota:hover { background: var(--glass); border-color: var(--accent-2); }
 body.theme-material .quota:hover { background: #f1f6fe; border-color: #1a73e8; }
+
+/* Використання Навичок (розподіл вартості) */
+.su-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px 22px; align-items: center;
+  padding: 9px 2px; border-bottom: 1px solid var(--border); }
+.su-row:last-child { border-bottom: none; }
+.su-head { color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.su-head span:not(:first-child), .su-row span:not(.su-name) { text-align: right; }
+.su-name { font-weight: 600; font-size: 14px; }
+.su-runs { color: var(--muted); font-variant-numeric: tabular-nums; }
+.su-total { font-weight: 700; font-variant-numeric: tabular-nums; }
+.su-avg { font-variant-numeric: tabular-nums; }
+@media (max-width: 560px) {
+  .su-row { grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .su-head { display: none; }
+  .su-runs { display: none; }
+}
+
+/* Перемикач області статистики «Гроші» (Admin) */
+.scope-head { display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.scope-head h2 { margin: 0; }
+.scope-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px;
+  background: var(--panel-2, rgba(127,127,127,0.10)); border: 1px solid var(--border); }
+.scope-seg button { background: transparent; color: var(--muted); padding: 6px 16px;
+  border-radius: 7px; font-size: 13px; font-weight: 600; }
+.scope-seg button:hover:not(.active) { color: var(--text); background: rgba(127,127,127,0.12); }
+.scope-seg button.active { background: var(--accent); color: #fff; }
+body.theme-material .scope-seg button.active { background: #1a73e8; }
+.scope-card select { width: 100%; }
+.scope-info { margin-top: 8px; font-size: 12.5px; }
+
+/* Перемикач моделі у верхній панелі */
+.model-picker { display: inline-flex; align-items: center; gap: 8px; }
+.mp-label { font-size: 12.5px; color: var(--muted); }
+.mp-single { font-size: 13.5px; font-weight: 600; color: var(--text);
+  padding: 5px 12px; border-radius: 8px; background: rgba(127,127,127,0.12);
+  border: 1px solid var(--border); }
+.mp-select { width: auto; min-width: 150px; padding: 6px 30px 6px 12px;
+  font-size: 13.5px; font-weight: 600; }
+.mp-none { font-size: 12.5px; color: var(--danger); }
+@media (max-width: 720px) { .mp-label { display: none; } }
+
+/* Матриця доступів «групи × моделі» */
+.am-wrap { overflow-x: auto; margin-top: 6px; }
+.am-table { border-collapse: separate; border-spacing: 0; min-width: max-content; }
+.am-table th, .am-table td { border-bottom: 1px solid var(--border); }
+.am-corner { position: sticky; left: 0; z-index: 3; background: var(--panel);
+  text-align: left; font-size: 12.5px; color: var(--muted); padding: 10px 14px;
+  white-space: nowrap; }
+.am-col { padding: 10px 14px; text-align: center; vertical-align: bottom;
+  font-size: 13px; white-space: nowrap; }
+.am-col.am-sys { color: var(--accent); }
+.am-mname { display: block; font-weight: 600; }
+.am-tag { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 600;
+  color: var(--accent); text-transform: uppercase; letter-spacing: .4px; }
+.am-tag.am-off { color: var(--muted); }
+.am-row { position: sticky; left: 0; z-index: 2; background: var(--panel);
+  text-align: left; font-weight: 600; font-size: 13.5px; padding: 10px 14px;
+  white-space: nowrap; }
+.am-cell { text-align: center; padding: 8px 14px; }
+.am-cell input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); }
+.am-cell input:disabled { cursor: not-allowed; opacity: 0.7; }
+.am-table tbody tr:hover th.am-row,
+.am-table tbody tr:hover td { background: rgba(127,127,127,0.07); }
