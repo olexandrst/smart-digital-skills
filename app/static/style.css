@@ -777,6 +777,35 @@ body.theme-material .msg-tok { box-shadow: var(--shadow); }
 .file-link svg { width: 16px; height: 16px; fill: var(--accent-2); flex: 0 0 auto; }
 .file-link.inline { background: transparent; border: none; padding: 0; }
 
+/* Вкладення чату (зображення/PDF) */
+.file-links { flex-flow: row wrap; align-items: center; gap: 8px; }
+.file-links .muted { flex-basis: 100%; font-size: 12px; }
+.file-links.fl-user { justify-content: flex-end; }         /* вкладення користувача — праворуч */
+.att-thumb { display: inline-block; line-height: 0; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border); }
+.att-thumb img { width: 132px; height: 132px; object-fit: cover; display: block; }
+.att-thumb:hover { border-color: var(--accent); }
+
+.chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
+.chat-attach { flex: 0 0 auto; width: 42px; height: 42px; padding: 0; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 10px; color: var(--muted); }
+.chat-attach:hover { color: var(--accent-2); border-color: var(--accent); background: var(--panel-2); }
+.chat-attach svg { width: 20px; height: 20px; }
+
+.chat-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-attachments:not(:empty) { margin-bottom: 8px; }
+.att-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; max-width: 220px; }
+.att-chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; }
+.att-pdf { display: inline-flex; align-items: center; justify-content: center; width: 30px;
+  height: 30px; border-radius: 6px; background: var(--danger); color: #fff; font-size: 10px;
+  font-weight: 700; flex: 0 0 auto; }
+.att-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-x { flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.att-x:hover { background: rgba(127,127,127,0.18); color: var(--danger); }
+
 @media (max-width: 720px) {
   .chat-layout { grid-template-columns: 1fr; }
 }

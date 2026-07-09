@@ -4,6 +4,7 @@
   - 'prompt'  — формує запит до LLM-моделі;
   - 'package' — архів зі skill.md та кодом, що виконується локально.
 """
+import base64
 import json
 import re
 import threading
@@ -14,7 +15,12 @@ from app.models import (
     Skill, UserSkill, Model, ChatSession, ChatMessage, TokenUsageLog,
 )
 from app.integrations import get_client_for_model
-from app.services import package_service, quota_service, model_access_service
+from app.services import (
+    package_service, quota_service, model_access_service, file_service,
+)
+
+# Вкладення (зображення/PDF) підтримують лише мультимодальні моделі Azure OpenAI.
+AZURE_PROVIDER = "azure_ai_foundry"
 
 # Скільки останніх повідомлень передавати моделі як контекст діалогу.
 HISTORY_LIMIT = 20
@@ -230,9 +236,59 @@ def set_session_model(user, session_id, model_id):
     return session
 
 
-def send_message(user, session_id, content, skill_id=None):
-    """Надсилає повідомлення; опційно застосовує скіл (LLM-шаблон або код-пакет)."""
-    if not content or not content.strip():
+def _model_is_azure(model):
+    return model is not None and getattr(model, "provider", "") == AZURE_PROVIDER
+
+
+def _load_attachments(user, file_ids, model):
+    """Готує вкладення (зображення/PDF) до відправки моделі.
+
+    Дозволено лише для моделей Azure OpenAI; типи — image/* та application/pdf.
+    Повертає список {id, filename, content_type, data_b64}.
+    """
+    if not _model_is_azure(model):
+        raise ApiError(
+            "Вкладення (зображення/PDF) підтримуються лише для моделей Azure OpenAI",
+            400, "attachments_unsupported")
+    out = []
+    for fid in file_ids:
+        uf = file_service.get_owned_file(user, fid)
+        ct = (uf.content_type or "").lower()
+        if not (ct.startswith("image/") or ct == "application/pdf"):
+            raise ApiError(
+                f"Тип файлу «{uf.filename}» не підтримується (лише зображення та PDF)",
+                400, "attachment_type")
+        with open(file_service.file_abs_path(uf, user), "rb") as fh:
+            data = fh.read()
+        out.append({"id": uf.id, "filename": uf.filename, "content_type": ct,
+                    "data_b64": base64.b64encode(data).decode("ascii")})
+    return out
+
+
+def _multimodal_content(text, attachments):
+    """Формує мультимодальний вміст повідомлення (OpenAI-сумісний) з тексту та
+    вкладень: зображення → image_url, PDF → file (base64 data-URI)."""
+    parts = []
+    if text and text.strip():
+        parts.append({"type": "text", "text": text})
+    for a in attachments:
+        ct, b64 = a["content_type"], a["data_b64"]
+        if ct.startswith("image/"):
+            parts.append({"type": "image_url",
+                          "image_url": {"url": f"data:{ct};base64,{b64}"}})
+        else:  # application/pdf
+            parts.append({"type": "file",
+                          "file": {"filename": a["filename"],
+                                   "file_data": f"data:{ct};base64,{b64}"}})
+    if not parts:  # повідомлення лише з порожнім текстом — не лишаємо порожній вміст
+        parts.append({"type": "text", "text": text or ""})
+    return parts
+
+
+def send_message(user, session_id, content, skill_id=None, file_ids=None):
+    """Надсилає повідомлення; опційно застосовує скіл або додає вкладення."""
+    content = content or ""
+    if not content.strip() and not file_ids:
         raise ApiError("Порожнє повідомлення", 400, "validation_error")
 
     session = _get_owned_session(user, session_id)
@@ -240,6 +296,15 @@ def send_message(user, session_id, content, skill_id=None):
     applied_skill = None
     if skill_id:
         applied_skill = _validate_runnable_skill(user, skill_id)
+
+    # Вкладення (зображення/PDF) — лише у звичайному чаті (без навички) та лише
+    # для моделей Azure OpenAI.
+    attachments = []
+    if file_ids:
+        if applied_skill is not None:
+            raise ApiError("Вкладення можна надсилати лише у звичайному чаті (без навички)",
+                           400, "attachments_with_skill")
+        attachments = _load_attachments(user, file_ids, session.model)
 
     files = []
     if applied_skill is not None and package_service.is_agent_skill(applied_skill):
@@ -276,7 +341,10 @@ def send_message(user, session_id, content, skill_id=None):
         history = [{"role": m.role, "content": m.content}
                    for m in session.messages[-HISTORY_LIMIT:]
                    if m.role in ("user", "assistant")]
-        history.append({"role": "user", "content": prompt_content})
+        # Поточне повідомлення: з вкладеннями — мультимодальний вміст, інакше текст.
+        history.append({"role": "user",
+                        "content": _multimodal_content(prompt_content, attachments)
+                        if attachments else prompt_content})
 
         client = get_client_for_model(model)
         result = client.chat(model.deployment_name, history, params)
@@ -286,7 +354,8 @@ def send_message(user, session_id, content, skill_id=None):
                  "total_tokens": result.total_tokens}
 
     reply = _sanitize_reply_links(reply)
-    _store_exchange(session, user, model_id, skill_id, content, reply, usage, files=files)
+    _store_exchange(session, user, model_id, skill_id, content, reply, usage, files=files,
+                    user_file_ids=[a["id"] for a in attachments])
 
     if is_first_exchange:
         _maybe_autoname(session, content)
@@ -353,11 +422,16 @@ def run_skill(user, skill_id, inputs, session_id=None):
 
 
 def _store_exchange(session, user, model_id, skill_id, user_content, reply, usage,
-                    files=None):
-    db.session.add(ChatMessage(
+                    files=None, user_file_ids=None):
+    user_msg = ChatMessage(
         session_id=session.id, role="user", content=user_content, skill_id=skill_id,
         prompt_tokens=usage["prompt_tokens"], total_tokens=usage["prompt_tokens"],
-    ))
+    )
+    # Прив'язуємо завантажені користувачем вкладення до його повідомлення, щоб
+    # вони показувались при перевідкритті чату (і лишались доступні в «Файли»).
+    if user_file_ids:
+        user_msg.msg_metadata = json.dumps({"file_ids": user_file_ids})
+    db.session.add(user_msg)
     assistant_msg = ChatMessage(
         session_id=session.id, role="assistant", content=reply,
         completion_tokens=usage["completion_tokens"], total_tokens=usage["completion_tokens"],

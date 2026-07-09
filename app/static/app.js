@@ -145,15 +145,22 @@ async function downloadFile(id, name) {
 function fileUrl(f) { return location.origin + f.url; }
 
 // Рендерить блок із клікабельними посиланнями на створені файли.
-function renderFileLinks(files) {
+function renderFileLinks(files, label = "Створені файли:") {
   if (!files || !files.length) return null;
-  const box = el(`<div class="file-links"><div class="muted">Створені файли:</div></div>`);
+  const box = el(`<div class="file-links"></div>`);
+  if (label) box.appendChild(el(`<div class="muted">${esc(label)}</div>`));
   files.forEach(f => {
     const url = fileUrl(f);
-    const a = el(`<a class="file-link" href="${url}" target="_blank" rel="noopener">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2ZM12 4v9l3.5-3.5 1.4 1.4L12 16l-4.9-5.1 1.4-1.4L12 13V4h0Z"/></svg>
-      <span>${esc(url)}</span></a>`);
-    box.appendChild(a);
+    const isImg = (f.content_type || "").startsWith("image/");
+    if (isImg) {
+      // Зображення — прев'ю-мініатюра з посиланням на повний файл.
+      box.appendChild(el(`<a class="att-thumb" href="${url}" target="_blank" rel="noopener"
+        title="${esc(f.filename || "")}"><img src="${url}" alt="${esc(f.filename || "")}"></a>`));
+    } else {
+      box.appendChild(el(`<a class="file-link" href="${url}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2ZM12 4v9l3.5-3.5 1.4 1.4L12 16l-4.9-5.1 1.4-1.4L12 13V4h0Z"/></svg>
+        <span>${esc(f.filename || url)}</span></a>`));
+    }
   });
   return box;
 }
@@ -233,12 +240,14 @@ function renderModelPicker() {
 // Вибір моделі: застосовуємо до відкритого чату (як і до наступних нових).
 async function pickModel(id) {
   chatState.activeModelId = id;
+  const mdl = chatState.models.find(m => m.id === id) || {};
+  // Вкладення доступні лише для Azure — оновлюємо кнопку 📎 під нову модель.
+  updateAttachAvailability(mdl.provider);
   if (!chatState.sessionId) return;
   try {
     await api(`/chat/sessions/${chatState.sessionId}`, { method: "PATCH", body: { model_id: id } });
-    const nm = (chatState.models.find(m => m.id === id) || {}).name || "";
     const label = $("#chat-model");
-    if (label) label.textContent = "· " + nm;
+    if (label) label.textContent = "· " + (mdl.name || "");
     refreshSessionList();
   } catch (err) { toast(err.message, "err"); renderModelPicker(); }
 }
@@ -396,7 +405,7 @@ async function openTab(id) {
 
 // ---------- Чат з обраною моделлю ----------
 let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null,
-                  models: [], activeModelId: null };
+                  models: [], activeModelId: null, attachments: [] };
 
 function sessionItemHtml(s, activeId) {
   // Без кольорового маркування за вендором — усі чати одним системним кольором.
@@ -429,7 +438,12 @@ async function viewChat() {
         <div id="chat-header" class="chat-header muted">Оберіть чат або створіть новий («Новий чат» угорі).</div>
         <div id="chat-log" class="chat-log"></div>
         <div id="chat-input-box" class="hidden">
-          <div class="row">
+          <div id="chat-attachments" class="chat-attachments"></div>
+          <div class="row chat-input-row">
+            <input type="file" id="chat-file" accept="image/*,application/pdf" multiple hidden>
+            <button id="chat-attach" class="chat-attach" type="button" title="Додати зображення або PDF" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 6.5 8.9 14a2 2 0 1 0 2.8 2.8l7.6-7.6a4 4 0 1 0-5.6-5.6l-7.7 7.6a6 6 0 1 0 8.5 8.5l6.3-6.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
             <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1; min-height:60px"></textarea>
             <button id="chat-send">Надіслати</button>
           </div>
@@ -523,8 +537,8 @@ function renderChatMessage(m) {
   // Робочі посилання на створені файли (зберігаються з повідомленням — переживають
   // перевідкриття чату).
   if (m.files && m.files.length) {
-    const fl = renderFileLinks(m.files);
-    if (fl) log.appendChild(fl);
+    const fl = renderFileLinks(m.files, m.role === "user" ? "Вкладення:" : "Створені файли:");
+    if (fl) { fl.classList.add("fl-" + m.role); log.appendChild(fl); }
   }
   log.scrollTop = log.scrollHeight;
   return bubble;
@@ -548,6 +562,50 @@ function renderChatNote(text) {
   log.scrollTop = log.scrollHeight;
 }
 
+// ---------- Вкладення чату (зображення/PDF, лише Azure OpenAI) ----------
+// Показуємо кнопку 📎 лише для моделей Azure; для локальних — приховуємо.
+function updateAttachAvailability(provider) {
+  const azure = provider === "azure_ai_foundry";
+  const btn = $("#chat-attach");
+  if (btn) btn.hidden = !azure;
+  if (!azure && chatState.attachments.length) { chatState.attachments = []; renderAttachments(); }
+}
+
+function renderAttachments() {
+  const box = $("#chat-attachments");
+  if (!box) return;
+  box.innerHTML = chatState.attachments.map((a, i) => {
+    const thumb = (a.content_type || "").startsWith("image/")
+      ? `<img src="${fileUrl(a)}" alt="">`
+      : `<span class="att-pdf">PDF</span>`;
+    return `<div class="att-chip">${thumb}<span class="att-name">${esc(a.filename)}</span>` +
+      `<button class="att-x" type="button" data-i="${i}" title="Прибрати">×</button></div>`;
+  }).join("");
+  box.querySelectorAll(".att-x").forEach(b => b.addEventListener("click", () => {
+    chatState.attachments.splice(Number(b.dataset.i), 1);
+    renderAttachments();
+  }));
+}
+
+// Завантажує файл у сховище (доступний і в «Файли») та додає у вкладення чату.
+async function addAttachment(file) {
+  const ct = file.type || "";
+  if (!ct.startsWith("image/") && ct !== "application/pdf") {
+    toast("Підтримуються лише зображення та PDF", "err"); return;
+  }
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const res = await fetch(API + "/files", {
+      method: "POST", headers: { "Authorization": `Bearer ${state.token}` }, body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Помилка завантаження");
+    chatState.attachments.push({ id: data.id, filename: data.filename,
+      content_type: data.content_type, url: data.url, download_url: data.download_url });
+    renderAttachments();
+  } catch (err) { toast(err.message, "err"); }
+}
+
 async function openChatSession(sessionId) {
   chatState.sessionId = sessionId;
   const session = await api(`/chat/sessions/${sessionId}`);
@@ -562,6 +620,16 @@ async function openChatSession(sessionId) {
   document.querySelectorAll(".session-item").forEach(i =>
     i.classList.toggle("active", Number(i.dataset.sid) === sessionId));
 
+  // Вкладення: скидаємо і показуємо кнопку лише для Azure-моделі поточного чату.
+  chatState.attachments = [];
+  renderAttachments();
+  updateAttachAvailability(session.model_provider);
+  $("#chat-attach").onclick = () => $("#chat-file").click();
+  $("#chat-file").onchange = async (e) => {
+    for (const file of Array.from(e.target.files)) await addAttachment(file);
+    e.target.value = "";
+  };
+
   const sendBtn = $("#chat-send");
 
   function setSending(on) {
@@ -571,17 +639,21 @@ async function openChatSession(sessionId) {
 
   async function doSend() {
     const text = $("#chat-text").value.trim();
-    if (!text) return;
+    const atts = chatState.attachments.slice();
+    if (!text && !atts.length) return;
     const skillId = chatState.selectedSkill || null;
-    const userEl = renderChatMessage({ role: "user", content: text });
+    const userEl = renderChatMessage({ role: "user", content: text, files: atts });
     $("#chat-text").value = "";
+    chatState.attachments = [];
+    renderAttachments();
     const loading = showChatLoading();
     const controller = new AbortController();
     chatState.controller = controller;
     setSending(true);
     try {
       const res = await api(`/chat/sessions/${sessionId}/messages`, {
-        method: "POST", body: { content: text, skill_id: skillId }, signal: controller.signal });
+        method: "POST", signal: controller.signal,
+        body: { content: text, skill_id: skillId, file_ids: atts.map(a => a.id) } });
       loading.remove();
       userEl.querySelector(".msg-tok").textContent = res.usage.prompt_tokens;
       // Файли рендеряться як частина повідомлення (той самий шлях, що й при

@@ -77,8 +77,34 @@ def build_http_client(timeout=None):
     return httpx.Client(timeout=httpx.Timeout(read, connect=15.0), trust_env=True)
 
 
-def estimate_tokens(text: str) -> int:
+def content_to_text(content) -> str:
+    """Зводить вміст повідомлення до тексту.
+
+    Вміст може бути рядком або мультимодальним списком частин (текст +
+    зображення/файли) — для оцінки токенів і моку беремо текст, а вкладення
+    позначаємо коротким плейсхолдером.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        out = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            ptype = part.get("type")
+            if ptype == "text":
+                out.append(part.get("text", ""))
+            elif ptype == "image_url":
+                out.append("[зображення]")
+            elif ptype == "file":
+                out.append(f"[файл: {(part.get('file') or {}).get('filename', 'PDF')}]")
+        return " ".join(out)
+    return str(content or "")
+
+
+def estimate_tokens(text) -> int:
     """Груба оцінка: ~1.3 токена на слово (достатньо для базового обліку MVP/моку)."""
+    text = content_to_text(text)
     if not text:
         return 0
     return max(1, int(len(text.split()) * 1.3) + 1)
@@ -94,7 +120,7 @@ def mock_chat_response(provider_label: str, model_name: str, messages) -> LLMRes
     last_user = ""
     for m in reversed(messages):
         if m.get("role") == "user":
-            last_user = m.get("content", "")
+            last_user = content_to_text(m.get("content", ""))
             break
     snippet = (last_user[:80] + "…") if len(last_user) > 80 else last_user
     content = (
