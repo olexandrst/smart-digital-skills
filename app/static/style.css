@@ -9,9 +9,10 @@
   --primary-strong: #1765cc;
   --primary-soft: #e8f0fe;          /* тональна заливка активних елементів */
   --primary-soft-2: #d2e3fc;
+  --nav-active: #c4dafb;            /* контрастніша заливка активного пункту меню */
   --appbar: linear-gradient(90deg, #1a73e8, #1e6fd9);
   --appbar-solid: #1a73e8;
-  --bg: #e4e8ef;                    /* глибший сірий — контрастніше з білими картками */
+  --bg: #d9dfe8;                    /* глибший сірий — контрастніше з білими картками */
   --panel: #ffffff;                 /* поверхня карток */
   --panel-2: #f4f6fa;               /* вкладена поверхня */
   --border: #e0e4ea;
@@ -53,6 +54,7 @@ body.theme-dark {
   --ok-soft: rgba(109, 213, 140, 0.14);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.30);
   --shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.55);
+  --nav-active: rgba(77, 141, 246, 0.32);
   /* Діаграми — темна палітра */
   --chart-in: #3987e5; --chart-out: #d95926;
   --chart-grid: rgba(255,255,255,0.10); --chart-axis: #898781;
@@ -245,7 +247,7 @@ button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
 }
 .nav-item svg { width: 19px; height: 19px; fill: currentColor; flex: 0 0 auto; }
 .nav-item:hover { background: var(--panel-2); color: var(--text); box-shadow: none; }
-.nav-item.active { background: var(--primary-soft); color: var(--primary); }
+.nav-item.active { background: var(--nav-active); color: var(--primary); font-weight: 600; }
 .nav-item.active svg { fill: var(--primary); }
 
 .side-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; }
@@ -640,13 +642,17 @@ body.theme-dark #chat-send.stop { color: #2a0d0b; }
 /* Поле вводу — фіксована висота у 4 рядки; довший текст скролиться всередині */
 .chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
 #chat-text { resize: none; height: 104px; min-height: 104px; overflow-y: auto; line-height: 1.45; }
-.chat-attach {
+.chat-tool {
   flex: 0 0 auto; width: 42px; height: 42px; padding: 0; display: inline-flex;
   align-items: center; justify-content: center; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 50%; color: var(--muted); box-shadow: none;
 }
-.chat-attach:hover { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); box-shadow: none; }
-.chat-attach svg { width: 20px; height: 20px; }
+.chat-tool:hover { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); box-shadow: none; }
+.chat-tool svg { width: 20px; height: 20px; }
+/* Активний веб-пошук (глобус) — синя заливка */
+.chat-tool.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.chat-tool.active:hover { background: var(--primary-strong); color: #fff; }
+body.theme-dark .chat-tool.active { color: #0b1220; }
 
 .chat-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
 .chat-attachments:not(:empty) { margin-bottom: 8px; }
@@ -875,8 +881,23 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.6); }
 .su-table th.su-num, .su-table td.su-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .su-table td.su-name { font-weight: 600; font-size: 14px; }
 .su-table td.su-num { color: var(--text); }
-.su-table td:nth-child(2) { color: var(--muted); }
-.su-table td:nth-child(3) { font-weight: 700; }
+.su-table td.su-runs { color: var(--muted); }
+.su-table td.su-cost { font-weight: 700; }
+.su-table tr.su-total-row td { border-top: 2px solid var(--border); border-bottom: none;
+  font-weight: 700; }
+.su-table tr.su-total-row:hover td { background: transparent; }
+
+/* Розподіл за режимом роботи (офлайн / онлайн) */
+.brk-table { width: 100%; border-collapse: collapse; }
+.brk-table th, .brk-table td { padding: 9px 4px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.brk-table tbody tr:last-child td { border-bottom: none; }
+.brk-table th { color: var(--muted); font-size: 12.5px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.brk-table th:first-child, .brk-table td:first-child { text-align: left; }
+.brk-table th:not(:first-child), .brk-table td:not(:first-child) {
+  text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.brk-table td:first-child { font-weight: 600; }
+.brk-table td.brk-strong { font-weight: 700; }
+.brk-table tbody tr:hover td { background: var(--panel-2); }
 
 /* Перемикач області статистики «Гроші» (Admin) */
 .scope-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }

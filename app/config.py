@@ -42,6 +42,11 @@ class BaseConfig:
     # Локальні сервери зазвичай не потребують ключа; openai SDK вимагає непорожній.
     LOCAL_API_KEY = os.getenv("LOCAL_API_KEY", "local")
 
+    # --- Веб-пошук (онлайн-режим чату, DuckDuckGo) ---
+    # За замовчуванням мокуємо разом з LLM (демо-результати без мережі).
+    WEB_SEARCH_MOCK = os.getenv("WEB_SEARCH_MOCK", os.getenv("LLM_MOCK", "1")) == "1"
+    WEB_SEARCH_MAX_RESULTS = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
+
     # --- Скіли-пакети (виконання коду) ---
     # Каталог зі збереженими архівами скілів.
     SKILL_PACKAGES_DIR = os.getenv(

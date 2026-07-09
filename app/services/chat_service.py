@@ -17,10 +17,75 @@ from app.models import (
 from app.integrations import get_client_for_model
 from app.services import (
     package_service, quota_service, model_access_service, file_service,
+    web_search_service,
 )
 
 # Вкладення (зображення/PDF) підтримують лише мультимодальні моделі Azure OpenAI.
 AZURE_PROVIDER = "azure_ai_foundry"
+
+# Онлайн-режим (гібридний RAG): 1) сформувати пошуковий запит, 2) відповісти за
+# результатами веб-пошуку. Токени обох викликів підсумовуються.
+WEB_QUERY_SYSTEM = (
+    "Ти формулюєш стислий пошуковий запит для веб-пошуку на основі повідомлення "
+    "користувача. Поверни ЛИШЕ сам запит (кілька ключових слів) — без лапок, "
+    "пояснень чи розмітки."
+)
+
+
+def _rag_prompt(user_text, search_query, context):
+    return (
+        "Дай відповідь на запит користувача, спираючись на наведені нижче результати "
+        "веб-пошуку. За потреби посилайся на джерела. Якщо результати не містять "
+        "відповіді — чесно про це скажи.\n\n"
+        f"Запит користувача:\n{user_text}\n\n"
+        f"Пошуковий запит: {search_query}\n\n"
+        f"Результати веб-пошуку:\n{context}"
+    )
+
+
+def _run_web_search(client, model, history, user_text, params, attachments):
+    """Онлайн-режим: два виклики LLM (запит → відповідь за результатами пошуку).
+
+    Повертає (reply, usage) з підсумованими токенами обох викликів.
+    """
+    from app.integrations.base import content_to_text
+    # 1) Формулюємо пошуковий запит із повідомлення користувача.
+    q_res = client.chat(model.deployment_name, [
+        {"role": "system", "content": WEB_QUERY_SYSTEM},
+        {"role": "user", "content": content_to_text(user_text)},
+    ], {"temperature": 0.2})
+    search_query = (q_res.content or "").strip().splitlines()[0].strip(' "\'') \
+        or content_to_text(user_text)
+    search_query = search_query[:200]
+
+    # 2) Веб-пошук DuckDuckGo та відповідь за його результатами.
+    results = web_search_service.search(search_query)
+    context = web_search_service.format_results(results)
+    rag_text = _rag_prompt(content_to_text(user_text), search_query, context)
+    answer_content = _multimodal_content(rag_text, attachments) if attachments else rag_text
+    a_res = client.chat(model.deployment_name,
+                        history + [{"role": "user", "content": answer_content}], params)
+
+    reply = a_res.content or ""
+    if results:  # додаємо перелік клікабельних джерел для прозорості
+        lines = []
+        for r in results:
+            url = (r.get("url") or "").strip()
+            if not url:
+                continue
+            # Чистимо заголовок, щоб markdown-посилання [текст](url) не ламалось.
+            title = re.sub(r"[\[\]()\r\n]+", " ", (r.get("title") or "")).strip()
+            title = re.sub(r"\s+", " ", title)[:90] or url
+            lines.append(f"- [{title}]({url})")
+        if lines:
+            reply = f"{reply}\n\n**Джерела:**\n" + "\n".join(lines)
+
+    usage = {
+        "prompt_tokens": q_res.prompt_tokens + a_res.prompt_tokens,
+        "completion_tokens": q_res.completion_tokens + a_res.completion_tokens,
+        "total_tokens": q_res.total_tokens + a_res.total_tokens,
+    }
+    return reply, usage
 
 # Скільки останніх повідомлень передавати моделі як контекст діалогу.
 HISTORY_LIMIT = 20
@@ -286,8 +351,9 @@ def _multimodal_content(text, attachments):
     return parts
 
 
-def send_message(user, session_id, content, skill_id=None, file_ids=None):
-    """Надсилає повідомлення; опційно застосовує скіл або додає вкладення."""
+def send_message(user, session_id, content, skill_id=None, file_ids=None,
+                 web_search=False):
+    """Надсилає повідомлення; опційно застосовує скіл, вкладення або веб-пошук."""
     content = content or ""
     if not content.strip() and not file_ids:
         raise ApiError("Порожнє повідомлення", 400, "validation_error")
@@ -297,6 +363,10 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None):
     applied_skill = None
     if skill_id:
         applied_skill = _validate_runnable_skill(user, skill_id)
+
+    # Веб-пошук — лише у звичайному чаті (без навички).
+    web_search = bool(web_search) and applied_skill is None
+    mode = "online" if web_search else "offline"
 
     # Вкладення (зображення/PDF) — лише у звичайному чаті (без навички) та лише
     # для моделей Azure OpenAI.
@@ -342,21 +412,26 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None):
         history = [{"role": m.role, "content": m.content}
                    for m in session.messages[-HISTORY_LIMIT:]
                    if m.role in ("user", "assistant")]
-        # Поточне повідомлення: з вкладеннями — мультимодальний вміст, інакше текст.
-        history.append({"role": "user",
-                        "content": _multimodal_content(prompt_content, attachments)
-                        if attachments else prompt_content})
-
         client = get_client_for_model(model)
-        result = client.chat(model.deployment_name, history, params)
-        reply = result.content
-        usage = {"prompt_tokens": result.prompt_tokens,
-                 "completion_tokens": result.completion_tokens,
-                 "total_tokens": result.total_tokens}
+
+        if web_search:
+            # Онлайн: два виклики LLM (пошуковий запит → відповідь за результатами).
+            reply, usage = _run_web_search(
+                client, model, history, prompt_content, params, attachments)
+        else:
+            # Поточне повідомлення: з вкладеннями — мультимодальний вміст, інакше текст.
+            history.append({"role": "user",
+                            "content": _multimodal_content(prompt_content, attachments)
+                            if attachments else prompt_content})
+            result = client.chat(model.deployment_name, history, params)
+            reply = result.content
+            usage = {"prompt_tokens": result.prompt_tokens,
+                     "completion_tokens": result.completion_tokens,
+                     "total_tokens": result.total_tokens}
 
     reply = _sanitize_reply_links(reply)
     _store_exchange(session, user, model_id, skill_id, content, reply, usage, files=files,
-                    user_file_ids=[a["id"] for a in attachments])
+                    user_file_ids=[a["id"] for a in attachments], mode=mode)
 
     if is_first_exchange:
         _maybe_autoname(session, content)
@@ -367,6 +442,7 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None):
         "skill_id": skill_id,
         "usage": usage,
         "files": files,
+        "mode": mode,
         "session_total_tokens": session.total_tokens_sum,
     }
 
@@ -423,7 +499,7 @@ def run_skill(user, skill_id, inputs, session_id=None):
 
 
 def _store_exchange(session, user, model_id, skill_id, user_content, reply, usage,
-                    files=None, user_file_ids=None):
+                    files=None, user_file_ids=None, mode="offline"):
     user_msg = ChatMessage(
         session_id=session.id, role="user", content=user_content, skill_id=skill_id,
         prompt_tokens=usage["prompt_tokens"], total_tokens=usage["prompt_tokens"],
@@ -455,7 +531,7 @@ def _store_exchange(session, user, model_id, skill_id, user_content, reply, usag
         completion_tokens=usage["completion_tokens"],
         total_tokens=usage["total_tokens"],
         cost_in=cost_in, cost_out=cost_out, cost_total=cost_total,
-        feature="chat", is_system=False,
+        feature="chat", mode=mode, is_system=False,
     ))
     db.session.commit()
     # Тижневий лічильник квоти — у грошах (лише користувацьке використання).
