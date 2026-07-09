@@ -270,20 +270,18 @@ $("#new-chat-btn").addEventListener("click", createNewChat);
 // ---------- Тема (Темна glass / Світла / Material), лише всередині застосунку ----------
 const T_MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
 const T_SUN = '<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-13v2m0 16v2M4 12H2m20 0h-2M5.6 5.6 4.2 4.2m15.6 1.4 1.4-1.4M5.6 18.4l-1.4 1.4m15.6-1.4 1.4 1.4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>';
-const T_GRID = '<path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/>';
 const THEMES = [
-  { id: "dark", label: "Темна", icon: T_MOON },
   { id: "light", label: "Світла", icon: T_SUN },
-  { id: "material", label: "Material", icon: T_GRID },
+  { id: "dark", label: "Темна", icon: T_MOON },
 ];
 function themePref() {
   const t = localStorage.getItem("theme");
-  return ["dark", "light", "material"].includes(t) ? t : "dark";
+  // Раніше було 3 теми — "material" і "light" зводимо до світлої.
+  return t === "dark" ? "dark" : "light";
 }
 function applyTheme() {
   const t = themePref();
-  document.body.classList.toggle("theme-light", t === "light");
-  document.body.classList.toggle("theme-material", t === "material");
+  document.body.classList.toggle("theme-dark", t === "dark");
   document.querySelectorAll("#theme-seg button").forEach(b =>
     b.classList.toggle("active", b.dataset.theme === t));
 }
@@ -307,7 +305,7 @@ if (pwToggle) pwToggle.addEventListener("click", () => {
 });
 
 function showLogin() {
-  document.body.classList.remove("theme-light", "theme-material");  // логін завжди темний
+  document.body.classList.remove("theme-dark");  // логін має власний вигляд
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");
 }
