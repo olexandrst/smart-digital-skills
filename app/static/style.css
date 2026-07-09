@@ -9,9 +9,10 @@
   --primary-strong: #1765cc;
   --primary-soft: #e8f0fe;          /* тональна заливка активних елементів */
   --primary-soft-2: #d2e3fc;
+  --nav-active: #c4dafb;            /* контрастніша заливка активного пункту меню */
   --appbar: linear-gradient(90deg, #1a73e8, #1e6fd9);
   --appbar-solid: #1a73e8;
-  --bg: #e4e8ef;                    /* глибший сірий — контрастніше з білими картками */
+  --bg: #d9dfe8;                    /* глибший сірий — контрастніше з білими картками */
   --panel: #ffffff;                 /* поверхня карток */
   --panel-2: #f4f6fa;               /* вкладена поверхня */
   --border: #e0e4ea;
@@ -53,6 +54,7 @@ body.theme-dark {
   --ok-soft: rgba(109, 213, 140, 0.14);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.30);
   --shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.55);
+  --nav-active: rgba(77, 141, 246, 0.32);
   /* Діаграми — темна палітра */
   --chart-in: #3987e5; --chart-out: #d95926;
   --chart-grid: rgba(255,255,255,0.10); --chart-axis: #898781;
@@ -245,7 +247,7 @@ button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
 }
 .nav-item svg { width: 19px; height: 19px; fill: currentColor; flex: 0 0 auto; }
 .nav-item:hover { background: var(--panel-2); color: var(--text); box-shadow: none; }
-.nav-item.active { background: var(--primary-soft); color: var(--primary); }
+.nav-item.active { background: var(--nav-active); color: var(--primary); font-weight: 600; }
 .nav-item.active svg { fill: var(--primary); }
 
 .side-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 8px; }
