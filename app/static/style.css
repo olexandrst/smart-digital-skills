@@ -11,9 +11,9 @@
   --primary-soft-2: #d2e3fc;
   --appbar: linear-gradient(90deg, #1a73e8, #1e6fd9);
   --appbar-solid: #1a73e8;
-  --bg: #f2f4f8;
+  --bg: #e4e8ef;                    /* глибший сірий — контрастніше з білими картками */
   --panel: #ffffff;                 /* поверхня карток */
-  --panel-2: #f5f7fb;               /* вкладена поверхня */
+  --panel-2: #f4f6fa;               /* вкладена поверхня */
   --border: #e0e4ea;
   --text: #1f2430;
   --muted: #5f6875;
