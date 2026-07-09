@@ -1,6 +1,19 @@
 """Спільні примітиви для LLM-провайдерів."""
+import os
 from dataclasses import dataclass
 from urllib.parse import urlsplit
+
+# Таймаут очікування відповіді моделі (сек). За замовчуванням 30 хв — деякі
+# локальні моделі (Ollama/LM Studio) відповідають довго; користувач може
+# перервати запит кнопкою «Стоп». Налаштовується через LLM_TIMEOUT.
+DEFAULT_LLM_TIMEOUT = 1800.0
+
+
+def llm_timeout():
+    try:
+        return float(os.getenv("LLM_TIMEOUT", DEFAULT_LLM_TIMEOUT))
+    except (TypeError, ValueError):
+        return DEFAULT_LLM_TIMEOUT
 
 
 def azure_resource_base(endpoint):
@@ -44,7 +57,7 @@ class LLMResponse:
 FoundryResponse = LLMResponse
 
 
-def build_http_client():
+def build_http_client(timeout=None):
     """httpx-клієнт для openai SDK, що оминає несумісність із аргументом ``proxies``.
 
     У httpx>=0.28 параметр ``proxies`` прибрано, тоді як деякі версії openai SDK
@@ -52,12 +65,16 @@ def build_http_client():
     argument 'proxies'``. Передаючи власний ``http_client``, ми змушуємо SDK не
     будувати внутрішній клієнт із цим аргументом. Проксі з середовища
     (HTTP_PROXY/HTTPS_PROXY) підхоплюються автоматично через ``trust_env=True``.
+
+    ``timeout`` — читання відповіді (сек); за замовчуванням — довгий таймаут для
+    чату (LLM_TIMEOUT). Для швидких операцій (перелік моделей) передають менший.
     """
     try:
         import httpx
     except ImportError:  # pragma: no cover — httpx є залежністю openai
         return None
-    return httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0), trust_env=True)
+    read = llm_timeout() if timeout is None else timeout
+    return httpx.Client(timeout=httpx.Timeout(read, connect=15.0), trust_env=True)
 
 
 def estimate_tokens(text: str) -> int:

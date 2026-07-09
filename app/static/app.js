@@ -1876,6 +1876,8 @@ async function renderScopeSelector() {
   const card = $("#scope-card");
   if (!card) return;
   const isGroup = moneyScope.mode === "group";
+  const count = ((isGroup ? scopeOptions.groups : scopeOptions.users) || []).length;
+  const size = Math.min(7, Math.max(3, count));
   card.innerHTML = `
     <div class="scope-head">
       <h2>Статистика для</h2>
@@ -1884,7 +1886,12 @@ async function renderScopeSelector() {
         <button type="button" class="${isGroup ? "active" : ""}" data-mode="group">Групи</button>
       </div>
     </div>
-    <select id="scope-target">${scopeTargetOptions()}</select>
+    <div class="scope-search-wrap">
+      <svg class="scope-search-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 3.9 10.6l4.3 4.3 1.4-1.4-4.3-4.3A6 6 0 0 0 10 4Zm0 2a4 4 0 1 1 0 8 4 4 0 0 1 0-8Z"/></svg>
+      <input type="text" id="scope-search" class="scope-search" autocomplete="off"
+             placeholder="${isGroup ? "Пошук групи…" : "Пошук користувача…"}">
+    </div>
+    <select id="scope-target" class="scope-select" size="${size}">${scopeTargetOptions()}</select>
     <div id="scope-info" class="muted scope-info"></div>`;
   // Синхронізуємо стан із фактично обраним у списку значенням.
   const sel = $("#scope-target");
@@ -1897,24 +1904,36 @@ async function renderScopeSelector() {
       moneyScope.mode = b.dataset.mode;
       renderScopeSelector().then(loadMoney);
     }));
+  $("#scope-search").addEventListener("input", (e) => {
+    sel.innerHTML = scopeTargetOptions(e.target.value);
+  });
   sel.addEventListener("change", () => {
+    if (!sel.value) return;  // рядок-заглушка «нічого не знайдено»
     if (moneyScope.mode === "group") moneyScope.groupId = sel.value;
     else moneyScope.userId = sel.value;
     loadMoney();
   });
 }
 
-function scopeTargetOptions() {
+function scopeTargetOptions(filter = "") {
+  const f = filter.trim().toLowerCase();
   if (moneyScope.mode === "group") {
-    const groups = (scopeOptions && scopeOptions.groups) || [];
-    if (!groups.length) return `<option value="">— груп немає —</option>`;
+    let groups = (scopeOptions && scopeOptions.groups) || [];
+    const total = groups.length;
+    if (f) groups = groups.filter(g => (g.name || "").toLowerCase().includes(f));
+    if (!groups.length)
+      return `<option value="" disabled>${total ? "— нічого не знайдено —" : "— груп немає —"}</option>`;
     const cur = moneyScope.groupId || String(groups[0].id);
     return groups.map(g =>
       `<option value="${g.id}" ${String(g.id) === String(cur) ? "selected" : ""}>${esc(g.name)}</option>`).join("");
   }
   const me = state.user && state.user.id;
+  let users = (scopeOptions && scopeOptions.users) || [];
+  if (f) users = users.filter(u =>
+    ((u.full_name || "") + " " + (u.username || "")).toLowerCase().includes(f));
+  if (!users.length) return `<option value="" disabled>— нічого не знайдено —</option>`;
   const cur = moneyScope.userId || String(me);
-  return ((scopeOptions && scopeOptions.users) || []).map(u => {
+  return users.map(u => {
     const label = (u.full_name ? u.full_name + " · " : "") + u.username + (u.id === me ? " (я)" : "");
     return `<option value="${u.id}" ${String(u.id) === String(cur) ? "selected" : ""}>${esc(label)}</option>`;
   }).join("");
@@ -1957,16 +1976,20 @@ function renderSkillUsage(box, bySkill) {
     box.innerHTML = `<p class="muted">За обраний період навички не запускались.</p>`;
     return;
   }
-  box.innerHTML =
-    `<div class="su-row su-head">
-       <span>Навичка</span><span>Запусків</span><span>Загальна вартість</span><span>Середня / запуск</span>
-     </div>` +
-    items.map(s => `<div class="su-row">
-       <span class="su-name">${esc(s.skill)}</span>
-       <span class="su-runs">${fmtInt(s.runs)}</span>
-       <span class="su-total">${fmtMoney(s.cost)}</span>
-       <span class="su-avg">${fmtMoney(s.avg)}</span>
-     </div>`).join("");
+  box.innerHTML = `<table class="su-table">
+    <thead><tr>
+      <th class="su-name">Навичка</th>
+      <th class="su-num">Запусків</th>
+      <th class="su-num">Загальна вартість</th>
+      <th class="su-num">Середня / запуск</th>
+    </tr></thead>
+    <tbody>${items.map(s => `<tr>
+      <td class="su-name">${esc(s.skill)}</td>
+      <td class="su-num">${fmtInt(s.runs)}</td>
+      <td class="su-num">${fmtMoney(s.cost)}</td>
+      <td class="su-num">${fmtMoney(s.avg)}</td>
+    </tr>`).join("")}</tbody>
+  </table>`;
 }
 
 // ---------- Діаграми (inline SVG, тема-залежні) ----------
