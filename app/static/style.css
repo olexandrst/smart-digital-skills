@@ -234,7 +234,9 @@ button.small { padding: 5px 10px; font-size: 13px; }
   font-weight: 700; color: #fff; flex: 0 0 auto;
   background: linear-gradient(135deg, #7c5cff, #e35cc8);
 }
-.user-meta { display: flex; flex-direction: column; min-width: 0; }
+/* Профіль у верхній панелі: ім'я/роль → іконка → «Вийти» (вирівнювання вправо) */
+.user-meta { display: flex; flex-direction: column; min-width: 0; text-align: right;
+  align-items: flex-end; }
 .user-meta #user-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roles { color: var(--muted); font-size: 12px; text-transform: capitalize; }
 
@@ -777,6 +779,38 @@ body.theme-material .msg-tok { box-shadow: var(--shadow); }
 .file-link svg { width: 16px; height: 16px; fill: var(--accent-2); flex: 0 0 auto; }
 .file-link.inline { background: transparent; border: none; padding: 0; }
 
+/* Вкладення чату (зображення/PDF) */
+.file-links { flex-flow: row wrap; align-items: center; gap: 8px; }
+.file-links .muted { flex-basis: 100%; font-size: 12px; }
+.file-links.fl-user { justify-content: flex-end; }         /* вкладення користувача — праворуч */
+.att-thumb { display: inline-block; line-height: 0; border-radius: 10px; overflow: hidden;
+  border: 1px solid var(--border); }
+.att-thumb img { width: 132px; height: 132px; object-fit: cover; display: block; }
+.att-thumb:hover { border-color: var(--accent); }
+
+.chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
+/* Поле вводу — фіксована висота у 4 рядки; довший текст скролиться всередині */
+#chat-text { resize: none; height: 104px; min-height: 104px; overflow-y: auto;
+  line-height: 1.45; }
+.chat-attach { flex: 0 0 auto; width: 42px; height: 42px; padding: 0; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 10px; color: var(--muted); }
+.chat-attach:hover { color: var(--accent-2); border-color: var(--accent); background: var(--panel-2); }
+.chat-attach svg { width: 20px; height: 20px; }
+
+.chat-attachments { display: flex; flex-wrap: wrap; gap: 8px; }
+.chat-attachments:not(:empty) { margin-bottom: 8px; }
+.att-chip { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 5px 5px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; max-width: 220px; }
+.att-chip img { width: 30px; height: 30px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; }
+.att-pdf { display: inline-flex; align-items: center; justify-content: center; width: 30px;
+  height: 30px; border-radius: 6px; background: var(--danger); color: #fff; font-size: 10px;
+  font-weight: 700; flex: 0 0 auto; }
+.att-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att-x { flex: 0 0 auto; width: 20px; height: 20px; padding: 0; border-radius: 6px;
+  background: transparent; color: var(--muted); font-size: 16px; line-height: 1; }
+.att-x:hover { background: rgba(127,127,127,0.18); color: var(--danger); }
+
 @media (max-width: 720px) {
   .chat-layout { grid-template-columns: 1fr; }
 }
@@ -1074,23 +1108,15 @@ body.theme-material .scope-seg button.active { background: #1a73e8; }
 .scope-select option { padding: 6px 8px; }
 .scope-select option:disabled { color: var(--muted); }
 
-/* Перемикач моделі у верхній панелі */
-.model-picker { display: inline-flex; align-items: center; gap: 8px; }
-.mp-label { font-size: 12.5px; color: var(--muted); }
-.mp-single { font-size: 13.5px; font-weight: 600; color: var(--text);
-  padding: 5px 12px; border-radius: 8px; background: rgba(127,127,127,0.12);
-  border: 1px solid var(--border); }
-.mp-select { width: auto; min-width: 150px; padding: 6px 30px 6px 12px;
-  font-size: 13.5px; font-weight: 600; }
+/* Перемикач моделі (картка над «Мої чати» у сайдбарі чату) */
+.model-card { margin-bottom: 14px; }
+.model-card h3 { margin: 0 0 10px; }
+.model-picker { display: block; }
+.mp-single { display: block; font-size: 13.5px; font-weight: 600; color: var(--text);
+  padding: 8px 12px; border-radius: 8px; background: rgba(127,127,127,0.12);
+  border: 1px solid var(--border); word-break: break-word; }
+.mp-select { width: 100%; font-size: 13.5px; font-weight: 600; }
 .mp-none { font-size: 12.5px; color: var(--danger); }
-@media (max-width: 720px) { .mp-label { display: none; } }
-/* Синій Material-апбар: назва моделі має бути білою (інакше зливається з фоном) */
-body.theme-material .topbar .mp-label { color: rgba(255,255,255,0.9); }
-body.theme-material .topbar .mp-single { color: #fff;
-  background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.4); }
-body.theme-material .topbar .mp-select { color: #fff;
-  background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.5); }
-body.theme-material .topbar .mp-select option { color: #202124; background: #fff; }
 
 /* Матриця доступів «групи × моделі» */
 .am-wrap { overflow-x: auto; margin-top: 6px; }
@@ -1114,3 +1140,10 @@ body.theme-material .topbar .mp-select option { color: #202124; background: #fff
 .am-cell input:disabled { cursor: not-allowed; opacity: 0.7; }
 .am-table tbody tr:hover th.am-row,
 .am-table tbody tr:hover td { background: rgba(127,127,127,0.07); }
+
+/* Перемикач «Дозволити індивідуальний доступ» (Навички → Доступи) */
+.ind-toggle { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
+.ind-toggle input { width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto;
+  accent-color: var(--accent); cursor: pointer; }
+.ind-toggle span { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+.ind-toggle b { color: var(--text); }

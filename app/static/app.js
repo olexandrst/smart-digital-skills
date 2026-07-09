@@ -145,15 +145,22 @@ async function downloadFile(id, name) {
 function fileUrl(f) { return location.origin + f.url; }
 
 // Рендерить блок із клікабельними посиланнями на створені файли.
-function renderFileLinks(files) {
+function renderFileLinks(files, label = "Створені файли:") {
   if (!files || !files.length) return null;
-  const box = el(`<div class="file-links"><div class="muted">Створені файли:</div></div>`);
+  const box = el(`<div class="file-links"></div>`);
+  if (label) box.appendChild(el(`<div class="muted">${esc(label)}</div>`));
   files.forEach(f => {
     const url = fileUrl(f);
-    const a = el(`<a class="file-link" href="${url}" target="_blank" rel="noopener">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2ZM12 4v9l3.5-3.5 1.4 1.4L12 16l-4.9-5.1 1.4-1.4L12 13V4h0Z"/></svg>
-      <span>${esc(url)}</span></a>`);
-    box.appendChild(a);
+    const isImg = (f.content_type || "").startsWith("image/");
+    if (isImg) {
+      // Зображення — прев'ю-мініатюра з посиланням на повний файл.
+      box.appendChild(el(`<a class="att-thumb" href="${url}" target="_blank" rel="noopener"
+        title="${esc(f.filename || "")}"><img src="${url}" alt="${esc(f.filename || "")}"></a>`));
+    } else {
+      box.appendChild(el(`<a class="file-link" href="${url}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20h14v-2H5v2ZM12 4v9l3.5-3.5 1.4 1.4L12 16l-4.9-5.1 1.4-1.4L12 13V4h0Z"/></svg>
+        <span>${esc(f.filename || url)}</span></a>`));
+    }
   });
   return box;
 }
@@ -218,27 +225,27 @@ function renderModelPicker() {
     return;
   }
   if (models.length === 1) {
-    box.innerHTML = `<span class="mp-label">Модель:</span>` +
-      `<span class="mp-single">${esc(models[0].name)}</span>`;
+    box.innerHTML = `<span class="mp-single">${esc(models[0].name)}</span>`;
     return;
   }
   const cur = chatState.activeModelId;
   const opts = models.map(m =>
     `<option value="${m.id}" ${m.id === cur ? "selected" : ""}>${esc(m.name)}${m.is_system ? " (системна)" : ""}</option>`).join("");
-  box.innerHTML = `<span class="mp-label">Модель:</span>` +
-    `<select id="mp-select" class="mp-select" title="Модель для чату">${opts}</select>`;
+  box.innerHTML = `<select id="mp-select" class="mp-select" title="Модель для чату">${opts}</select>`;
   $("#mp-select").addEventListener("change", () => pickModel(Number($("#mp-select").value)));
 }
 
 // Вибір моделі: застосовуємо до відкритого чату (як і до наступних нових).
 async function pickModel(id) {
   chatState.activeModelId = id;
+  const mdl = chatState.models.find(m => m.id === id) || {};
+  // Вкладення доступні лише для Azure — оновлюємо кнопку 📎 під нову модель.
+  updateAttachAvailability(mdl.provider);
   if (!chatState.sessionId) return;
   try {
     await api(`/chat/sessions/${chatState.sessionId}`, { method: "PATCH", body: { model_id: id } });
-    const nm = (chatState.models.find(m => m.id === id) || {}).name || "";
     const label = $("#chat-model");
-    if (label) label.textContent = "· " + nm;
+    if (label) label.textContent = "· " + (mdl.name || "");
     refreshSessionList();
   } catch (err) { toast(err.message, "err"); renderModelPicker(); }
 }
@@ -313,6 +320,9 @@ async function showApp() {
   $("#user-name").textContent = display;
   $("#user-roles").textContent = state.user.roles.length ? state.user.roles.join(", ") : "member";
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
+  // Налаштування навичок (індивідуальний доступ) визначає видимість «Каталогу».
+  try { state.skillSettings = await api("/skills/settings"); }
+  catch (e) { state.skillSettings = { individual_access: true }; }
   buildNav();
   refreshQuota();
   loadModelPicker();
@@ -356,7 +366,7 @@ const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
   { id: "catalog", label: "Каталог", view: viewCatalog },
   { id: "files", label: "Мої файли", view: viewFiles },
-  { id: "manage-skills", label: "Управління навичками", view: viewManageSkills, roles: ["admin", "skill_manager"] },
+  { id: "manage-skills", label: "Навички", view: viewManageSkills, roles: ["admin", "skill_manager"] },
   { id: "models", label: "Моделі", view: viewModels, roles: ["admin"] },
   { id: "groups", label: "Групи", view: viewGroups },
   { id: "users", label: "Користувачі", view: viewUsers, roles: ["admin"] },
@@ -364,7 +374,13 @@ const TABS = [
 ];
 
 function visibleTabs() {
-  return TABS.filter(t => !t.roles || t.roles.some(r => hasRole(r)));
+  return TABS.filter(t => {
+    if (t.roles && !t.roles.some(r => hasRole(r))) return false;
+    // «Каталог» для не-адмінів доступний лише коли ввімкнено індивідуальний доступ.
+    if (t.id === "catalog" && !hasRole("admin") && state.skillSettings
+        && !state.skillSettings.individual_access) return false;
+    return true;
+  });
 }
 
 function buildNav() {
@@ -396,7 +412,7 @@ async function openTab(id) {
 
 // ---------- Чат з обраною моделлю ----------
 let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null,
-                  models: [], activeModelId: null };
+                  models: [], activeModelId: null, attachments: [] };
 
 function sessionItemHtml(s, activeId) {
   // Без кольорового маркування за вендором — усі чати одним системним кольором.
@@ -411,7 +427,6 @@ async function viewChat() {
     api("/skills/mine"), api("/chat/sessions"),
   ]);
   chatState.skills = skills;
-  loadModelPicker();  // оновлюємо перелік моделей (доступи могли змінитись)
   const view = $("#view");
 
   const sessionItems = sessions.map(s => sessionItemHtml(s, chatState.sessionId)).join("")
@@ -420,6 +435,10 @@ async function viewChat() {
   view.innerHTML = `
     <div class="chat-layout">
       <aside class="chat-sidebar">
+        <div class="card model-card">
+          <h3>Модель</h3>
+          <div id="model-picker" class="model-picker"></div>
+        </div>
         <div class="card chat-history">
           <h3>Мої чати</h3>
           <div id="session-list">${sessionItems}</div>
@@ -429,8 +448,13 @@ async function viewChat() {
         <div id="chat-header" class="chat-header muted">Оберіть чат або створіть новий («Новий чат» угорі).</div>
         <div id="chat-log" class="chat-log"></div>
         <div id="chat-input-box" class="hidden">
-          <div class="row">
-            <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1; min-height:60px"></textarea>
+          <div id="chat-attachments" class="chat-attachments"></div>
+          <div class="row chat-input-row">
+            <input type="file" id="chat-file" accept="image/*,application/pdf" multiple hidden>
+            <button id="chat-attach" class="chat-attach" type="button" title="Додати зображення або PDF" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 6.5 8.9 14a2 2 0 1 0 2.8 2.8l7.6-7.6a4 4 0 1 0-5.6-5.6l-7.7 7.6a6 6 0 1 0 8.5 8.5l6.3-6.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1"></textarea>
             <button id="chat-send">Надіслати</button>
           </div>
         </div>
@@ -443,6 +467,7 @@ async function viewChat() {
 
   bindSessionListEvents();
   bindRibbon();
+  loadModelPicker();  // перемикач моделі у сайдбарі (доступи могли змінитись)
 
   // Відкриваємо новостворений чат, інакше — останній наявний.
   const toOpen = chatState.openAfter || (sessions[0] && sessions[0].id);
@@ -523,8 +548,8 @@ function renderChatMessage(m) {
   // Робочі посилання на створені файли (зберігаються з повідомленням — переживають
   // перевідкриття чату).
   if (m.files && m.files.length) {
-    const fl = renderFileLinks(m.files);
-    if (fl) log.appendChild(fl);
+    const fl = renderFileLinks(m.files, m.role === "user" ? "Вкладення:" : "Створені файли:");
+    if (fl) { fl.classList.add("fl-" + m.role); log.appendChild(fl); }
   }
   log.scrollTop = log.scrollHeight;
   return bubble;
@@ -548,6 +573,50 @@ function renderChatNote(text) {
   log.scrollTop = log.scrollHeight;
 }
 
+// ---------- Вкладення чату (зображення/PDF, лише Azure OpenAI) ----------
+// Показуємо кнопку 📎 лише для моделей Azure; для локальних — приховуємо.
+function updateAttachAvailability(provider) {
+  const azure = provider === "azure_ai_foundry";
+  const btn = $("#chat-attach");
+  if (btn) btn.hidden = !azure;
+  if (!azure && chatState.attachments.length) { chatState.attachments = []; renderAttachments(); }
+}
+
+function renderAttachments() {
+  const box = $("#chat-attachments");
+  if (!box) return;
+  box.innerHTML = chatState.attachments.map((a, i) => {
+    const thumb = (a.content_type || "").startsWith("image/")
+      ? `<img src="${fileUrl(a)}" alt="">`
+      : `<span class="att-pdf">PDF</span>`;
+    return `<div class="att-chip">${thumb}<span class="att-name">${esc(a.filename)}</span>` +
+      `<button class="att-x" type="button" data-i="${i}" title="Прибрати">×</button></div>`;
+  }).join("");
+  box.querySelectorAll(".att-x").forEach(b => b.addEventListener("click", () => {
+    chatState.attachments.splice(Number(b.dataset.i), 1);
+    renderAttachments();
+  }));
+}
+
+// Завантажує файл у сховище (доступний і в «Файли») та додає у вкладення чату.
+async function addAttachment(file) {
+  const ct = file.type || "";
+  if (!ct.startsWith("image/") && ct !== "application/pdf") {
+    toast("Підтримуються лише зображення та PDF", "err"); return;
+  }
+  const form = new FormData();
+  form.append("file", file);
+  try {
+    const res = await fetch(API + "/files", {
+      method: "POST", headers: { "Authorization": `Bearer ${state.token}` }, body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || "Помилка завантаження");
+    chatState.attachments.push({ id: data.id, filename: data.filename,
+      content_type: data.content_type, url: data.url, download_url: data.download_url });
+    renderAttachments();
+  } catch (err) { toast(err.message, "err"); }
+}
+
 async function openChatSession(sessionId) {
   chatState.sessionId = sessionId;
   const session = await api(`/chat/sessions/${sessionId}`);
@@ -562,6 +631,16 @@ async function openChatSession(sessionId) {
   document.querySelectorAll(".session-item").forEach(i =>
     i.classList.toggle("active", Number(i.dataset.sid) === sessionId));
 
+  // Вкладення: скидаємо і показуємо кнопку лише для Azure-моделі поточного чату.
+  chatState.attachments = [];
+  renderAttachments();
+  updateAttachAvailability(session.model_provider);
+  $("#chat-attach").onclick = () => $("#chat-file").click();
+  $("#chat-file").onchange = async (e) => {
+    for (const file of Array.from(e.target.files)) await addAttachment(file);
+    e.target.value = "";
+  };
+
   const sendBtn = $("#chat-send");
 
   function setSending(on) {
@@ -571,17 +650,21 @@ async function openChatSession(sessionId) {
 
   async function doSend() {
     const text = $("#chat-text").value.trim();
-    if (!text) return;
+    const atts = chatState.attachments.slice();
+    if (!text && !atts.length) return;
     const skillId = chatState.selectedSkill || null;
-    const userEl = renderChatMessage({ role: "user", content: text });
+    const userEl = renderChatMessage({ role: "user", content: text, files: atts });
     $("#chat-text").value = "";
+    chatState.attachments = [];
+    renderAttachments();
     const loading = showChatLoading();
     const controller = new AbortController();
     chatState.controller = controller;
     setSending(true);
     try {
       const res = await api(`/chat/sessions/${sessionId}/messages`, {
-        method: "POST", body: { content: text, skill_id: skillId }, signal: controller.signal });
+        method: "POST", signal: controller.signal,
+        body: { content: text, skill_id: skillId, file_ids: atts.map(a => a.id) } });
       loading.remove();
       userEl.querySelector(".msg-tok").textContent = res.usage.prompt_tokens;
       // Файли рендеряться як частина повідомлення (той самий шлях, що й при
@@ -1004,9 +1087,102 @@ async function renderFeedback() {
   });
 }
 
+let skillsSubTab = "config";  // активна вкладка «Навички»: config | access
+
 async function viewManageSkills() {
-  const skills = await api("/skills");
   const view = $("#view");
+  view.innerHTML = `
+    <div class="usage-tabs">
+      <button class="u-tab" data-st="config">Конфіг</button>
+      <button class="u-tab" data-st="access">Доступи</button>
+    </div>
+    <div id="skills-panel"></div>`;
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.addEventListener("click", () => { skillsSubTab = b.dataset.st; paintSkillsSub(); }));
+  paintSkillsSub();
+}
+
+function paintSkillsSub() {
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.st === skillsSubTab));
+  if (skillsSubTab === "access") renderSkillsAccess();
+  else renderSkillsConfig();
+}
+
+// Матриця доступів «групи × навички» + перемикач індивідуального доступу.
+async function renderSkillsAccess() {
+  const panel = $("#skills-panel");
+  panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
+  const mx = await api("/skills/access-matrix");
+  const grants = new Set(mx.grants);
+  const toggleCard = `
+    <div class="card">
+      <label class="ind-toggle">
+        <input type="checkbox" id="ind-access" ${mx.individual_access ? "checked" : ""}>
+        <span><b>Дозволити індивідуальний доступ</b> — меню «Каталог» доступне користувачам,
+        і вони можуть самостійно встановлювати та вилучати навички.
+        Доступ, наданий групою, від цього не залежить.</span>
+      </label>
+    </div>`;
+  let matrixCard;
+  if (!mx.skills.length) {
+    matrixCard = `<div class="card"><p class="muted">Немає опублікованих навичок — опублікуйте їх у вкладці «Конфіг».</p></div>`;
+  } else if (!mx.groups.length) {
+    matrixCard = `<div class="card"><p class="muted">Спершу створіть групи у вкладці «Групи», щоб надавати їм доступ до навичок.</p></div>`;
+  } else {
+    const head = mx.skills.map(s =>
+      `<th class="am-col"><span class="am-mname">${esc(s.name)}</span></th>`).join("");
+    const rows = mx.groups.map(g => {
+      const cells = mx.skills.map(s => {
+        const on = grants.has(`${g.id}:${s.id}`);
+        return `<td class="am-cell"><input type="checkbox" data-g="${g.id}" data-s="${s.id}"${on ? " checked" : ""}></td>`;
+      }).join("");
+      return `<tr><th class="am-row" scope="row">${esc(g.name)}</th>${cells}</tr>`;
+    }).join("");
+    matrixCard = `
+      <div class="card">
+        <h2>Матриця доступів</h2>
+        <p class="muted">Позначте, які <strong>групи</strong> мають доступ до яких <strong>навичок</strong>. Користувач бачить навички своїх груп (додатково до самостійно встановлених).</p>
+        <div class="am-wrap">
+          <table class="am-table">
+            <thead><tr><th class="am-corner">Група \\ Навичка</th>${head}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+  panel.innerHTML = toggleCard + matrixCard;
+
+  $("#ind-access").addEventListener("change", async (e) => {
+    const cb = e.target;
+    cb.disabled = true;
+    try {
+      const res = await api("/skills/access-settings", { method: "POST",
+        body: { individual_access: cb.checked } });
+      state.skillSettings = { individual_access: res.individual_access };
+      toast(res.individual_access
+        ? "Індивідуальний доступ увімкнено"
+        : "Індивідуальний доступ вимкнено");
+    } catch (err) { cb.checked = !cb.checked; toast(err.message, "err"); }
+    finally { cb.disabled = false; }
+  });
+
+  panel.querySelectorAll(".am-cell input[data-g]").forEach(cb =>
+    cb.addEventListener("change", async () => {
+      cb.disabled = true;
+      try {
+        await api("/skills/access", { method: "POST", body: {
+          group_id: Number(cb.dataset.g), skill_id: Number(cb.dataset.s), granted: cb.checked } });
+      } catch (err) {
+        cb.checked = !cb.checked;  // відкат на помилці
+        toast(err.message, "err");
+      } finally { cb.disabled = false; }
+    }));
+}
+
+async function renderSkillsConfig() {
+  const skills = await api("/skills");
+  const view = $("#skills-panel");
   view.innerHTML = `
     <div class="card" id="fb-card">
       <div class="fb-head">

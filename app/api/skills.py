@@ -14,7 +14,7 @@ from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
-    Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill,
+    Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill, Group,
     ChatSession, ChatMessage, TokenUsageLog, UserFile,
 )
 from app.services import skill_service, chat_service, package_service
@@ -42,12 +42,63 @@ def list_skills():
 @bp.get("/mine")
 @require_auth
 def my_skills():
-    """Навички, активні для поточного користувача (ефективний доступ)."""
+    """Навички, доступні користувачу: власні активації ∪ навички його груп."""
     user = current_user()
-    rows = UserSkill.query.filter_by(user_id=user.id, is_active=True).all()
-    skill_ids = [r.skill_id for r in rows]
-    skills = Skill.query.filter(Skill.id.in_(skill_ids)).all()
+    skill_ids = skill_service.effective_skill_ids(user.id)
+    skills = (Skill.query.filter(Skill.id.in_(skill_ids))
+              .filter_by(status="published").all()) if skill_ids else []
     return jsonify([s.to_dict() for s in skills])
+
+
+@bp.get("/settings")
+@require_auth
+def skills_settings():
+    """Налаштування доступу до навичок (для UI: Каталог та самоактивація)."""
+    return jsonify({"individual_access": skill_service.individual_access_enabled()})
+
+
+@bp.get("/access-matrix")
+@require_global_role("admin")
+def access_matrix():
+    """Матриця доступів: групи (рядки) × опубліковані навички (колонки)."""
+    groups = Group.query.order_by(Group.name).all()
+    skills = Skill.query.filter_by(status="published").order_by(Skill.name).all()
+    grants = [f"{gs.group_id}:{gs.skill_id}"
+              for gs in GroupSkill.query.filter_by(is_active=True).all()]
+    return jsonify({
+        "groups": [{"id": g.id, "name": g.name} for g in groups],
+        "skills": [{"id": s.id, "name": s.name} for s in skills],
+        "grants": grants,
+        "individual_access": skill_service.individual_access_enabled(),
+    })
+
+
+@bp.post("/access")
+@require_global_role("admin")
+def set_access():
+    """Вмикає/вимикає доступ групи до навички (чекбокс матриці)."""
+    data = request.get_json(silent=True) or {}
+    gid, sid = data.get("group_id"), data.get("skill_id")
+    if not gid or not sid:
+        raise ApiError("Вкажіть group_id та skill_id", 400, "validation_error")
+    Group.query.get_or_404(gid)
+    granted = bool(data.get("granted"))
+    if granted:
+        skill_service.assign_to_group(gid, sid, current_user().id)
+    else:
+        skill_service.remove_from_group(gid, sid)
+    return jsonify({"group_id": gid, "skill_id": sid, "granted": granted})
+
+
+@bp.post("/access-settings")
+@require_global_role("admin")
+def set_access_settings():
+    """Перемикач «Дозволити індивідуальний доступ» (Каталог + самоактивація)."""
+    data = request.get_json(silent=True) or {}
+    if "individual_access" not in data:
+        raise ApiError("Вкажіть individual_access", 400, "validation_error")
+    value = skill_service.set_individual_access(bool(data["individual_access"]))
+    return jsonify({"individual_access": value})
 
 
 @bp.get("/<int:skill_id>")
@@ -98,19 +149,30 @@ def change_status(skill_id):
     return jsonify(skill.to_dict())
 
 
+def _require_individual_access(user):
+    """Самоактивація дозволена, якщо ввімкнено індивідуальний доступ (або Admin)."""
+    if not skill_service.individual_access_enabled() and not user.has_global_role("admin"):
+        raise ApiError("Індивідуальний доступ до навичок вимкнено адміністратором",
+                       403, "individual_access_disabled")
+
+
 @bp.post("/<int:skill_id>/activate")
 @require_auth
 def activate(skill_id):
     """Самостійна активація (встановлення) опублікованої навички для себе."""
-    count = skill_service.self_activate(current_user().id, skill_id)
+    user = current_user()
+    _require_individual_access(user)
+    count = skill_service.self_activate(user.id, skill_id)
     return jsonify({"message": "Навичку встановлено", "activations_count": count})
 
 
 @bp.post("/<int:skill_id>/deactivate")
 @require_auth
 def deactivate(skill_id):
-    """Самостійне вилучення навички користувачем (знімає її з «встановлених»)."""
-    count = skill_service.self_deactivate(current_user().id, skill_id)
+    """Самостійне вилучення навички (доступ за групою при цьому зберігається)."""
+    user = current_user()
+    _require_individual_access(user)
+    count = skill_service.self_deactivate(user.id, skill_id)
     return jsonify({"message": "Навичку вилучено", "activations_count": count})
 
 
