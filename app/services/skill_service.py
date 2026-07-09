@@ -1,19 +1,56 @@
-"""SkillService — центральна логіка подвійного призначення та лічильника активацій.
+"""SkillService — доступ до навичок (власний + за групами) та лічильник активацій.
 
-Ефективний доступ матеріалізується в user_skills (одна стрічка на user+skill).
-Це дає природний підрахунок унікальних активацій та реалізує правило
-«плюс усі члени групи, крім тих, у кого скіл уже був».
+Ефективний доступ користувача = власні активації (user_skills, is_active)
+∪ навички груп, де він активний учасник (group_skills, обчислюється динамічно).
+Тому самостійне вилучення навички НЕ прибирає доступ, наданий групою.
 """
 from app.extensions import db
 from app.core.errors import ApiError
 from app.models import (
-    Skill, UserSkill, GroupSkill, GroupMembership,
+    Skill, UserSkill, GroupSkill, GroupMembership, AppSetting,
 )
+
+# Ключ налаштування «Дозволити індивідуальний доступ» (Каталог + самоактивація).
+INDIVIDUAL_ACCESS_KEY = "skills_individual_access"
+
+
+def individual_access_enabled():
+    """Чи можуть користувачі самі встановлювати/вилучати навички (Каталог)."""
+    return AppSetting.get(INDIVIDUAL_ACCESS_KEY, "1") == "1"
+
+
+def set_individual_access(enabled):
+    AppSetting.set(INDIVIDUAL_ACCESS_KEY, "1" if enabled else "0")
+    db.session.commit()
+    return individual_access_enabled()
+
+
+def effective_skill_ids(user_id):
+    """Ефективний доступ: власні активації ∪ навички активних груп користувача."""
+    self_ids = {us.skill_id for us in UserSkill.query.filter_by(
+        user_id=user_id, is_active=True).all()}
+    gids = [m.group_id for m in GroupMembership.query.filter_by(
+        user_id=user_id, status="active").all()]
+    group_ids = set()
+    if gids:
+        group_ids = {gs.skill_id for gs in GroupSkill.query.filter(
+            GroupSkill.group_id.in_(gids), GroupSkill.is_active == True).all()}  # noqa: E712
+    return self_ids | group_ids
 
 
 def recompute_activations(skill_id):
-    """activations_count = к-сть унікальних користувачів з активним доступом."""
-    count = UserSkill.query.filter_by(skill_id=skill_id, is_active=True).count()
+    """activations_count = к-сть унікальних користувачів з ефективним доступом
+    (власні активації ∪ активні учасники груп з активним призначенням)."""
+    self_users = {us.user_id for us in UserSkill.query.filter_by(
+        skill_id=skill_id, is_active=True).all()}
+    gids = [gs.group_id for gs in GroupSkill.query.filter_by(
+        skill_id=skill_id, is_active=True).all()]
+    group_users = set()
+    if gids:
+        group_users = {m.user_id for m in GroupMembership.query.filter(
+            GroupMembership.group_id.in_(gids),
+            GroupMembership.status == "active").all()}
+    count = len(self_users | group_users)
     skill = Skill.query.get(skill_id)
     if skill:
         skill.activations_count = count

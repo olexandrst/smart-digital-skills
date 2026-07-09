@@ -116,8 +116,9 @@ def run_agent_skill(user, model, skill, content, history=None):
 
 
 def _user_has_skill(user_id, skill_id):
-    return UserSkill.query.filter_by(
-        user_id=user_id, skill_id=skill_id, is_active=True).first() is not None
+    """Ефективний доступ: власна активація або навичка групи користувача."""
+    from app.services import skill_service
+    return skill_id in skill_service.effective_skill_ids(user_id)
 
 
 def _skill_params(skill):

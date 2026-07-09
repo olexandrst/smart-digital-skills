@@ -14,6 +14,7 @@ from app.models.chat import (
     AuditLog,
 )
 from app.models.file import UserFile
+from app.models.setting import AppSetting
 
 __all__ = [
     "User",
@@ -38,4 +39,5 @@ __all__ = [
     "TokenCounter",
     "AuditLog",
     "UserFile",
+    "AppSetting",
 ]

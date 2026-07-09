@@ -225,15 +225,13 @@ function renderModelPicker() {
     return;
   }
   if (models.length === 1) {
-    box.innerHTML = `<span class="mp-label">Модель:</span>` +
-      `<span class="mp-single">${esc(models[0].name)}</span>`;
+    box.innerHTML = `<span class="mp-single">${esc(models[0].name)}</span>`;
     return;
   }
   const cur = chatState.activeModelId;
   const opts = models.map(m =>
     `<option value="${m.id}" ${m.id === cur ? "selected" : ""}>${esc(m.name)}${m.is_system ? " (системна)" : ""}</option>`).join("");
-  box.innerHTML = `<span class="mp-label">Модель:</span>` +
-    `<select id="mp-select" class="mp-select" title="Модель для чату">${opts}</select>`;
+  box.innerHTML = `<select id="mp-select" class="mp-select" title="Модель для чату">${opts}</select>`;
   $("#mp-select").addEventListener("change", () => pickModel(Number($("#mp-select").value)));
 }
 
@@ -322,6 +320,9 @@ async function showApp() {
   $("#user-name").textContent = display;
   $("#user-roles").textContent = state.user.roles.length ? state.user.roles.join(", ") : "member";
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
+  // Налаштування навичок (індивідуальний доступ) визначає видимість «Каталогу».
+  try { state.skillSettings = await api("/skills/settings"); }
+  catch (e) { state.skillSettings = { individual_access: true }; }
   buildNav();
   refreshQuota();
   loadModelPicker();
@@ -365,7 +366,7 @@ const TABS = [
   { id: "chat", label: "Чат", view: viewChat },
   { id: "catalog", label: "Каталог", view: viewCatalog },
   { id: "files", label: "Мої файли", view: viewFiles },
-  { id: "manage-skills", label: "Управління навичками", view: viewManageSkills, roles: ["admin", "skill_manager"] },
+  { id: "manage-skills", label: "Навички", view: viewManageSkills, roles: ["admin", "skill_manager"] },
   { id: "models", label: "Моделі", view: viewModels, roles: ["admin"] },
   { id: "groups", label: "Групи", view: viewGroups },
   { id: "users", label: "Користувачі", view: viewUsers, roles: ["admin"] },
@@ -373,7 +374,13 @@ const TABS = [
 ];
 
 function visibleTabs() {
-  return TABS.filter(t => !t.roles || t.roles.some(r => hasRole(r)));
+  return TABS.filter(t => {
+    if (t.roles && !t.roles.some(r => hasRole(r))) return false;
+    // «Каталог» для не-адмінів доступний лише коли ввімкнено індивідуальний доступ.
+    if (t.id === "catalog" && !hasRole("admin") && state.skillSettings
+        && !state.skillSettings.individual_access) return false;
+    return true;
+  });
 }
 
 function buildNav() {
@@ -420,7 +427,6 @@ async function viewChat() {
     api("/skills/mine"), api("/chat/sessions"),
   ]);
   chatState.skills = skills;
-  loadModelPicker();  // оновлюємо перелік моделей (доступи могли змінитись)
   const view = $("#view");
 
   const sessionItems = sessions.map(s => sessionItemHtml(s, chatState.sessionId)).join("")
@@ -429,6 +435,10 @@ async function viewChat() {
   view.innerHTML = `
     <div class="chat-layout">
       <aside class="chat-sidebar">
+        <div class="card model-card">
+          <h3>Модель</h3>
+          <div id="model-picker" class="model-picker"></div>
+        </div>
         <div class="card chat-history">
           <h3>Мої чати</h3>
           <div id="session-list">${sessionItems}</div>
@@ -444,7 +454,7 @@ async function viewChat() {
             <button id="chat-attach" class="chat-attach" type="button" title="Додати зображення або PDF" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 6.5 8.9 14a2 2 0 1 0 2.8 2.8l7.6-7.6a4 4 0 1 0-5.6-5.6l-7.7 7.6a6 6 0 1 0 8.5 8.5l6.3-6.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1; min-height:60px"></textarea>
+            <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1"></textarea>
             <button id="chat-send">Надіслати</button>
           </div>
         </div>
@@ -457,6 +467,7 @@ async function viewChat() {
 
   bindSessionListEvents();
   bindRibbon();
+  loadModelPicker();  // перемикач моделі у сайдбарі (доступи могли змінитись)
 
   // Відкриваємо новостворений чат, інакше — останній наявний.
   const toOpen = chatState.openAfter || (sessions[0] && sessions[0].id);
@@ -632,16 +643,6 @@ async function openChatSession(sessionId) {
 
   const sendBtn = $("#chat-send");
 
-  // Поле вводу росте під обсяг тексту (до межі, далі — прокрутка), щоб було
-  // видно все набране.
-  const textEl = $("#chat-text");
-  const autoGrow = () => {
-    textEl.style.height = "auto";
-    textEl.style.height = Math.min(textEl.scrollHeight, 260) + "px";
-  };
-  textEl.oninput = autoGrow;
-  autoGrow();
-
   function setSending(on) {
     sendBtn.classList.toggle("stop", on);
     sendBtn.textContent = on ? "■ Стоп" : "Надіслати";
@@ -654,7 +655,6 @@ async function openChatSession(sessionId) {
     const skillId = chatState.selectedSkill || null;
     const userEl = renderChatMessage({ role: "user", content: text, files: atts });
     $("#chat-text").value = "";
-    autoGrow();  // повертаємо поле до базової висоти після очищення
     chatState.attachments = [];
     renderAttachments();
     const loading = showChatLoading();
@@ -1087,9 +1087,102 @@ async function renderFeedback() {
   });
 }
 
+let skillsSubTab = "config";  // активна вкладка «Навички»: config | access
+
 async function viewManageSkills() {
-  const skills = await api("/skills");
   const view = $("#view");
+  view.innerHTML = `
+    <div class="usage-tabs">
+      <button class="u-tab" data-st="config">Конфіг</button>
+      <button class="u-tab" data-st="access">Доступи</button>
+    </div>
+    <div id="skills-panel"></div>`;
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.addEventListener("click", () => { skillsSubTab = b.dataset.st; paintSkillsSub(); }));
+  paintSkillsSub();
+}
+
+function paintSkillsSub() {
+  document.querySelectorAll(".u-tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.st === skillsSubTab));
+  if (skillsSubTab === "access") renderSkillsAccess();
+  else renderSkillsConfig();
+}
+
+// Матриця доступів «групи × навички» + перемикач індивідуального доступу.
+async function renderSkillsAccess() {
+  const panel = $("#skills-panel");
+  panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
+  const mx = await api("/skills/access-matrix");
+  const grants = new Set(mx.grants);
+  const toggleCard = `
+    <div class="card">
+      <label class="ind-toggle">
+        <input type="checkbox" id="ind-access" ${mx.individual_access ? "checked" : ""}>
+        <span><b>Дозволити індивідуальний доступ</b> — меню «Каталог» доступне користувачам,
+        і вони можуть самостійно встановлювати та вилучати навички.
+        Доступ, наданий групою, від цього не залежить.</span>
+      </label>
+    </div>`;
+  let matrixCard;
+  if (!mx.skills.length) {
+    matrixCard = `<div class="card"><p class="muted">Немає опублікованих навичок — опублікуйте їх у вкладці «Конфіг».</p></div>`;
+  } else if (!mx.groups.length) {
+    matrixCard = `<div class="card"><p class="muted">Спершу створіть групи у вкладці «Групи», щоб надавати їм доступ до навичок.</p></div>`;
+  } else {
+    const head = mx.skills.map(s =>
+      `<th class="am-col"><span class="am-mname">${esc(s.name)}</span></th>`).join("");
+    const rows = mx.groups.map(g => {
+      const cells = mx.skills.map(s => {
+        const on = grants.has(`${g.id}:${s.id}`);
+        return `<td class="am-cell"><input type="checkbox" data-g="${g.id}" data-s="${s.id}"${on ? " checked" : ""}></td>`;
+      }).join("");
+      return `<tr><th class="am-row" scope="row">${esc(g.name)}</th>${cells}</tr>`;
+    }).join("");
+    matrixCard = `
+      <div class="card">
+        <h2>Матриця доступів</h2>
+        <p class="muted">Позначте, які <strong>групи</strong> мають доступ до яких <strong>навичок</strong>. Користувач бачить навички своїх груп (додатково до самостійно встановлених).</p>
+        <div class="am-wrap">
+          <table class="am-table">
+            <thead><tr><th class="am-corner">Група \\ Навичка</th>${head}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+  panel.innerHTML = toggleCard + matrixCard;
+
+  $("#ind-access").addEventListener("change", async (e) => {
+    const cb = e.target;
+    cb.disabled = true;
+    try {
+      const res = await api("/skills/access-settings", { method: "POST",
+        body: { individual_access: cb.checked } });
+      state.skillSettings = { individual_access: res.individual_access };
+      toast(res.individual_access
+        ? "Індивідуальний доступ увімкнено"
+        : "Індивідуальний доступ вимкнено");
+    } catch (err) { cb.checked = !cb.checked; toast(err.message, "err"); }
+    finally { cb.disabled = false; }
+  });
+
+  panel.querySelectorAll(".am-cell input[data-g]").forEach(cb =>
+    cb.addEventListener("change", async () => {
+      cb.disabled = true;
+      try {
+        await api("/skills/access", { method: "POST", body: {
+          group_id: Number(cb.dataset.g), skill_id: Number(cb.dataset.s), granted: cb.checked } });
+      } catch (err) {
+        cb.checked = !cb.checked;  // відкат на помилці
+        toast(err.message, "err");
+      } finally { cb.disabled = false; }
+    }));
+}
+
+async function renderSkillsConfig() {
+  const skills = await api("/skills");
+  const view = $("#skills-panel");
   view.innerHTML = `
     <div class="card" id="fb-card">
       <div class="fb-head">
