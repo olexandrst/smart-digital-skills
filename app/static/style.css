@@ -787,6 +787,9 @@ body.theme-material .msg-tok { box-shadow: var(--shadow); }
 .att-thumb:hover { border-color: var(--accent); }
 
 .chat-input-row { display: flex; align-items: flex-end; gap: 8px; }
+/* Поле вводу авторозширюється під текст (висоту задає JS); далі — прокрутка */
+#chat-text { resize: none; min-height: 60px; max-height: 260px; overflow-y: auto;
+  line-height: 1.45; }
 .chat-attach { flex: 0 0 auto; width: 42px; height: 42px; padding: 0; display: inline-flex;
   align-items: center; justify-content: center; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 10px; color: var(--muted); }

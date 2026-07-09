@@ -632,6 +632,16 @@ async function openChatSession(sessionId) {
 
   const sendBtn = $("#chat-send");
 
+  // Поле вводу росте під обсяг тексту (до межі, далі — прокрутка), щоб було
+  // видно все набране.
+  const textEl = $("#chat-text");
+  const autoGrow = () => {
+    textEl.style.height = "auto";
+    textEl.style.height = Math.min(textEl.scrollHeight, 260) + "px";
+  };
+  textEl.oninput = autoGrow;
+  autoGrow();
+
   function setSending(on) {
     sendBtn.classList.toggle("stop", on);
     sendBtn.textContent = on ? "■ Стоп" : "Надіслати";
@@ -644,6 +654,7 @@ async function openChatSession(sessionId) {
     const skillId = chatState.selectedSkill || null;
     const userEl = renderChatMessage({ role: "user", content: text, files: atts });
     $("#chat-text").value = "";
+    autoGrow();  // повертаємо поле до базової висоти після очищення
     chatState.attachments = [];
     renderAttachments();
     const loading = showChatLoading();
