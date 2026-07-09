@@ -87,6 +87,10 @@ def test_usage_by_mode_and_skills_total(client):
     assert modes["online"]["requests"] == 1
     assert modes["offline"]["requests"] == 2  # офлайн-чат + запуск навички
     assert modes["online"]["total_tokens"] > 0
+    # Токени-вкладка також має розподіл по навичках (лише токени).
+    me_skill = next(s for s in me["by_skill"] if s["skill"] == "Summarizer")
+    assert me_skill["total_tokens"] > 0 and me_skill["runs"] == 1
+    assert me["skills_total"]["total_tokens"] == me_skill["total_tokens"]
 
     money = client.get("/api/usage/money", headers=auth(token)).get_json()
     mm = {m["mode"]: m for m in money["by_mode"]}

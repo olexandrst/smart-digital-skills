@@ -67,11 +67,18 @@ def _run_web_search(client, model, history, user_text, params, attachments):
                         history + [{"role": "user", "content": answer_content}], params)
 
     reply = a_res.content or ""
-    if results:  # додаємо перелік джерел для прозорості
-        srcs = "\n".join(f"- [{r['title'] or r['url']}]({r['url']})"
-                         for r in results if r.get("url"))
-        if srcs:
-            reply = f"{reply}\n\n**Джерела:**\n{srcs}"
+    if results:  # додаємо перелік клікабельних джерел для прозорості
+        lines = []
+        for r in results:
+            url = (r.get("url") or "").strip()
+            if not url:
+                continue
+            # Чистимо заголовок, щоб markdown-посилання [текст](url) не ламалось.
+            title = re.sub(r"[\[\]()\r\n]+", " ", (r.get("title") or "")).strip()
+            title = re.sub(r"\s+", " ", title)[:90] or url
+            lines.append(f"- [{title}]({url})")
+        if lines:
+            reply = f"{reply}\n\n**Джерела:**\n" + "\n".join(lines)
 
     usage = {
         "prompt_tokens": q_res.prompt_tokens + a_res.prompt_tokens,

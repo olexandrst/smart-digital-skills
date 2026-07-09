@@ -51,6 +51,26 @@ def _user_logs(user_id):
     return TokenUsageLog.query.filter_by(user_id=user_id, is_system=False)
 
 
+def _by_skill(query):
+    """Розподіл по навичках (запуски/токени/вартість) + підсумок «Разом»."""
+    srows = (query.filter(TokenUsageLog.skill_id.isnot(None))
+             .with_entities(TokenUsageLog.skill_id,
+                            func.coalesce(func.sum(TokenUsageLog.cost_total), 0.0),
+                            func.coalesce(func.sum(TokenUsageLog.total_tokens), 0),
+                            func.count(TokenUsageLog.id))
+             .group_by(TokenUsageLog.skill_id).all())
+    skill_names = {s.id: s.name for s in Skill.query.all()}
+    rows = sorted(
+        [{"skill_id": r[0], "skill": skill_names.get(r[0], "—"),
+          "cost": float(r[1]), "total_tokens": int(r[2]), "runs": int(r[3]),
+          "avg": (float(r[1]) / r[3]) if r[3] else 0.0}
+         for r in srows], key=lambda x: x["cost"], reverse=True)
+    total = {"cost": sum(s["cost"] for s in rows),
+             "total_tokens": sum(s["total_tokens"] for s in rows),
+             "runs": sum(s["runs"] for s in rows)}
+    return rows, total
+
+
 def _by_mode(query):
     """Розподіл токенів і вартості за режимом роботи (offline / online)."""
     rows = (query.with_entities(
@@ -133,6 +153,9 @@ def my_usage():
     data = _aggregate(_user_logs(user.id))
     data["quota"] = quota_service.status(user.id)
     data["by_mode"] = _by_mode(_user_logs(user.id))
+    by_skill, skills_total = _by_skill(_user_logs(user.id))
+    data["by_skill"] = by_skill
+    data["skills_total"] = skills_total
     return jsonify(data)
 
 
@@ -209,25 +232,8 @@ def money():
          for r in rows],
         key=lambda x: x["cost"], reverse=True)
 
-    # Розподіл вартості по НАВИЧКАХ (лише запуски з застосованою навичкою).
-    srows = (q.filter(TokenUsageLog.skill_id.isnot(None))
-             .with_entities(TokenUsageLog.skill_id,
-                            func.coalesce(func.sum(TokenUsageLog.cost_total), 0.0),
-                            func.coalesce(func.sum(TokenUsageLog.total_tokens), 0),
-                            func.count(TokenUsageLog.id))
-             .group_by(TokenUsageLog.skill_id).all())
-    skill_names = {s.id: s.name for s in Skill.query.all()}
-    by_skill = sorted(
-        [{"skill_id": r[0], "skill": skill_names.get(r[0], "—"),
-          "cost": float(r[1]), "total_tokens": int(r[2]), "runs": int(r[3]),
-          "avg": (float(r[1]) / r[3]) if r[3] else 0.0}
-         for r in srows],
-        key=lambda x: x["cost"], reverse=True)
-    skills_total = {
-        "cost": sum(s["cost"] for s in by_skill),
-        "total_tokens": sum(s["total_tokens"] for s in by_skill),
-        "runs": sum(s["runs"] for s in by_skill),
-    }
+    # Розподіл по НАВИЧКАХ (лише запуски з застосованою навичкою) + підсумок.
+    by_skill, skills_total = _by_skill(q)
 
     return jsonify({
         "cost_in": agg["cost_in"], "cost_out": agg["cost_out"],
