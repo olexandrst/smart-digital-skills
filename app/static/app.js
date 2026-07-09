@@ -410,7 +410,7 @@ async function openTab(id) {
 
 // ---------- Чат з обраною моделлю ----------
 let chatState = { sessionId: null, skills: [], openAfter: null, selectedSkill: null,
-                  models: [], activeModelId: null, attachments: [] };
+                  models: [], activeModelId: null, attachments: [], webSearch: false };
 
 function sessionItemHtml(s, activeId) {
   // Без кольорового маркування за вендором — усі чати одним системним кольором.
@@ -449,7 +449,10 @@ async function viewChat() {
           <div id="chat-attachments" class="chat-attachments"></div>
           <div class="row chat-input-row">
             <input type="file" id="chat-file" accept="image/*,application/pdf" multiple hidden>
-            <button id="chat-attach" class="chat-attach" type="button" title="Додати зображення або PDF" hidden>
+            <button id="chat-web" class="chat-tool" type="button" title="Веб-пошук (DuckDuckGo) — вимкнено">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2c1.6 0 3.7 2.6 4.3 7H7.7C8.3 6.6 10.4 4 12 4Zm-1 0.2C10 5.6 9.2 7.6 8.9 9H5.1A8 8 0 0 1 11 4.2ZM4.3 11h4.4c-.1 1-.1 2 0 3H4.3a8 8 0 0 1 0-3Zm.8 5h3.8c.3 1.4 1.1 3.4 2.1 4.8A8 8 0 0 1 5.1 16Zm6.9 4.8C10.4 20 8.3 17.4 7.7 15h8.6c-.6 4.4-2.7 7-4.3 7Zm2-.8c1-1.4 1.8-3.4 2.1-4.8h3.8a8 8 0 0 1-5.9 4.8Zm2.3-6.8c.1-1 .1-2 0-3h4.4a8 8 0 0 1 0 3h-4.4Zm-.2-5c-.3-1.4-1.1-3.4-2.1-4.8A8 8 0 0 1 18.9 9h-3.8Z" fill="currentColor"/></svg>
+            </button>
+            <button id="chat-attach" class="chat-tool" type="button" title="Додати зображення або PDF" hidden>
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 6.5 8.9 14a2 2 0 1 0 2.8 2.8l7.6-7.6a4 4 0 1 0-5.6-5.6l-7.7 7.6a6 6 0 1 0 8.5 8.5l6.3-6.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <textarea id="chat-text" placeholder="Введіть повідомлення…" style="flex:1"></textarea>
@@ -596,6 +599,16 @@ function renderAttachments() {
   }));
 }
 
+// Стан кнопки веб-пошуку (глобус): активна = онлайн-режим.
+function renderWebToggle() {
+  const btn = $("#chat-web");
+  if (!btn) return;
+  btn.classList.toggle("active", chatState.webSearch);
+  btn.title = chatState.webSearch
+    ? "Веб-пошук (DuckDuckGo) — увімкнено (онлайн)"
+    : "Веб-пошук (DuckDuckGo) — вимкнено (офлайн)";
+}
+
 // Завантажує файл у сховище (доступний і в «Файли») та додає у вкладення чату.
 async function addAttachment(file) {
   const ct = file.type || "";
@@ -638,6 +651,9 @@ async function openChatSession(sessionId) {
     for (const file of Array.from(e.target.files)) await addAttachment(file);
     e.target.value = "";
   };
+  // Веб-пошук (глобус): за замовчуванням вимкнено — працюємо офлайн.
+  renderWebToggle();
+  $("#chat-web").onclick = () => { chatState.webSearch = !chatState.webSearch; renderWebToggle(); };
 
   const sendBtn = $("#chat-send");
 
@@ -662,7 +678,8 @@ async function openChatSession(sessionId) {
     try {
       const res = await api(`/chat/sessions/${sessionId}/messages`, {
         method: "POST", signal: controller.signal,
-        body: { content: text, skill_id: skillId, file_ids: atts.map(a => a.id) } });
+        body: { content: text, skill_id: skillId, file_ids: atts.map(a => a.id),
+                web_search: chatState.webSearch } });
       loading.remove();
       userEl.querySelector(".msg-tok").textContent = res.usage.prompt_tokens;
       // Файли рендеряться як частина повідомлення (той самий шлях, що й при
@@ -1988,12 +2005,14 @@ async function renderTokensPanel() {
       <div class="stat"><div class="num">${fmtInt(mine.prompt_tokens)}</div><div class="label">Вхідні</div></div>
       <div class="stat"><div class="num">${fmtInt(mine.completion_tokens)}</div><div class="label">Вихідні</div></div>
     </div></div>
+    <div class="card"><h2>Токени за режимом роботи</h2><div id="tok-mode"></div></div>
     <div class="card">
       <h2>Використання токенів за часом</h2>
       <div class="ch-legend"><span class="ch-key"><i style="background:var(--chart-in)"></i>Вхідні</span><span class="ch-key"><i style="background:var(--chart-out)"></i>Вихідні</span></div>
       <div id="tok-chart"></div>
     </div>`;
   panel.innerHTML = html;
+  renderModeSplit($("#tok-mode"), mine.by_mode, "tokens");
   renderTokenChart($("#tok-chart"), tl);
 
   if (hasRole("admin")) {
@@ -2026,6 +2045,10 @@ async function renderMoneyPanel() {
         </div>
       </div>
       <div id="money-total"><p class="muted">Завантаження…</p></div>
+    </div>
+    <div class="card">
+      <h2>Витрати за режимом роботи</h2>
+      <div id="money-mode"></div>
     </div>
     <div class="card">
       <h2>Витрати за моделями</h2>
@@ -2139,30 +2162,65 @@ async function loadMoney() {
       <div class="stat"><div class="num">${fmtMoney(m.cost_out)}</div><div class="label">За вихідні токени</div></div>
       <div class="stat"><div class="num">${fmtInt(m.requests)}</div><div class="label">Запитів</div></div>
     </div>`;
+  renderModeSplit($("#money-mode"), m.by_mode, "money");
   renderMoneyPie($("#money-pie"), $("#money-list"), m.by_model);
-  renderSkillUsage($("#skill-usage"), m.by_skill);
+  renderSkillUsage($("#skill-usage"), m.by_skill, m.skills_total);
 }
 
-// Розподіл вартості по навичках: загальна та середня за запуск.
-function renderSkillUsage(box, bySkill) {
+// Розподіл токенів/вартості за режимом роботи (офлайн / онлайн-вебпошук).
+const MODE_LABEL = { offline: "Офлайн", online: "Онлайн (веб-пошук)" };
+function renderModeSplit(box, byMode, kind) {
+  if (!box) return;
+  const rows = byMode || [];
+  if (kind === "money") {
+    box.innerHTML = `<table class="brk-table">
+      <thead><tr><th>Режим</th><th>Витрачено</th><th>Токенів</th><th>Запитів</th></tr></thead>
+      <tbody>${rows.map(m => `<tr>
+        <td>${esc(MODE_LABEL[m.mode] || m.mode)}</td>
+        <td class="brk-strong">${fmtMoney(m.cost_total)}</td>
+        <td>${fmtInt(m.total_tokens)}</td>
+        <td>${fmtInt(m.requests)}</td></tr>`).join("")}</tbody></table>`;
+  } else {
+    box.innerHTML = `<table class="brk-table">
+      <thead><tr><th>Режим</th><th>Вхідні</th><th>Вихідні</th><th>Усього</th><th>Запитів</th></tr></thead>
+      <tbody>${rows.map(m => `<tr>
+        <td>${esc(MODE_LABEL[m.mode] || m.mode)}</td>
+        <td>${fmtInt(m.prompt_tokens)}</td>
+        <td>${fmtInt(m.completion_tokens)}</td>
+        <td class="brk-strong">${fmtInt(m.total_tokens)}</td>
+        <td>${fmtInt(m.requests)}</td></tr>`).join("")}</tbody></table>`;
+  }
+}
+
+// Розподіл по навичках: запуски, токени, вартість, середня + рядок «Разом».
+function renderSkillUsage(box, bySkill, skillsTotal) {
   const items = (bySkill || []).filter(s => s.runs > 0);
   if (!items.length) {
     box.innerHTML = `<p class="muted">За обраний період навички не запускались.</p>`;
     return;
   }
+  const row = s => `<tr>
+      <td class="su-name">${esc(s.skill)}</td>
+      <td class="su-num su-runs">${fmtInt(s.runs)}</td>
+      <td class="su-num">${fmtInt(s.total_tokens)}</td>
+      <td class="su-num su-cost">${fmtMoney(s.cost)}</td>
+      <td class="su-num">${fmtMoney(s.avg)}</td></tr>`;
+  const t = skillsTotal || {};
+  const totalRow = `<tr class="su-total-row">
+      <td class="su-name">Разом</td>
+      <td class="su-num su-runs">${fmtInt(t.runs || 0)}</td>
+      <td class="su-num">${fmtInt(t.total_tokens || 0)}</td>
+      <td class="su-num su-cost">${fmtMoney(t.cost || 0)}</td>
+      <td class="su-num">—</td></tr>`;
   box.innerHTML = `<table class="su-table">
     <thead><tr>
       <th class="su-name">Навичка</th>
       <th class="su-num">Запусків</th>
+      <th class="su-num">Токенів</th>
       <th class="su-num">Загальна вартість</th>
       <th class="su-num">Середня / запуск</th>
     </tr></thead>
-    <tbody>${items.map(s => `<tr>
-      <td class="su-name">${esc(s.skill)}</td>
-      <td class="su-num">${fmtInt(s.runs)}</td>
-      <td class="su-num">${fmtMoney(s.cost)}</td>
-      <td class="su-num">${fmtMoney(s.avg)}</td>
-    </tr>`).join("")}</tbody>
+    <tbody>${items.map(row).join("")}${totalRow}</tbody>
   </table>`;
 }
 

@@ -109,6 +109,8 @@ class TokenUsageLog(db.Model):
     cost_out = db.Column(db.Float, nullable=False, default=0.0)
     cost_total = db.Column(db.Float, nullable=False, default=0.0)
     feature = db.Column(db.String, nullable=False, default="chat")  # chat | chat_naming | ...
+    # Режим роботи чату: 'offline' (без вебу) | 'online' (з веб-пошуком DuckDuckGo).
+    mode = db.Column(db.String, nullable=False, default="offline")
     is_system = db.Column(db.Boolean, nullable=False, default=False)  # використання системою
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 

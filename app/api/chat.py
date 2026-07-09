@@ -57,6 +57,7 @@ def send_message(session_id):
         content=data.get("content", ""),
         skill_id=data.get("skill_id"),
         file_ids=data.get("file_ids"),
+        web_search=data.get("web_search", False),
     )
     return jsonify(result)
 
