@@ -84,15 +84,61 @@ def test_attachment_rejected_on_local_model(client):
     assert res.get_json()["error"] == "attachments_unsupported"
 
 
-def test_attachment_with_skill_rejected(client):
+def test_attachment_with_skill_extracts_then_runs(client):
+    """Вкладення + навичка: крок вилучення (vision) → навичка на витягнутому
+    тексті. Токени двох викликів підсумовуються; файл прив'язано до повідомлення."""
+    from app.models import TokenUsageLog
     token = login(client, "u1", "pass")
     skill = Skill.query.filter_by(name="Summarizer").first()
     client.post(f"/api/skills/{skill.id}/activate", headers=auth(token))
-    f = _upload(client, token, "photo.png")
     sid = _azure_session(client, token)
+
+    # Той самий запуск навички без файлу — для порівняння обсягу токенів.
+    plain = client.post(f"/api/chat/sessions/{sid}/messages", headers=auth(token),
+                        json={"content": "стисни це", "skill_id": skill.id}).get_json()
+
+    f = _upload(client, token, "doc.pdf", b"%PDF-1.4 ...")
+    res = client.post(f"/api/chat/sessions/{sid}/messages", headers=auth(token),
+                      json={"content": "стисни документ", "skill_id": skill.id,
+                            "file_ids": [f["id"]]})
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["mode"] == "offline"
+    # Два виклики (вилучення + навичка) → токенів більше, ніж за один.
+    assert data["usage"]["total_tokens"] > plain["usage"]["total_tokens"]
+
+    log = TokenUsageLog.query.filter_by(is_system=False).order_by(
+        TokenUsageLog.id.desc()).first()
+    assert log.skill_id == skill.id and log.total_tokens == data["usage"]["total_tokens"]
+
+    # Вкладення прив'язане до повідомлення користувача й лишається у «Файли».
+    sess = client.get(f"/api/chat/sessions/{sid}", headers=auth(token)).get_json()
+    umsgs = [m for m in sess["messages"] if m["role"] == "user"]
+    assert any(x["id"] == f["id"] for m in umsgs for x in m["files"])
+
+
+def test_attachment_with_skill_still_rejects_local_model(client):
+    """Навичка + вкладення на не-Azure моделі сесії — усе одно 400 (потрібен vision)."""
+    admin = login(client, "admin", "Admin123!")
+    token = login(client, "u1", "pass")
+    mid = client.post("/api/models", headers=auth(admin), json={
+        "name": "Local", "provider": "ollama", "deployment_name": "llama3.1",
+        "base_url": "http://localhost:11434/v1"}).get_json()["id"]
+    gid = client.post("/api/groups", headers=auth(admin), json={"name": "G"}).get_json()["id"]
+    uid = User.query.filter_by(username="u1").first().id
+    client.post(f"/api/groups/{gid}/members", headers=auth(admin), json={"user_id": uid})
+    client.post("/api/models/access", headers=auth(admin),
+                json={"group_id": gid, "model_id": mid, "granted": True})
+    skill = Skill.query.filter_by(name="Summarizer").first()
+    client.post(f"/api/skills/{skill.id}/activate", headers=auth(token))
+
+    sid = client.post("/api/chat/sessions", headers=auth(token),
+                      json={"model_id": mid}).get_json()["id"]
+    f = _upload(client, token, "photo.png")
     res = client.post(f"/api/chat/sessions/{sid}/messages", headers=auth(token),
                       json={"content": "стисни", "skill_id": skill.id, "file_ids": [f["id"]]})
     assert res.status_code == 400
+    assert res.get_json()["error"] == "attachments_unsupported"
 
 
 def test_cannot_attach_other_users_file(client):

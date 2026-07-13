@@ -331,6 +331,49 @@ def _load_attachments(user, file_ids, model):
     return out
 
 
+def _sum_usage(a, b):
+    """Сума лічильників токенів двох викликів LLM."""
+    return {k: (a.get(k, 0) + b.get(k, 0))
+            for k in ("prompt_tokens", "completion_tokens", "total_tokens")}
+
+
+# Екстрактор вмісту з файлів (крок 1 при вкладеннях + навичка): «знімає»
+# мультимодальність — повертає текст, який далі годуємо самій навичці.
+EXTRACT_SYSTEM = (
+    "Ти — інструмент вилучення вмісту з файлів. За наданими зображеннями та/або "
+    "PDF поверни весь релевантний текст, дані й структуру як зрозумілий "
+    "структурований текст. Не додавай власних коментарів, висновків чи відповіді "
+    "на запит — лише вилучений вміст."
+)
+
+
+def _extract_attachments_text(model, user_text, attachments):
+    """Крок 1: один виклик vision-моделі (Azure) для вилучення тексту з файлів.
+
+    Повертає (extracted_text, usage). Модель гарантовано Azure — це вже
+    забезпечує `_load_attachments`.
+    """
+    client = get_client_for_model(model)
+    hint = ("Вилучи вміст із наданих файлів. Для контексту, користувач далі "
+            f"працюватиме з цим так: «{(user_text or '').strip()}».")
+    res = client.chat(model.deployment_name, [
+        {"role": "system", "content": EXTRACT_SYSTEM},
+        {"role": "user", "content": _multimodal_content(hint, attachments)},
+    ], {"temperature": 0.1})
+    usage = {"prompt_tokens": res.prompt_tokens,
+             "completion_tokens": res.completion_tokens,
+             "total_tokens": res.total_tokens}
+    return (res.content or ""), usage
+
+
+def _augment_with_extract(content, extracted):
+    """Долучає вилучений із файлів вміст до тексту користувача для навички."""
+    extracted = (extracted or "").strip()
+    if not extracted:
+        return content
+    return f"{content}\n\n[Вміст доданих файлів]:\n{extracted}".strip()
+
+
 def _multimodal_content(text, attachments):
     """Формує мультимодальний вміст повідомлення (OpenAI-сумісний) з тексту та
     вкладень: зображення → image_url, PDF → file (base64 data-URI)."""
@@ -368,14 +411,22 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None,
     web_search = bool(web_search) and applied_skill is None
     mode = "online" if web_search else "offline"
 
-    # Вкладення (зображення/PDF) — лише у звичайному чаті (без навички) та лише
-    # для моделей Azure OpenAI.
+    # Вкладення (зображення/PDF) — лише для моделей Azure OpenAI (перевіряє
+    # `_load_attachments`). Зі звичайним чатом ідуть нативно як мультимодальний
+    # вміст; із навичкою — спершу «знімаємо» мультимодальність окремим викликом
+    # (крок 1), а вилучений текст додаємо до вводу навички.
     attachments = []
     if file_ids:
-        if applied_skill is not None:
-            raise ApiError("Вкладення можна надсилати лише у звичайному чаті (без навички)",
-                           400, "attachments_with_skill")
         attachments = _load_attachments(user, file_ids, session.model)
+    attachment_ids = [a["id"] for a in attachments]
+
+    effective_content = content
+    extract_usage = None
+    if attachments and applied_skill is not None:
+        extracted, extract_usage = _extract_attachments_text(
+            session.model, content, attachments)
+        effective_content = _augment_with_extract(content, extracted)
+        attachments = []  # спожиті у текст — далі не передаємо як мультимодальні
 
     files = []
     if applied_skill is not None and package_service.is_agent_skill(applied_skill):
@@ -385,11 +436,11 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None,
             raise ApiError("Для агентного скіла потрібна активна модель сесії",
                            400, "model_inactive")
         reply, usage, files = run_agent_skill(
-            user, model, applied_skill, content, history=session.messages)
+            user, model, applied_skill, effective_content, history=session.messages)
         model_id = model.id
     elif applied_skill is not None and applied_skill.skill_kind == "package":
         # Скіл-скрипт (явний entrypoint): виконуємо код, модель не викликаємо.
-        inputs = _inputs_for_message(applied_skill, content)
+        inputs = _inputs_for_message(applied_skill, effective_content)
         reply, usage, files = _execute_skill(applied_skill, inputs, user)
         model_id = session.model_id
     else:
@@ -403,7 +454,7 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None,
 
         if applied_skill is not None:
             prompt_content = _build_prompt(
-                applied_skill, _inputs_for_message(applied_skill, content))
+                applied_skill, _inputs_for_message(applied_skill, effective_content))
             params = _skill_params(applied_skill)
         else:
             prompt_content = content
@@ -429,9 +480,13 @@ def send_message(user, session_id, content, skill_id=None, file_ids=None,
                      "completion_tokens": result.completion_tokens,
                      "total_tokens": result.total_tokens}
 
+    # Токени кроку вилучення вкладень підсумовуємо у обмін (як у веб-пошуку).
+    if extract_usage:
+        usage = _sum_usage(usage, extract_usage)
+
     reply = _sanitize_reply_links(reply)
     _store_exchange(session, user, model_id, skill_id, content, reply, usage, files=files,
-                    user_file_ids=[a["id"] for a in attachments], mode=mode)
+                    user_file_ids=attachment_ids, mode=mode)
 
     if is_first_exchange:
         _maybe_autoname(session, content)
