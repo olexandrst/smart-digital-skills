@@ -15,7 +15,7 @@ from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
     Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill, Group,
-    ChatSession, ChatMessage, TokenUsageLog, UserFile,
+    CatalogFavorite, ChatSession, ChatMessage, TokenUsageLog, UserFile,
 )
 from app.services import skill_service, chat_service, package_service
 
@@ -386,6 +386,8 @@ def delete_skill(skill_id):
 
     UserSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
     GroupSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
+    CatalogFavorite.query.filter_by(item_type="skill", item_id=skill_id)\
+        .delete(synchronize_session=False)
     # Фідбек зберігаємо (знімок назви/версії), лише відв'язуємо від навички.
     for model in (ChatSession, ChatMessage, TokenUsageLog, UserFile, SkillFeedback):
         model.query.filter_by(skill_id=skill_id).update(

@@ -138,6 +138,9 @@ def seed():
         # 9. Демо-скіл-ПАКЕТ (виконання Python-коду з архіву)
         _seed_package_skill(admin)
 
+        # 10. Наповнення каталогу: промпти, інструкції, агенти, посилання
+        _seed_catalog_resources(admin)
+
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
         print("  Skill-менеджер: skillmanager / Skill123!")
@@ -196,6 +199,115 @@ def _seed_package_skill(admin):
             default_value=spec.get("default_value"),
             description=spec.get("description"), position=spec.get("position", 0)))
     db.session.commit()
+
+
+CATALOG_DEMO = [
+    {
+        "resource_type": "prompt", "name": "Аналіз тендерної документації",
+        "description": "Розбирає ТД на вимоги, строки та ризики й повертає структурований чекліст.",
+        "category": "Закупівлі", "tags": "аналітика, документи",
+        "icon_emoji": "📑", "is_featured": True,
+        "body": ("Ти — досвідчений фахівець із закупівель.\n"
+                 "Проаналізуй наведену тендерну документацію та поверни:\n"
+                 "1. Ключові вимоги до учасника.\n"
+                 "2. Строки та етапи.\n"
+                 "3. Ризики й неоднозначні формулювання.\n"
+                 "4. Чекліст документів для подання.\n\n"
+                 "Документація:\n\"\"\"\n{{текст}}\n\"\"\""),
+    },
+    {
+        "resource_type": "prompt", "name": "Протокол наради за стенограмою",
+        "description": "Перетворює розшифровку зустрічі на протокол із рішеннями та задачами.",
+        "category": "Операційна робота", "tags": "наради, підсумки",
+        "icon_emoji": "🗒️",
+        "body": ("Склади протокол наради за стенограмою нижче.\n"
+                 "Формат: Порядок денний → Обговорення → Рішення → Задачі "
+                 "(відповідальний, дедлайн).\n\nСтенограма:\n\"\"\"\n{{текст}}\n\"\"\""),
+    },
+    {
+        "resource_type": "instruction", "name": "Як писати ефективні промпти",
+        "description": "Базові правила формулювання завдань для LLM: роль, контекст, формат, приклади.",
+        "category": "Навчання", "tags": "prompt engineering, основи",
+        "icon_emoji": "🎓", "is_featured": True,
+        "body": ("## Чотири складові якісного промпту\n\n"
+                 "1. **Роль** — ким має бути модель: «Ти — фінансовий аналітик…».\n"
+                 "2. **Контекст** — дані, обмеження, аудиторія результату.\n"
+                 "3. **Задача** — одна чітка дія: проаналізуй, порівняй, склади.\n"
+                 "4. **Формат** — таблиця, список, JSON, довжина відповіді.\n\n"
+                 "### Що покращує результат\n\n"
+                 "- Один-два приклади бажаної відповіді.\n"
+                 "- Явна заборона вигадувати факти.\n"
+                 "- Розбиття складного завдання на кроки.\n\n"
+                 "### Типові помилки\n\n"
+                 "- Занадто загальне формулювання («напиши щось про…»).\n"
+                 "- Кілька різних задач в одному запиті.\n"
+                 "- Відсутність критеріїв якості результату."),
+    },
+    {
+        "resource_type": "instruction", "name": "Робота з конфіденційними даними в ШІ",
+        "description": "Що можна і що не можна передавати в моделі; правила знеособлення.",
+        "category": "Безпека", "tags": "політика, безпека",
+        "icon_emoji": "🔐",
+        "body": ("## Що не передаємо в зовнішні моделі\n\n"
+                 "- Персональні дані працівників і контрагентів.\n"
+                 "- Комерційну таємницю, ціни діючих контрактів.\n"
+                 "- Облікові дані та ключі доступу.\n\n"
+                 "## Як працювати безпечно\n\n"
+                 "1. Знеособлюйте дані перед запитом (заміна імен на «Контрагент А»).\n"
+                 "2. Для чутливих задач використовуйте внутрішні моделі.\n"
+                 "3. Не зберігайте відповіді моделі поза корпоративними системами."),
+    },
+    {
+        "resource_type": "agent", "name": "Асистент технічної підтримки",
+        "description": "Агент першої лінії: класифікує звернення та пропонує рішення з бази знань.",
+        "category": "Підтримка", "tags": "звернення, база знань",
+        "icon_emoji": "🤖", "url": "https://agents.example.com/support-assistant",
+        "link_scope": "external",
+    },
+    {
+        "resource_type": "agent", "name": "Агент аналітики виробництва",
+        "description": "Відповідає на запитання щодо показників зміни та формує добові зведення.",
+        "category": "Виробництво", "icon_emoji": "🏭",
+        "url": "https://agents.example.com/production-analytics",
+        "link_scope": "external", "is_featured": True,
+    },
+    {
+        "resource_type": "link", "name": "Портал знань Metinvest Digital",
+        "description": "Внутрішня база регламентів, шаблонів і навчальних матеріалів.",
+        "category": "Внутрішні ресурси", "icon_emoji": "🏛️",
+        "url": "/portal/knowledge", "link_scope": "internal",
+    },
+    {
+        "resource_type": "link", "name": "Hugging Face",
+        "description": "Каталог відкритих моделей, датасетів і демо-застосунків.",
+        "category": "Зовнішні сервіси", "tags": "моделі, ML",
+        "icon_emoji": "🤗", "url": "https://huggingface.co", "link_scope": "external",
+    },
+    {
+        "resource_type": "link", "name": "Заявка на доступ до моделі",
+        "description": "Внутрішня форма запиту доступу до корпоративних LLM та квоти.",
+        "category": "Внутрішні ресурси", "icon_emoji": "📨",
+        "url": "/portal/ai-access-request", "link_scope": "internal",
+    },
+]
+
+
+def _seed_catalog_resources(admin):
+    """Демо-наповнення каталогу: промпти, інструкції, агенти та посилання."""
+    from datetime import datetime
+    from app.models import CatalogResource
+
+    created = 0
+    for spec in CATALOG_DEMO:
+        if CatalogResource.query.filter_by(name=spec["name"]).first():
+            continue
+        db.session.add(CatalogResource(
+            **spec, status="published", published_at=datetime.utcnow(),
+            author="Metinvest Digital", created_by=admin.id))
+        created += 1
+    if created:
+        db.session.commit()
+        print(f"  Каталог: додано ресурсів — {created}")
 
 
 if __name__ == "__main__":

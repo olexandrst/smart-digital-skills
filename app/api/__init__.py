@@ -4,6 +4,7 @@ from app.api.users import bp as users_bp
 from app.api.groups import bp as groups_bp
 from app.api.skills import bp as skills_bp
 from app.api.categories import bp as categories_bp
+from app.api.catalog import bp as catalog_bp
 from app.api.models import bp as models_bp
 from app.api.chat import bp as chat_bp
 from app.api.usage import bp as usage_bp
@@ -16,6 +17,7 @@ def register_blueprints(app):
     app.register_blueprint(groups_bp, url_prefix="/api/groups")
     app.register_blueprint(skills_bp, url_prefix="/api/skills")
     app.register_blueprint(categories_bp, url_prefix="/api/categories")
+    app.register_blueprint(catalog_bp, url_prefix="/api/catalog")
     app.register_blueprint(models_bp, url_prefix="/api/models")
     app.register_blueprint(chat_bp, url_prefix="/api/chat")
     app.register_blueprint(usage_bp, url_prefix="/api/usage")

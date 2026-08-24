@@ -13,6 +13,10 @@ from app.models.chat import (
     TokenCounter,
     AuditLog,
 )
+from app.models.resource import (
+    CatalogResource, CatalogFavorite,
+    RESOURCE_TYPES, LINK_TYPES, LINK_SCOPES, ACCENTS,
+)
 from app.models.file import UserFile
 from app.models.setting import AppSetting
 
@@ -38,6 +42,12 @@ __all__ = [
     "TokenLimit",
     "TokenCounter",
     "AuditLog",
+    "CatalogResource",
+    "CatalogFavorite",
+    "RESOURCE_TYPES",
+    "LINK_TYPES",
+    "LINK_SCOPES",
+    "ACCENTS",
     "UserFile",
     "AppSetting",
 ]

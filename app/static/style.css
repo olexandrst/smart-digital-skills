@@ -5,13 +5,13 @@
 
 :root {
   /* Палітра (світла) */
-  --primary: #1a73e8;
-  --primary-strong: #1765cc;
-  --primary-soft: #e8f0fe;          /* тональна заливка активних елементів */
-  --primary-soft-2: #d2e3fc;
-  --nav-active: #c4dafb;            /* контрастніша заливка активного пункту меню */
-  --appbar: linear-gradient(90deg, #1a73e8, #1e6fd9);
-  --appbar-solid: #1a73e8;
+  --primary: #e30613;               /* фірмовий червоний Metinvest Digital */
+  --primary-strong: #c00510;
+  --primary-soft: #fdecee;          /* тональна заливка активних елементів */
+  --primary-soft-2: #f9d3d7;
+  --nav-active: #fbd8dc;            /* контрастніша заливка активного пункту меню */
+  --appbar: linear-gradient(90deg, #17181d, #2a2d35);
+  --appbar-solid: #17181d;
   --bg: #d9dfe8;                    /* глибший сірий — контрастніше з білими картками */
   --panel: #ffffff;                 /* поверхня карток */
   --panel-2: #f4f6fa;               /* вкладена поверхня */
@@ -32,16 +32,25 @@
   --chart-grid: #e1e0d9; --chart-axis: #898781;
   --c1:#2a78d6; --c2:#1baf7a; --c3:#eda100; --c4:#008300;
   --c5:#4a3aa7; --c6:#e34948; --c7:#e87ba4; --c8:#eb6834;
+  /* Фірмовий стиль Metinvest Digital (каталог) */
+  --md-red: #e30613;
+  --md-red-strong: #c00510;
+  --md-red-soft: #fdecee;
+  --md-ink: #1a1a1a;
+  --md-line: #e6e9ee;
+  --md-canvas: #f2f4f7;
+  --md-glow: 0 8px 20px rgba(227, 6, 19, 0.26);
+  --md-tag-dot: #b6bcc7;
 }
 
 /* ===== Темна тема (на базі Material) ===== */
 body.theme-dark {
-  --primary: #4d8df6;
-  --primary-strong: #6ba1f8;
-  --primary-soft: rgba(77, 141, 246, 0.18);
-  --primary-soft-2: rgba(77, 141, 246, 0.30);
-  --appbar: linear-gradient(90deg, #17325e, #1a3a6e);
-  --appbar-solid: #17325e;
+  --primary: #ff3b47;
+  --primary-strong: #ff5b65;
+  --primary-soft: rgba(255, 59, 71, 0.18);
+  --primary-soft-2: rgba(255, 59, 71, 0.30);
+  --appbar: linear-gradient(90deg, #101218, #1c1f27);
+  --appbar-solid: #101218;
   --bg: #12141a;
   --panel: #1c1f27;
   --panel-2: #242834;
@@ -54,12 +63,21 @@ body.theme-dark {
   --ok-soft: rgba(109, 213, 140, 0.14);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.30);
   --shadow-lg: 0 10px 32px rgba(0, 0, 0, 0.55);
-  --nav-active: rgba(77, 141, 246, 0.32);
+  --nav-active: rgba(255, 59, 71, 0.30);
   /* Діаграми — темна палітра */
   --chart-in: #3987e5; --chart-out: #d95926;
   --chart-grid: rgba(255,255,255,0.10); --chart-axis: #898781;
   --c1:#3987e5; --c2:#199e70; --c3:#c98500; --c4:#008300;
   --c5:#9085e9; --c6:#e66767; --c7:#d55181; --c8:#d95926;
+  /* Фірмовий стиль Metinvest Digital — темна тема */
+  --md-red: #ff3b47;
+  --md-red-strong: #ff5b65;
+  --md-red-soft: rgba(255, 59, 71, 0.16);
+  --md-ink: #eef1f8;
+  --md-line: #333947;
+  --md-canvas: #171a22;
+  --md-glow: 0 8px 20px rgba(255, 59, 71, 0.22);
+  --md-tag-dot: #626a7a;
 }
 
 * { box-sizing: border-box; }
@@ -204,7 +222,7 @@ button {
   font-family: inherit;
   transition: background .15s ease, box-shadow .15s ease, color .15s ease;
 }
-button:hover { background: var(--primary-strong); box-shadow: 0 2px 8px rgba(26,115,232,0.28); }
+button:hover { background: var(--primary-strong); box-shadow: 0 2px 8px rgba(227, 6, 19, 0.26); }
 button.ghost {
   background: transparent; color: var(--primary);
   border: 1px solid var(--border); box-shadow: none;
@@ -402,86 +420,265 @@ body.theme-dark .stat .num { color: var(--primary-strong); }
 .toast.err { border-left-color: var(--danger); }
 
 /* =====================================================================
-   Каталог навичок
+   Каталог — фірмовий стиль Metinvest Digital
+   (білі картки з великим радіусом, червоний акцент, плитки-іконки,
+   пігулки-теги з кольоровою крапкою, «зірочка» обраного)
    ===================================================================== */
-.catalog { max-width: 1120px; margin: 0 auto; }
-.catalog-search { position: relative; display: flex; align-items: center; max-width: 560px; margin: 4px auto 26px; }
-.catalog-search svg { position: absolute; left: 16px; width: 20px; height: 20px; fill: var(--muted); pointer-events: none; }
+.catalog { max-width: 1180px; margin: 0 auto; }
+
+/* ----- Геро-панель: крапкова сітка + бейдж бренду ----- */
+.cat-hero {
+  position: relative; text-align: center; overflow: hidden;
+  padding: 34px 24px 30px; margin: -4px 0 22px;
+  border-radius: 20px; border: 1px solid var(--md-line);
+  background:
+    radial-gradient(circle at 1px 1px, rgba(26, 26, 26, 0.13) 1px, transparent 0) 0 0 / 18px 18px,
+    linear-gradient(180deg, var(--md-canvas), var(--panel));
+}
+body.theme-dark .cat-hero {
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.07) 1px, transparent 0) 0 0 / 18px 18px,
+    linear-gradient(180deg, var(--md-canvas), var(--panel));
+}
+.md-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 14px 6px 11px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--md-line);
+  box-shadow: var(--shadow);
+  font-size: 12.5px; font-weight: 600; color: var(--muted);
+}
+.md-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--md-red); flex: 0 0 auto; }
+.cat-hero-title {
+  margin: 14px 0 8px; font-weight: 800; letter-spacing: -0.6px;
+  font-size: clamp(26px, 3.2vw, 40px); line-height: 1.1; color: var(--md-ink);
+}
+.md-accent { color: var(--md-red); }
+.cat-hero-sub { margin: 0 auto; max-width: 640px; color: var(--muted); font-size: 15px; line-height: 1.55; }
+
+/* ----- Панель фільтрів: види наповнення + пошук ----- */
+.cat-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.cat-kinds {
+  display: flex; gap: 6px; flex-wrap: wrap; padding: 5px;
+  border-radius: 999px; background: var(--panel);
+  border: 1px solid var(--md-line); box-shadow: var(--shadow);
+}
+.cat-kind {
+  display: inline-flex; align-items: center; gap: 8px; width: auto;
+  padding: 8px 14px; border-radius: 999px; border: none;
+  background: transparent; color: var(--muted); box-shadow: none;
+  font-size: 13.5px; font-weight: 600;
+}
+.cat-kind svg { width: 16px; height: 16px; fill: currentColor; }
+.cat-kind:hover { background: rgba(127, 127, 127, 0.12); color: var(--text); box-shadow: none; }
+.cat-kind.active { background: var(--md-red); color: #fff; box-shadow: var(--md-glow); }
+.cat-kind-n {
+  font-size: 11.5px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+  background: rgba(127, 127, 127, 0.16);
+}
+.cat-kind.active .cat-kind-n { background: rgba(255, 255, 255, 0.26); }
+
+.catalog-search { position: relative; display: flex; align-items: center; flex: 1 1 240px; min-width: 240px; max-width: 420px; margin: 0; }
+.catalog-search svg { position: absolute; left: 16px; width: 19px; height: 19px; fill: var(--muted); pointer-events: none; }
 .catalog-search input {
-  padding: 13px 16px 13px 46px; border-radius: 999px; font-size: 15px;
-  background: var(--panel); box-shadow: var(--shadow);
+  padding: 12px 16px 12px 44px; border-radius: 999px; font-size: 14.5px;
+  background: var(--panel); border-color: var(--md-line); box-shadow: var(--shadow);
 }
-.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 18px; }
-.cat-empty { grid-column: 1 / -1; text-align: center; padding: 24px 0; }
+.catalog-search input:focus { border-color: var(--md-red); box-shadow: 0 0 0 3px var(--md-red-soft); }
 
-.cat-card {
-  display: flex; flex-direction: column; align-items: center; text-align: center;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 22px 18px 18px;
+.cat-filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 20px; }
+.cat-chipf {
+  display: inline-flex; align-items: center; gap: 6px; width: auto;
+  padding: 6px 13px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--panel); border: 1px solid var(--md-line);
+  color: var(--muted); box-shadow: none;
+}
+.cat-chipf svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.cat-chipf:hover { background: var(--panel); color: var(--text); border-color: var(--muted); box-shadow: none; }
+.cat-chipf.active { background: var(--md-red-soft); border-color: var(--md-red); color: var(--md-red); }
+.cat-fav-filter.active svg { fill: var(--md-red); }
+
+/* ----- Сітка плиток ----- */
+.cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+.cat-empty { grid-column: 1 / -1; text-align: center; padding: 28px 0; }
+
+.mdc {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--md-line);
+  border-radius: 18px; padding: 20px 20px 16px;
   box-shadow: var(--shadow); cursor: pointer;
-  transition: transform .15s ease, box-shadow .15s ease;
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 }
-.cat-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
-.cat-card:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-
-.cat-logo { width: 64px; height: 64px; margin: 2px 0 12px; display: flex; align-items: center; justify-content: center; }
-.cat-logo-img { width: 64px; height: 64px; object-fit: contain; border-radius: 14px; }
-.cat-logo-default {
-  width: 64px; height: 64px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #1a73e8, #7c4dff);
+.mdc::before {  /* червоний акцент зверху — на hover та в рекомендованих */
+  content: ""; position: absolute; inset: -1px -1px auto -1px; height: 3px;
+  border-radius: 18px 18px 0 0; background: var(--md-red);
+  opacity: 0; transition: opacity .16s ease;
 }
-.cat-logo-default svg { width: 32px; height: 32px; fill: #fff; }
-
-.cat-name { margin: 0 0 8px; font-size: 17px; font-weight: 700; line-height: 1.2; }
-.cat-meta { display: flex; flex-direction: column; align-items: center; gap: 7px; margin-bottom: 12px; }
-.cat-va { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; color: var(--muted); }
-.cat-va b { color: var(--text); font-weight: 600; }
-.cat-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; }
-.cat-more {
-  background: none; border: none; padding: 0; margin: 0;
-  color: var(--primary); font-size: 13px; font-weight: 600; cursor: pointer;
-  width: auto; display: inline; box-shadow: none;
+.mdc:hover, .mdc:focus-visible {
+  transform: translateY(-3px); box-shadow: var(--shadow-lg);
+  border-color: rgba(227, 6, 19, 0.38); outline: none;
 }
-.cat-more:hover { background: none; text-decoration: underline; box-shadow: none; }
+.mdc:hover::before, .mdc:focus-visible::before, .mdc.featured::before { opacity: 1; }
+.mdc.featured { border-color: rgba(227, 6, 19, 0.38); }
 
-.cat-btn {
-  margin-top: auto; width: 100%;
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 10px 14px; border-radius: 999px; font-weight: 600; font-size: 14px;
+.mdc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.mdc-tile {
+  flex: 0 0 auto; width: 46px; height: 46px; border-radius: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+  background: linear-gradient(135deg, #e30613, #a90410);
 }
-.cat-btn svg { width: 17px; height: 17px; fill: currentColor; }
-.cat-install { background: var(--primary); color: #fff; }
-.cat-install:hover { background: var(--primary-strong); }
-.cat-remove { background: var(--danger); color: #fff; }
-.cat-remove:hover { background: #b3261e; }
-body.theme-dark .cat-remove { color: #2a0d0b; }
+.mdc-tile svg { width: 23px; height: 23px; fill: currentColor; }
+.mdc-tile img { width: 100%; height: 100%; object-fit: contain; border-radius: 14px; }
+.mdc-emoji { font-size: 22px; line-height: 1; }
+.a-red   { background: linear-gradient(135deg, #e30613, #a90410); }
+.a-ink   { background: linear-gradient(135deg, #2f333d, #14161c); }
+.a-steel { background: linear-gradient(135deg, #45658a, #2b3f57); }
+.a-amber { background: linear-gradient(135deg, #f0a020, #cf7900); }
+.a-green { background: linear-gradient(135deg, #22a06b, #13704a); }
+.mdc-tile.has-img { background: var(--panel-2); border: 1px solid var(--md-line); box-shadow: none; }
+.mdc-tile.lg { width: 56px; height: 56px; border-radius: 16px; }
+.mdc-tile.lg svg { width: 28px; height: 28px; }
+.mdc-tile.lg .mdc-emoji { font-size: 27px; }
+.mdc-tile.sm { width: 36px; height: 36px; border-radius: 11px; }
+.mdc-tile.sm svg { width: 18px; height: 18px; }
+.mdc-tile.sm .mdc-emoji { font-size: 17px; }
 
-/* ===== Детальна картка навички (модалка) ===== */
-.sm-modal { max-width: 640px; max-height: 88vh; overflow-y: auto; display: flex; flex-direction: column; }
+.mdc-fav {
+  flex: 0 0 auto; width: 32px; height: 32px; padding: 0; border-radius: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; color: var(--muted);
+  box-shadow: none;
+}
+.mdc-fav svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.mdc-fav:hover { background: var(--md-red-soft); color: var(--md-red); box-shadow: none; }
+.mdc-fav.on { color: var(--md-red); }
+.mdc-fav.on svg { fill: var(--md-red); }
+
+.mdc-title { margin: 0 0 6px; font-size: 16.5px; font-weight: 700; line-height: 1.25; color: var(--md-ink); }
+.mdc-desc { margin: 0 0 14px; font-size: 13.2px; line-height: 1.55; color: var(--muted); }
+.mdc-div { height: 1px; background: var(--md-line); margin: auto 0 12px; }
+.mdc-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.mdc-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--md-line);
+}
+.mdc-tag .md-dot { width: 6px; height: 6px; background: var(--md-tag-dot); }
+.mdc-tag.primary { color: var(--md-ink); }
+.mdc-tag.primary .md-dot { background: var(--md-red); }
+
+.mdc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mdc-meta { font-size: 11.8px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.mdc-act {
+  flex: 0 0 auto; width: auto; border: none;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  background: var(--md-red); color: #fff; box-shadow: 0 4px 12px rgba(227, 6, 19, 0.24);
+}
+.mdc-act:hover { background: var(--md-red-strong); box-shadow: var(--md-glow); }
+.mdc-act svg { width: 15px; height: 15px; fill: currentColor; }
+.mdc-act.ghost-act {
+  background: var(--panel); color: var(--md-red);
+  border: 1px solid var(--md-red); box-shadow: none;
+}
+.mdc-act.ghost-act:hover { background: var(--md-red-soft); box-shadow: none; }
+
+/* ===== Детальна картка (модалка) у стилі Metinvest Digital ===== */
+.sm-modal { max-width: 680px; max-height: 88vh; overflow-y: auto; display: flex; flex-direction: column; }
+.md-modal { border-radius: 18px; }
 .sm-head { align-items: flex-start; gap: 12px; }
-.sm-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.sm-title h2 { margin: 0 0 6px; }
+.sm-title { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.sm-title h2 { margin: 0 0 6px; color: var(--md-ink); }
+.md-eyebrow {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--md-red); margin-bottom: 4px;
+}
+.md-head-side { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
 .sm-logo { flex: 0 0 auto; width: 52px; height: 52px; display: flex; align-items: center; justify-content: center; }
-.sm-logo-img { width: 52px; height: 52px; object-fit: contain; border-radius: 12px; }
+.sm-logo-img { width: 52px; height: 52px; object-fit: contain; border-radius: 14px; }
 .sm-logo-default {
-  width: 52px; height: 52px; border-radius: 50%;
+  width: 52px; height: 52px; border-radius: 16px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #1a73e8, #7c4dff);
+  background: linear-gradient(135deg, #e30613, #a90410);
 }
 .sm-logo-default svg { width: 26px; height: 26px; fill: #fff; }
 .sm-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 12.5px; }
 .sm-meta b { color: var(--text); }
 .sm-body { margin: 16px 0 6px; }
 .sm-desc { margin: 0 0 14px; line-height: 1.55; }
-.sm-attr { display: grid; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+.sm-attr { display: grid; grid-template-columns: 160px 1fr; gap: 10px; padding: 10px 0; border-top: 1px solid var(--md-line); }
 .sm-attr-k { font-weight: 600; font-size: 13.5px; color: var(--muted); }
 .sm-attr-v { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
 @media (max-width: 560px) { .sm-attr { grid-template-columns: 1fr; gap: 3px; } }
-.sm-actions { margin: 8px 0 2px; }
-.sm-actions .cat-btn { width: 100%; margin-top: 0; }
+.sm-actions { margin: 10px 0 2px; }
+.sm-actions .mdc-act { width: 100%; }
 .sm-feedback h3 { margin: 4px 0 4px; }
 .sm-feedback textarea { min-height: 70px; }
+
+.md-block {
+  margin: 16px 0 0; border: 1px solid var(--md-line);
+  border-radius: 14px; background: var(--panel-2); overflow: hidden;
+}
+.md-block-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--md-line);
+}
+.md-block-head .md-eyebrow { margin: 0; }
+.md-pre {
+  margin: 0; padding: 14px; font-size: 13px; line-height: 1.55;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word; max-height: 340px; overflow: auto;
+}
+.md-doc { padding: 4px 16px 14px; font-size: 14px; line-height: 1.6; }
+.md-doc h1, .md-doc h2, .md-doc h3 { margin: 14px 0 6px; font-size: 16px; }
+.md-doc ul, .md-doc ol { padding-left: 20px; margin: 6px 0; }
+.md-doc p { margin: 6px 0; }
+.md-url { display: block; padding: 12px 14px; font-size: 13.5px; color: var(--md-red); word-break: break-all; }
+.md-mini {
+  display: inline-flex; align-items: center; gap: 6px; width: auto;
+  padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  background: var(--panel); border: 1px solid var(--md-line);
+  color: var(--text); box-shadow: none;
+}
+.md-mini svg { width: 13px; height: 13px; fill: currentColor; }
+.md-mini:hover { background: var(--panel); color: var(--md-red); border-color: var(--md-red); box-shadow: none; }
+
+/* ===== Наповнення каталогу (управління) ===== */
+.res-tabs { margin-top: 14px; }
+.res-tabs .fb-tab b { margin-left: 4px; opacity: .75; }
+.res-list { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.res-row {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+  border: 1px solid var(--md-line); border-radius: 14px; background: var(--panel-2);
+}
+.res-main { flex: 1; min-width: 0; }
+.res-name { font-weight: 700; font-size: 14.5px; }
+.res-star { color: var(--md-red); }
+.res-sub { margin-top: 2px; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-url { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.8px; }
+.res-acts { display: flex; gap: 6px; flex: 0 0 auto; }
+@media (max-width: 780px) {
+  .res-row { flex-wrap: wrap; }
+  .res-acts { width: 100%; }
+}
+
+.res-editor { max-width: 720px; max-height: 90vh; overflow-y: auto; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; margin: 10px 0 12px; }
+.form-grid > label {
+  display: flex; flex-direction: column; gap: 5px;
+  font-size: 12.5px; font-weight: 600; color: var(--muted);
+}
+.form-grid > label.wide { grid-column: 1 / -1; }
+.form-grid > label.check { flex-direction: row; align-items: center; gap: 9px; font-weight: 500; color: var(--text); }
+.form-grid > label.check input { width: auto; }
+.form-grid input, .form-grid select, .form-grid textarea { color: var(--text); font-weight: 400; }
+.form-grid textarea { min-height: 64px; }
+@media (max-width: 620px) { .form-grid { grid-template-columns: 1fr; } }
 
 /* =====================================================================
    Навички (управління): зворотний зв'язок, категорії, редактор
@@ -538,9 +735,9 @@ body.theme-dark .fb-badge { color: #2a0d0b; }
 }
 .editor-icon-preview img { width: 100%; height: 100%; object-fit: contain; }
 .editor-icon-default {
-  width: 60px; height: 60px; border-radius: 50%;
+  width: 60px; height: 60px; border-radius: 18px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, #1a73e8, #7c4dff);
+  background: linear-gradient(135deg, #e30613, #a90410);
 }
 .editor-icon-default svg { width: 30px; height: 30px; fill: #fff; }
 .editor-icon-actions { display: flex; flex-direction: column; gap: 6px; width: 100%; }
@@ -567,11 +764,11 @@ body.theme-dark .fb-badge { color: #2a0d0b; }
 .chat-log { display: flex; flex-direction: column; gap: 26px; margin: 16px 0; max-height: 420px; overflow-y: auto; padding-right: 6px; }
 .msg { position: relative; padding: 12px 16px; border-radius: 18px; max-width: 82%; white-space: pre-wrap; }
 .msg.user {
-  background: var(--primary); color: #fff;
+  background: #23262e; color: #fff;
   border-bottom-right-radius: 6px; align-self: flex-end;
-  box-shadow: 0 2px 10px rgba(26, 115, 232, 0.30);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
 }
-body.theme-dark .msg.user { background: #2b5cad; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+body.theme-dark .msg.user { background: #333845; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
 .msg.assistant {
   background: var(--panel-2); border: 1px solid var(--border);
   border-bottom-left-radius: 6px;
@@ -784,7 +981,7 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.6); }
 .model-tile {
   display: flex; flex-direction: column; gap: 4px; text-align: left;
   padding: 16px; border-radius: var(--radius); cursor: pointer; color: #fff;
-  border: none; background: linear-gradient(160deg, #1a73e8, #185abc);
+  border: none; background: linear-gradient(160deg, #2f333d, #15171d);
   box-shadow: var(--shadow);
   transition: transform .15s ease, box-shadow .15s ease;
 }

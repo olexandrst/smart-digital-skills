@@ -35,6 +35,11 @@
   **«Не опублікована» / «Опублікована»**; обов'язкові атрибути (назва, версія,
   автор, опис, категорія) зі `skill.md` з можливістю редагування; завантаження
   нової версії в контексті навички; видалення чистить усі зв'язки
+- 🗂️ **Розширений каталог** у фірмовому стилі Metinvest Digital: крім навичок —
+  **промпти** (копіювання в один клік), **інструкції** (Markdown-документи),
+  **агенти** та **корисні посилання** (зовнішні сервіси й внутрішні ресурси);
+  фільтри за видом і категорією, пошук, «Обране» (зірочка) для будь-якого
+  елемента; наповнення керується у «Навички → Каталог» (Admin/Skill Manager)
 - 💬 **Чат із обраною моделлю** — користувач обирає LLM-модель зі списку
   активних, веде багатоходовий діалог (з історією) і за бажанням **застосовує
   скіли** до повідомлень
@@ -422,6 +427,15 @@ smart-digital-skills/
 | GET | `/categories` | Список категорій навичок | авторизовані |
 | POST | `/categories` | Створення категорії | Admin/Skill Manager |
 | DELETE | `/categories/{id}` | Видалення категорії | Admin/Skill Manager |
+| GET | `/catalog/resources` | Ресурси каталогу (`?type=prompt\|instruction\|agent\|link`) | авторизовані |
+| GET | `/catalog/resources/{id}` | Детальна картка ресурсу | авторизовані |
+| POST | `/catalog/resources` | Створення ресурсу | Admin/Skill Manager |
+| PATCH | `/catalog/resources/{id}` | Редагування ресурсу | Admin/Skill Manager |
+| POST | `/catalog/resources/{id}/status` | Публікація (`published`) / зняття (`draft`) | Admin/Skill Manager |
+| POST | `/catalog/resources/{id}/open` | Лічильник відкриттів/копіювань | авторизовані |
+| DELETE | `/catalog/resources/{id}` | Видалення ресурсу | Admin/Skill Manager |
+| GET | `/catalog/favorites` | Обране користувача (навички + ресурси) | авторизовані |
+| POST | `/catalog/favorites` | Перемикання «зірочки» (`item_type`, `item_id`) | авторизовані |
 | GET/POST | `/chat/sessions` | Список / створення сесій чату (з `model_id`) | авторизовані |
 | GET/DELETE | `/chat/sessions/{id}` | Перегляд / видалення сесії | власник |
 | POST | `/chat/sessions/{id}/messages` | Надіслати повідомлення (опц. `skill_id`) | власник |

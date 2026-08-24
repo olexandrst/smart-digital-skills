@@ -171,6 +171,8 @@ erDiagram
 | `models` | Реєстр моделей Azure AI Foundry (LLM/CV) |
 | `skills` | Каталог скілів, життєвий цикл, версія, лічильник активацій |
 | `skill_inputs` | Параметри вхідних даних скіла (обов'язкові/опціональні) |
+| `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, агенти, посилання |
+| `catalog_favorites` | «Обране» користувача (спільне для скілів і ресурсів каталогу) |
 | `group_skills` | Призначення скілів групам (груповий доступ) |
 | `user_skills` | Матеріалізований ефективний доступ користувача до скіла (self/group) |
 | `chat_sessions` / `chat_messages` | Діалоги з моделями |
@@ -312,6 +314,42 @@ CREATE TABLE skills (
     created_at        TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
     published_at      TEXT
+);
+
+-- Наповнення каталогу поза скілами: промпти, інструкції, агенти, корисні посилання
+CREATE TABLE catalog_resources (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_type TEXT NOT NULL DEFAULT 'prompt'
+                  CHECK (resource_type IN ('prompt','instruction','agent','link')),
+    name          TEXT NOT NULL,
+    description   TEXT NOT NULL DEFAULT '',
+    category      TEXT,
+    author        TEXT,
+    tags          TEXT,                          -- через кому
+    body          TEXT,                          -- текст промпту / інструкції (Markdown)
+    url           TEXT,                          -- посилання (agent | link)
+    link_scope    TEXT CHECK (link_scope IN ('external','internal')),
+    icon_emoji    TEXT,                          -- емодзі-іконка плитки
+    accent        TEXT,                          -- колір плитки; NULL = типовий для виду
+    is_featured   INTEGER NOT NULL DEFAULT 0,    -- «рекомендований» — першим у каталозі
+    status        TEXT NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft','published')),
+    version       TEXT NOT NULL DEFAULT '1.0.0',
+    opens_count   INTEGER NOT NULL DEFAULT 0,    -- відкриття / копіювання
+    created_by    INTEGER REFERENCES users(id),
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    published_at  TEXT
+);
+
+-- «Обране» користувача — спільне для скілів і ресурсів каталогу
+CREATE TABLE catalog_favorites (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    item_type  TEXT NOT NULL DEFAULT 'skill' CHECK (item_type IN ('skill','resource')),
+    item_id    INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, item_type, item_id)
 );
 
 -- Параметри вхідних даних скіла (обов'язкові / опціональні)
