@@ -10,9 +10,15 @@
   --primary-soft: #fdecee;          /* тональна заливка активних елементів */
   --primary-soft-2: #f9d3d7;
   --nav-active: #fbd8dc;            /* контрастніша заливка активного пункту меню */
-  --appbar: linear-gradient(90deg, #17181d, #2a2d35);
-  --appbar-solid: #17181d;
-  --bg: #d9dfe8;                    /* глибший сірий — контрастніше з білими картками */
+  --appbar: linear-gradient(180deg, #fafbfc, #edeff3);   /* світло-сіра шапка */
+  --appbar-solid: #f2f4f7;
+  --appbar-text: #1a1a1a;           /* текст і кнопки на шапці */
+  --appbar-muted: #6b7280;
+  --appbar-line: #e0e4ea;           /* нижня межа шапки */
+  --appbar-btn: rgba(26, 26, 26, 0.05);
+  --appbar-btn-line: rgba(26, 26, 26, 0.14);
+  --bg: #e4e8ee;                    /* сіре тло під білими картками */
+  --bg-grad: linear-gradient(180deg, #edf0f4 0%, #e2e6ed 48%, #d8dde7 100%);
   --panel: #ffffff;                 /* поверхня карток */
   --panel-2: #f4f6fa;               /* вкладена поверхня */
   --border: #e0e4ea;
@@ -49,9 +55,15 @@ body.theme-dark {
   --primary-strong: #ff5b65;
   --primary-soft: rgba(255, 59, 71, 0.18);
   --primary-soft-2: rgba(255, 59, 71, 0.30);
-  --appbar: linear-gradient(90deg, #101218, #1c1f27);
-  --appbar-solid: #101218;
+  --appbar: linear-gradient(180deg, #232732, #1b1e26);
+  --appbar-solid: #1e2129;
+  --appbar-text: #eef1f8;
+  --appbar-muted: #9aa3b4;
+  --appbar-line: #333947;
+  --appbar-btn: rgba(255, 255, 255, 0.09);
+  --appbar-btn-line: rgba(255, 255, 255, 0.18);
   --bg: #12141a;
+  --bg-grad: linear-gradient(180deg, #1a1d25 0%, #15171e 48%, #101218 100%);
   --panel: #1c1f27;
   --panel-2: #242834;
   --border: #333947;
@@ -86,7 +98,7 @@ body {
   margin: 0;
   font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   color: var(--text);
-  background: var(--bg);
+  background: var(--bg) var(--bg-grad) fixed;
 }
 
 .hidden { display: none !important; }
@@ -228,10 +240,10 @@ button.ghost {
   border: 1px solid var(--border); box-shadow: none;
 }
 button.ghost:hover { background: var(--primary-soft); border-color: var(--primary-soft-2); box-shadow: none; }
-button.danger { background: var(--danger); color: #fff; }
-button.danger:hover { background: #b3261e; box-shadow: 0 2px 8px rgba(217,48,37,0.3); }
-body.theme-dark button.danger { color: #2a0d0b; }
-body.theme-dark button.danger:hover { background: #f6a9a2; }
+/* Небезпечні дії — контурні, щоб не зливатися з основною червоною кнопкою */
+button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); box-shadow: none; }
+button.danger:hover { background: var(--danger); color: #fff; box-shadow: 0 2px 8px rgba(217, 48, 37, 0.3); }
+body.theme-dark button.danger:hover { background: #f6a9a2; color: #2a0d0b; }
 button.small { padding: 6px 12px; font-size: 13px; }
 button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
 
@@ -248,16 +260,15 @@ button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
   padding: 0 14px 16px;
   position: sticky; top: 0; height: 100vh;
 }
-/* Бренд-смуга — продовження синього апбару вліво */
+/* Бренд-смуга — продовження шапки вліво */
 .side-brand {
   display: flex; align-items: center; gap: 10px;
-  font-weight: 600; font-size: 16px; color: #fff;
+  font-weight: 700; font-size: 16px; color: var(--appbar-text);
   height: 60px; margin: 0 -14px 12px; padding: 0 18px;
   background: var(--appbar);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.22);
+  border-bottom: 1px solid var(--appbar-line);
 }
 .side-brand .brand-mark { width: 28px; height: 28px; flex: 0 0 auto; }
-.side-brand .brand-mark path { stroke: #fff; }
 
 .side-nav { display: flex; flex-direction: column; gap: 4px; flex: 1; overflow-y: auto; }
 .nav-item {
@@ -309,45 +320,46 @@ button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
-/* ===== Синій верхній апбар ===== */
+/* ===== Світло-сіра верхня шапка ===== */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; padding: 0 24px; height: 60px;
   background: var(--appbar);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.22);
+  border-bottom: 1px solid var(--appbar-line);
   position: sticky; top: 0; z-index: 20;
 }
 .top-left { display: flex; align-items: center; gap: 18px; }
-.page-title { font-size: 20px; font-weight: 600; color: #fff; }
+.page-title { font-size: 20px; font-weight: 700; color: var(--appbar-text); }
 .btn-newchat {
   display: inline-flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,0.16); color: #fff;
-  border: 1px solid rgba(255,255,255,0.28);
+  background: var(--appbar-btn); color: var(--appbar-text);
+  border: 1px solid var(--appbar-btn-line);
   padding: 8px 16px; border-radius: 999px; font-weight: 600;
 }
-.btn-newchat:hover { background: rgba(255,255,255,0.28); box-shadow: none; }
+.btn-newchat:hover { background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red); box-shadow: none; }
 .btn-newchat svg { width: 16px; height: 16px; }
 
 .top-right { display: flex; align-items: center; gap: 12px; }
 .top-right .user-card { display: flex; align-items: center; gap: 10px; }
 .top-right .logout {
-  padding: 7px 16px; background: transparent; color: #fff;
-  border: 1px solid rgba(255,255,255,0.5); box-shadow: none;
+  padding: 7px 16px; background: transparent; color: var(--appbar-text);
+  border: 1px solid var(--appbar-btn-line); box-shadow: none;
 }
-.top-right .logout:hover { background: rgba(255,255,255,0.16); box-shadow: none; }
+.top-right .logout:hover { background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red); box-shadow: none; }
 
 /* Профіль: ім'я/роль → аватар → «Вийти» (усе праворуч) */
 .user-meta { display: flex; flex-direction: column; min-width: 0; text-align: right; align-items: flex-end; }
 .user-meta #user-name {
-  font-size: 14px; font-weight: 600; color: #fff;
+  font-size: 14px; font-weight: 600; color: var(--appbar-text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.roles { color: rgba(255,255,255,0.85); font-size: 12px; text-transform: capitalize; }
-.avatar {
+.roles { color: var(--appbar-muted); font-size: 12px; text-transform: capitalize; }
+.avatar {  /* червоний аватар — акцент бренду на світлій шапці */
   width: 36px; height: 36px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-weight: 700; color: var(--appbar-solid); flex: 0 0 auto;
-  background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  font-weight: 700; color: #fff; flex: 0 0 auto;
+  background: linear-gradient(135deg, #e30613, #a90410);
+  box-shadow: 0 2px 8px rgba(227, 6, 19, 0.28);
 }
 
 /* ===== Контент ===== */
@@ -453,7 +465,10 @@ body.theme-dark .cat-hero {
   font-size: clamp(26px, 3.2vw, 40px); line-height: 1.1; color: var(--md-ink);
 }
 .md-accent { color: var(--md-red); }
-.cat-hero-sub { margin: 0 auto; max-width: 640px; color: var(--muted); font-size: 15px; line-height: 1.55; }
+.cat-hero-sub { margin: 0 auto; max-width: 660px; color: var(--muted); font-size: 15px; line-height: 1.55; }
+.cat-hero-stats { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px 22px; margin-top: 18px; }
+.cat-stat { font-size: 13px; color: var(--muted); }
+.cat-stat b { font-size: 17px; font-weight: 800; color: var(--md-ink); margin-right: 5px; }
 
 /* ----- Панель фільтрів: види наповнення + пошук ----- */
 .cat-toolbar {
