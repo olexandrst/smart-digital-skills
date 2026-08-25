@@ -15,7 +15,8 @@ from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
     Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill, Group,
-    CatalogFavorite, ChatSession, ChatMessage, TokenUsageLog, UserFile,
+    CatalogFavorite, CatalogSection, ChatSession, ChatMessage, TokenUsageLog,
+    UserFile, ReviewLog,
 )
 from app.services import skill_service, chat_service, package_service
 
@@ -114,7 +115,7 @@ def update_skill(skill_id):
     """Редагування атрибутів навички: назва, версія, автор, опис, категорія."""
     skill = Skill.query.get_or_404(skill_id)
     data = request.get_json(silent=True) or {}
-    for field in ("name", "description", "version", "author", "category",
+    for field in ("name", "description", "version", "author", "category", "owner",
                   "prompt_template", "input_spec", "output_spec", "starter_prompt"):
         if field in data:
             value = data[field]
@@ -122,6 +123,14 @@ def update_skill(skill_id):
                 raise ApiError("Назва та версія не можуть бути порожніми",
                                400, "validation_error")
             setattr(skill, field, value)
+    if "section_id" in data:
+        section_id = data["section_id"]
+        if section_id in (None, "", 0):
+            skill.section_id = None
+        elif CatalogSection.query.get(section_id) is None:
+            raise ApiError("Розділ не знайдено", 404, "not_found")
+        else:
+            skill.section_id = section_id
     if "model_id" in data:
         skill.model_id = data["model_id"]
     if "parameters" in data:
@@ -142,9 +151,18 @@ def change_status(skill_id):
     if new_status not in VALID_STATUS:
         raise ApiError("Статус має бути 'draft' (не опублікована) або "
                        "'published' (опублікована)", 400, "validation_error")
+    old_status = skill.status
     skill.status = new_status
     if new_status == "published" and skill.published_at is None:
         skill.published_at = datetime.utcnow()
+    if old_status != new_status:
+        user = current_user()
+        db.session.add(ReviewLog(
+            item_type="skill", item_id=skill.id, item_name=skill.name,
+            actor_user_id=user.id if user else None,
+            actor_name=(user.full_name or user.username) if user else None,
+            from_status=old_status, to_status=new_status,
+        ))
     db.session.commit()
     return jsonify(skill.to_dict())
 
@@ -185,15 +203,27 @@ def submit_feedback(skill_id):
     skill = Skill.query.get_or_404(skill_id)
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
-    if not message:
+    rating = data.get("rating")
+    if rating not in (None, ""):
+        try:
+            rating = int(rating)
+        except (TypeError, ValueError):
+            raise ApiError("Оцінка має бути числом від 1 до 5", 400, "validation_error")
+        if not 1 <= rating <= 5:
+            raise ApiError("Оцінка має бути числом від 1 до 5", 400, "validation_error")
+    else:
+        rating = None
+    if not message and rating is None:
         raise ApiError("Повідомлення не може бути порожнім", 400, "validation_error")
     if len(message) > 5000:
         raise ApiError("Повідомлення завелике (максимум 5000 символів)",
                        400, "validation_error")
     user = current_user()
     fb = SkillFeedback(
-        skill_id=skill.id, skill_name=skill.name, skill_version=skill.version,
-        user_id=user.id, username=user.full_name or user.username, message=message,
+        item_type="skill", skill_id=skill.id, skill_name=skill.name,
+        skill_version=skill.version, rating=rating,
+        user_id=user.id, username=user.full_name or user.username,
+        message=message or "(без коментаря)",
     )
     db.session.add(fb)
     db.session.commit()

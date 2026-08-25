@@ -171,8 +171,11 @@ erDiagram
 | `models` | Реєстр моделей Azure AI Foundry (LLM/CV) |
 | `skills` | Каталог скілів, життєвий цикл, версія, лічильник активацій |
 | `skill_inputs` | Параметри вхідних даних скіла (обов'язкові/опціональні) |
-| `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, агенти, посилання |
+| `catalog_sections` | Розділи каталогу («Business Box») — друга вісь навігації хабу |
+| `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання |
 | `catalog_favorites` | «Обране» користувача (спільне для скілів і ресурсів каталогу) |
+| `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
+| `search_query_logs` | Пошукові запити користувачів для аналітики хабу |
 | `group_skills` | Призначення скілів групам (груповий доступ) |
 | `user_skills` | Матеріалізований ефективний доступ користувача до скіла (self/group) |
 | `chat_sessions` / `chat_messages` | Діалоги з моделями |
@@ -316,30 +319,79 @@ CREATE TABLE skills (
     published_at      TEXT
 );
 
--- Наповнення каталогу поза скілами: промпти, інструкції, агенти, корисні посилання
+-- Розділи каталогу («Business Box») — друга вісь навігації.
+-- url заповнено, якщо розділ поки живе у зовнішньому порталі (гібридний режим).
+CREATE TABLE catalog_sections (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT,
+    icon_emoji  TEXT,
+    accent      TEXT,
+    url         TEXT,                          -- зовнішній розділ; NULL = власні матеріали
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання
 CREATE TABLE catalog_resources (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_type  TEXT NOT NULL DEFAULT 'prompt'
+                   CHECK (resource_type IN ('prompt','instruction','case','agent','link')),
+    name           TEXT NOT NULL,
+    description    TEXT NOT NULL DEFAULT '',
+    category       TEXT,
+    section_id     INTEGER REFERENCES catalog_sections(id),
+    author         TEXT,
+    owner          TEXT,                         -- відповідальний за матеріал
+    tags           TEXT,                         -- через кому
+    body           TEXT,                         -- текст промпту / інструкції (Markdown)
+    url            TEXT,                         -- посилання (agent | link)
+    link_scope     TEXT CHECK (link_scope IN ('external','internal')),
+    tools          TEXT,                         -- інструменти та платформи
+    reuse_level    TEXT CHECK (reuse_level IN ('ready','adaptable','reference')),
+    reviewed_at    TEXT,                         -- дата останнього перегляду
+    next_review_at TEXT,                         -- дата наступного перегляду
+    icon_emoji     TEXT,                         -- емодзі-іконка плитки
+    accent         TEXT,                         -- колір плитки; NULL = типовий для виду
+    is_featured    INTEGER NOT NULL DEFAULT 0,   -- «рекомендований» — першим у каталозі
+    status         TEXT NOT NULL DEFAULT 'draft'
+                   CHECK (status IN ('draft','published','needs_update','archived')),
+    version        TEXT NOT NULL DEFAULT '1.0.0',
+    opens_count    INTEGER NOT NULL DEFAULT 0,   -- відкриття / копіювання
+    created_by     INTEGER REFERENCES users(id),
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    published_at   TEXT
+);
+
+-- Журнал життєвого циклу матеріалу: хто, коли і з якого статусу в який перевів
+CREATE TABLE review_logs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    resource_type TEXT NOT NULL DEFAULT 'prompt'
-                  CHECK (resource_type IN ('prompt','instruction','agent','link')),
-    name          TEXT NOT NULL,
-    description   TEXT NOT NULL DEFAULT '',
-    category      TEXT,
-    author        TEXT,
-    tags          TEXT,                          -- через кому
-    body          TEXT,                          -- текст промпту / інструкції (Markdown)
-    url           TEXT,                          -- посилання (agent | link)
-    link_scope    TEXT CHECK (link_scope IN ('external','internal')),
-    icon_emoji    TEXT,                          -- емодзі-іконка плитки
-    accent        TEXT,                          -- колір плитки; NULL = типовий для виду
-    is_featured   INTEGER NOT NULL DEFAULT 0,    -- «рекомендований» — першим у каталозі
-    status        TEXT NOT NULL DEFAULT 'draft'
-                  CHECK (status IN ('draft','published')),
-    version       TEXT NOT NULL DEFAULT '1.0.0',
-    opens_count   INTEGER NOT NULL DEFAULT 0,    -- відкриття / копіювання
-    created_by    INTEGER REFERENCES users(id),
-    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    published_at  TEXT
+    item_type     TEXT NOT NULL DEFAULT 'resource'
+                  CHECK (item_type IN ('resource','skill')),
+    item_id       INTEGER NOT NULL,
+    item_name     TEXT,                          -- знімок назви
+    actor_user_id INTEGER REFERENCES users(id),
+    actor_name    TEXT,
+    from_status   TEXT,
+    to_status     TEXT NOT NULL,
+    note          TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Пошукові запити користувачів: що шукають і що не знаходять
+CREATE TABLE search_query_logs (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    query            TEXT NOT NULL,
+    query_norm       TEXT NOT NULL,              -- нижній регістр — для групування
+    results_count    INTEGER NOT NULL DEFAULT 0,
+    section_id       INTEGER REFERENCES catalog_sections(id),
+    kind             TEXT,                       -- активний фільтр за видом
+    user_id          INTEGER REFERENCES users(id),
+    opened_item_type TEXT,                       -- заповнено, якщо запит завершився відкриттям
+    opened_item_id   INTEGER,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- «Обране» користувача — спільне для скілів і ресурсів каталогу

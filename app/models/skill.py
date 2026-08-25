@@ -53,6 +53,8 @@ class Skill(db.Model):
     description = db.Column(db.Text, nullable=False)
     author = db.Column(db.String)        # автор навички (зі skill.md або редагується)
     category = db.Column(db.String)      # категорія навички
+    section_id = db.Column(db.Integer, db.ForeignKey("catalog_sections.id"))
+    owner = db.Column(db.String)         # відповідальний за матеріал (BR-11)
     icon_path = db.Column(db.String)     # шлях до завантаженої PNG-іконки (nullable)
     # 'prompt' — LLM-навичка; 'package' — архів зі skill.md та кодом, що виконується.
     skill_kind = db.Column(db.String, nullable=False, default="prompt")
@@ -90,6 +92,8 @@ class Skill(db.Model):
             "description": self.description,
             "author": self.author,
             "category": self.category,
+            "section_id": self.section_id,
+            "owner": self.owner,
             "skill_kind": self.skill_kind or "prompt",
             "model_id": self.model_id,
             "model_name": self.model.name if self.model else None,
@@ -129,17 +133,26 @@ class SkillCategory(db.Model):
 
 
 class SkillFeedback(db.Model):
-    """Зворотний зв'язок користувача щодо навички (надходить у «Управління навичками»).
+    """Зворотний зв'язок користувача щодо матеріалу каталогу.
 
-    Назву навички, версію та логін зберігаємо знімком, щоб повідомлення лишалось
-    читабельним навіть після зміни/видалення навички чи користувача.
+    Історично таблиця обслуговувала лише навички, тому й назва. Тепер сюди ж
+    надходить фідбек про ресурси каталогу: `item_type` розрізняє їх, а
+    `resource_id` посилається на ресурс (для навичок лишається `skill_id`).
+    Оцінка `rating` (1–5) необов'язкова — можна лишити самий коментар.
+
+    Назву матеріалу, версію та логін зберігаємо знімком, щоб повідомлення
+    лишалось читабельним навіть після зміни/видалення матеріалу чи користувача.
     """
     __tablename__ = "skill_feedback"
 
     id = db.Column(db.Integer, primary_key=True)
+    item_type = db.Column(db.String, nullable=False, default="skill")  # skill|resource
     skill_id = db.Column(db.Integer, db.ForeignKey("skills.id", ondelete="SET NULL"))
-    skill_name = db.Column(db.String, nullable=False)
+    resource_id = db.Column(db.Integer,
+                            db.ForeignKey("catalog_resources.id", ondelete="SET NULL"))
+    skill_name = db.Column(db.String, nullable=False)   # знімок назви матеріалу
     skill_version = db.Column(db.String)
+    rating = db.Column(db.Integer)       # 1–5, необов'язково
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
     username = db.Column(db.String)
     message = db.Column(db.Text, nullable=False)
@@ -149,7 +162,10 @@ class SkillFeedback(db.Model):
     def to_dict(self):
         return {
             "id": self.id,
+            "item_type": self.item_type or "skill",
             "skill_id": self.skill_id,
+            "resource_id": self.resource_id,
+            "rating": self.rating,
             "skill_name": self.skill_name,
             "skill_version": self.skill_version,
             "user_id": self.user_id,

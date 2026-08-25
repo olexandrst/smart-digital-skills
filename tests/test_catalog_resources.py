@@ -144,8 +144,14 @@ def test_update_and_status_flow(client):
     assert pub.status_code == 200
     assert pub.get_json()["published_at"]
 
+    # «archived» — валідний статус життєвого циклу (BR-12); неіснуючий — ні.
+    archived = client.post(f"/api/catalog/resources/{rid}/status",
+                           json={"status": "archived"}, headers=h)
+    assert archived.status_code == 200
+    assert archived.get_json()["status"] == "archived"
+
     bad = client.post(f"/api/catalog/resources/{rid}/status",
-                      json={"status": "archived"}, headers=h)
+                      json={"status": "retired"}, headers=h)
     assert bad.status_code == 400
 
 

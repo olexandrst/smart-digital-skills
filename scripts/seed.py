@@ -138,8 +138,11 @@ def seed():
         # 9. Демо-скіл-ПАКЕТ (виконання Python-коду з архіву)
         _seed_package_skill(admin)
 
-        # 10. Наповнення каталогу: промпти, інструкції, агенти, посилання
-        _seed_catalog_resources(admin)
+        # 10. Розділи каталогу (дзеркало меню корпоративного AI Knowledge Hub)
+        sections = _seed_catalog_sections()
+
+        # 11. Наповнення каталогу: промпти, інструкції, кейси, агенти, посилання
+        _seed_catalog_resources(admin, sections)
 
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
@@ -201,9 +204,54 @@ def _seed_package_skill(admin):
     db.session.commit()
 
 
+# Розділи каталогу — дзеркало меню корпоративного AI Knowledge Hub.
+# `url` заповнено там, де розділ поки живе у зовнішньому порталі (гібридний режим):
+# плитка веде туди. Коли контент переїде до нас — посилання прибирається.
+CATALOG_SECTIONS = [
+    {"name": "Про проєкт «AI Culture Acceleration»", "icon_emoji": "🚀", "accent": "red",
+     "description": "Мета, етапи та команда програми розвитку AI-культури.",
+     "url": "/portal/ai-culture-acceleration"},
+    {"name": "Toolbox", "icon_emoji": "🧰", "accent": "ink",
+     "description": "Доступні ШІ-інструменти компанії та умови їх використання."},
+    {"name": "FAQ", "icon_emoji": "❓", "accent": "steel",
+     "description": "Часті питання та відповіді про роботу зі штучним інтелектом."},
+    {"name": "Power Links", "icon_emoji": "🔗", "accent": "green",
+     "description": "Корисні зовнішні сервіси та внутрішні ресурси."},
+    {"name": "Insight Center", "icon_emoji": "💡", "accent": "amber",
+     "description": "Лайфхаки та практики від AI-партнерів."},
+    {"name": "Learning Space", "icon_emoji": "🎓", "accent": "steel",
+     "description": "Навчальні матеріали, самостійне навчання та вебінари."},
+    {"name": "AI Use Policy & Safety", "icon_emoji": "🔐", "accent": "red",
+     "description": "Політики, правила та безпека використання ШІ."},
+    {"name": "AI Partners Network", "icon_emoji": "🤝", "accent": "ink",
+     "description": "Спільнота AI-партнерів у Viva Engage.",
+     "url": "https://web.yammer.com/main/groups/ai-partners-network"},
+    {"name": "Help & Feedback", "icon_emoji": "🆘", "accent": "amber",
+     "description": "Технічна підтримка та зворотний зв'язок щодо хабу.",
+     "url": "/portal/ai-help-feedback"},
+]
+
+
+def _seed_catalog_sections():
+    """Створює розділи каталогу (ідемпотентно). Повертає мапу назва → id."""
+    from app.models import CatalogSection
+
+    created = 0
+    for position, spec in enumerate(CATALOG_SECTIONS):
+        section = CatalogSection.query.filter_by(name=spec["name"]).first()
+        if section is None:
+            db.session.add(CatalogSection(**spec, position=position))
+            created += 1
+    if created:
+        db.session.commit()
+        print(f"  Каталог: додано розділів — {created}")
+    return {s.name: s.id for s in CatalogSection.query.all()}
+
+
 CATALOG_DEMO = [
     {
         "resource_type": "prompt", "name": "Аналіз тендерної документації",
+        "section": "Insight Center", "owner": "Марина Кондратенко",
         "description": "Розбирає ТД на вимоги, строки та ризики й повертає структурований чекліст.",
         "category": "Закупівлі", "tags": "аналітика, документи",
         "icon_emoji": "📑", "is_featured": True,
@@ -217,6 +265,7 @@ CATALOG_DEMO = [
     },
     {
         "resource_type": "prompt", "name": "Протокол наради за стенограмою",
+        "section": "Insight Center", "owner": "Марина Кондратенко",
         "description": "Перетворює розшифровку зустрічі на протокол із рішеннями та задачами.",
         "category": "Операційна робота", "tags": "наради, підсумки",
         "icon_emoji": "🗒️",
@@ -226,6 +275,7 @@ CATALOG_DEMO = [
     },
     {
         "resource_type": "instruction", "name": "Як писати ефективні промпти",
+        "section": "Learning Space", "owner": "Катерина Сумарєва",
         "description": "Базові правила формулювання завдань для LLM: роль, контекст, формат, приклади.",
         "category": "Навчання", "tags": "prompt engineering, основи",
         "icon_emoji": "🎓", "is_featured": True,
@@ -245,6 +295,7 @@ CATALOG_DEMO = [
     },
     {
         "resource_type": "instruction", "name": "Робота з конфіденційними даними в ШІ",
+        "section": "AI Use Policy & Safety", "owner": "Дмитро Кирєєв",
         "description": "Що можна і що не можна передавати в моделі; правила знеособлення.",
         "category": "Безпека", "tags": "політика, безпека",
         "icon_emoji": "🔐",
@@ -258,7 +309,24 @@ CATALOG_DEMO = [
                  "3. Не зберігайте відповіді моделі поза корпоративними системами."),
     },
     {
+        "resource_type": "case", "name": "Кейс: автоматизація обробки заявок у HR",
+        "section": "Insight Center", "owner": "Марина Кондратенко",
+        "description": "Як HR скоротив час опрацювання типових звернень удвічі за допомогою агента.",
+        "category": "HR", "tags": "кейс, автоматизація", "icon_emoji": "📈",
+        "reuse_level": "adaptable", "tools": "Copilot Studio, SharePoint",
+        "body": ("## Задача\n\nHR отримував ~400 типових звернень на місяць; "
+                 "кожне опрацьовувалось вручну до 15 хвилин.\n\n"
+                 "## Рішення\n\nАгент на Copilot Studio класифікує звернення, "
+                 "відповідає на типові з бази знань і ескалює складні на людину.\n\n"
+                 "## Результат\n\n- Час опрацювання: 15 → 7 хвилин.\n"
+                 "- 62% звернень закриваються без участі людини.\n"
+                 "- Окупність — третій місяць експлуатації.\n\n"
+                 "## Як повторити\n\nШаблон агента й базу знань можна адаптувати "
+                 "під будь-який підрозділ із типовим потоком звернень."),
+    },
+    {
         "resource_type": "agent", "name": "Асистент технічної підтримки",
+        "section": "Toolbox", "owner": "Антон Іщенко",
         "description": "Агент першої лінії: класифікує звернення та пропонує рішення з бази знань.",
         "category": "Підтримка", "tags": "звернення, база знань",
         "icon_emoji": "🤖", "url": "https://agents.example.com/support-assistant",
@@ -266,6 +334,7 @@ CATALOG_DEMO = [
     },
     {
         "resource_type": "agent", "name": "Агент аналітики виробництва",
+        "section": "Toolbox", "owner": "Антон Іщенко",
         "description": "Відповідає на запитання щодо показників зміни та формує добові зведення.",
         "category": "Виробництво", "icon_emoji": "🏭",
         "url": "https://agents.example.com/production-analytics",
@@ -273,18 +342,21 @@ CATALOG_DEMO = [
     },
     {
         "resource_type": "link", "name": "Портал знань Metinvest Digital",
+        "section": "Power Links", "owner": "Ольга Островерхова",
         "description": "Внутрішня база регламентів, шаблонів і навчальних матеріалів.",
         "category": "Внутрішні ресурси", "icon_emoji": "🏛️",
         "url": "/portal/knowledge", "link_scope": "internal",
     },
     {
         "resource_type": "link", "name": "Hugging Face",
+        "section": "Power Links", "owner": "Ольга Островерхова",
         "description": "Каталог відкритих моделей, датасетів і демо-застосунків.",
         "category": "Зовнішні сервіси", "tags": "моделі, ML",
         "icon_emoji": "🤗", "url": "https://huggingface.co", "link_scope": "external",
     },
     {
         "resource_type": "link", "name": "Заявка на доступ до моделі",
+        "section": "Help & Feedback", "owner": "Стародубцева Ольга",
         "description": "Внутрішня форма запиту доступу до корпоративних LLM та квоти.",
         "category": "Внутрішні ресурси", "icon_emoji": "📨",
         "url": "/portal/ai-access-request", "link_scope": "internal",
@@ -292,22 +364,37 @@ CATALOG_DEMO = [
 ]
 
 
-def _seed_catalog_resources(admin):
-    """Демо-наповнення каталогу: промпти, інструкції, агенти та посилання."""
-    from datetime import datetime
+def _seed_catalog_resources(admin, sections):
+    """Демо-наповнення каталогу: промпти, інструкції, кейси, агенти, посилання."""
+    from datetime import datetime, timedelta
     from app.models import CatalogResource
 
+    now = datetime.utcnow()
     created = 0
     for spec in CATALOG_DEMO:
         if CatalogResource.query.filter_by(name=spec["name"]).first():
             continue
+        fields = dict(spec)
+        section_name = fields.pop("section", None)
         db.session.add(CatalogResource(
-            **spec, status="published", published_at=datetime.utcnow(),
+            **fields, section_id=sections.get(section_name),
+            status="published", published_at=now,
+            reviewed_at=now, next_review_at=now + timedelta(days=180),
             author="Metinvest Digital", created_by=admin.id))
         created += 1
     if created:
         db.session.commit()
         print(f"  Каталог: додано ресурсів — {created}")
+
+    # Навички теж належать до розділу — щоб вісь працювала для всього каталогу.
+    toolbox_id = sections.get("Toolbox")
+    if toolbox_id:
+        unassigned = Skill.query.filter_by(section_id=None).all()
+        for skill in unassigned:
+            skill.section_id = toolbox_id
+            skill.owner = skill.owner or "Антон Іщенко"
+        if unassigned:
+            db.session.commit()
 
 
 if __name__ == "__main__":
