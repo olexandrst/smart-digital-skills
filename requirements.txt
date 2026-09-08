@@ -5,6 +5,7 @@ Flask-Cors==4.0.1
 python-dotenv==1.0.1
 PyYAML==6.0.2
 APScheduler==3.10.4
+gunicorn==23.0.0                 # production-сервер (Azure App Service, Docker)
 
 # --- SDK реальних LLM-провайдерів ---
 # У MVP за замовчуванням працює мок (LLM_MOCK=1); цей пакет потрібен для

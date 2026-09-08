@@ -3,7 +3,12 @@ import os
 from datetime import timedelta
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
+
+# Кореневий каталог стану: база даних, пакети та іконки скілів, файли
+# користувачів, тимчасова тека виконання. Виносити його за межі коду потрібно
+# на хостингах з ефемерною файловою системою — напр. на Azure App Service
+# задають INSTANCE_DIR=/home/data (див. DEPLOY-AZURE.md).
+INSTANCE_DIR = os.getenv("INSTANCE_DIR", os.path.join(BASE_DIR, "instance"))
 
 
 class BaseConfig:

@@ -10,7 +10,8 @@
 запустити систему без реального ключа.
 
 > Повні вимоги — у [`PRD.md`](PRD.md), архітектура та схема БД —
-> у [`Architecture.md`](Architecture.md).
+> у [`Architecture.md`](Architecture.md), розгортання на Azure —
+> у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md).
 
 ---
 
@@ -140,7 +141,9 @@ python wsgi.py
 
 Відкрийте **http://localhost:5000** у браузері.
 
-> Production-запуск: `gunicorn wsgi:app` (додайте `gunicorn` у середовище).
+> Production-запуск: `gunicorn wsgi:app` (пакет уже в `requirements.txt`).
+> Розгортання на Azure App Service — покрокова інструкція
+> у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md).
 
 ---
 
