@@ -15,7 +15,7 @@ from app.models.chat import (
 )
 from app.models.resource import (
     CatalogSection, CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
-    RESOURCE_TYPES, LINK_TYPES, LINK_SCOPES, ACCENTS,
+    RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
 )
 from app.models.file import UserFile
@@ -53,6 +53,7 @@ __all__ = [
     "REUSE_LEVELS",
     "RESOURCE_TYPES",
     "LINK_TYPES",
+    "BODY_TYPES",
     "LINK_SCOPES",
     "ACCENTS",
     "UserFile",

@@ -1,4 +1,4 @@
-# Архітектура рішення Smart-ProfiHub
+# Архітектура рішення AI Knowledge Hub
 
 **Стек:** Python 3.11+, Flask (REST API), SQLAlchemy + SQLite
 **Документ:** архітектура рішення + структура БД (основа для задачі Claude Code)
@@ -102,7 +102,7 @@
 ## 5. Структура проєкту (для Claude Code)
 
 ```
-smart-profihub/
+smart-digital-skills/
 ├── app/
 │   ├── __init__.py            # фабрика застосунку (create_app)
 │   ├── config.py              # конфіги Dev/Prod, шлях до SQLite, секрети
@@ -337,7 +337,8 @@ CREATE TABLE catalog_sections (
 CREATE TABLE catalog_resources (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     resource_type  TEXT NOT NULL DEFAULT 'prompt'
-                   CHECK (resource_type IN ('prompt','instruction','case','agent','link')),
+                   CHECK (resource_type IN ('prompt','instruction','case',
+                                            'agent','mcp','link')),
     name           TEXT NOT NULL,
     description    TEXT NOT NULL DEFAULT '',
     category       TEXT,

@@ -1,5 +1,5 @@
 /* =====================================================================
-   Smart Digital Skills — Material-дизайн (світла тема за замовчуванням
+   AI Knowledge Hub — Material-дизайн (світла тема за замовчуванням
    + темна `body.theme-dark`). Синій апбар зверху — фірмовий елемент.
    ===================================================================== */
 
@@ -182,8 +182,8 @@ body {
   border-radius: 10px;
 }
 .input-wrap input:focus {
-  outline: none; border-color: #4d8df6;
-  box-shadow: 0 0 0 3px rgba(77, 141, 246, 0.28);
+  outline: none; border-color: #ff5a63;
+  box-shadow: 0 0 0 3px rgba(227, 6, 19, 0.30);
 }
 .pw-toggle {
   position: absolute; right: 8px; background: transparent; border: none;
@@ -193,10 +193,10 @@ body {
 .pw-toggle:hover svg { fill: #eef2fb; }
 .btn-primary {
   margin-top: 4px; padding: 14px; font-size: 16px; font-weight: 600;
-  border-radius: 10px; background: #1a73e8; color: #fff;
-  box-shadow: 0 10px 24px rgba(26, 115, 232, 0.35);
+  border-radius: 10px; background: #e30613; color: #fff;
+  box-shadow: 0 10px 24px rgba(227, 6, 19, 0.38);
 }
-.btn-primary:hover { background: #3b86ec; }
+.btn-primary:hover { background: #ff2634; }
 
 /* =====================================================================
    Базові елементи форм і кнопки

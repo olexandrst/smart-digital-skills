@@ -94,7 +94,7 @@ def seed():
             Skill, name="Summarizer",
             defaults={
                 "description": "Стисло підсумовує наданий текст.",
-                "author": "Smart Digital Skills",
+                "author": "Metinvest Digital",
                 "category": "Текст",
                 "prompt_template": "Зроби стислий підсумок тексту мовою {language}:\n\n{text}",
                 "parameters": json.dumps({"temperature": 0.3}),
@@ -184,7 +184,7 @@ def _seed_package_skill(admin):
 
     skill = Skill(
         name=meta["name"], description=meta["description"],
-        author=meta.get("author") or "Smart Digital Skills",
+        author=meta.get("author") or "Metinvest Digital",
         category=meta.get("category") or "Загальне",
         skill_kind="package", runtime=meta["runtime"], entrypoint=meta["entrypoint"],
         version=meta["version"], prompt_template=meta.get("instructions"),
@@ -307,6 +307,45 @@ CATALOG_DEMO = [
                  "1. Знеособлюйте дані перед запитом (заміна імен на «Контрагент А»).\n"
                  "2. Для чутливих задач використовуйте внутрішні моделі.\n"
                  "3. Не зберігайте відповіді моделі поза корпоративними системами."),
+    },
+    {
+        "resource_type": "mcp", "name": "MCP: Корпоративна база знань",
+        "section": "Toolbox", "owner": "Антон Іщенко",
+        "description": "Дає агентам доступ до регламентів, шаблонів і документації компанії.",
+        "category": "Внутрішні ресурси", "tags": "MCP, база знань",
+        "icon_emoji": "🔌", "url": "https://mcp.metinvest.local/knowledge/sse",
+        "link_scope": "internal", "tools": "Copilot Studio, Claude Desktop",
+        "reuse_level": "ready",
+        "body": ("## Що надає сервер\n\n"
+                 "- `search_documents` — пошук по регламентах і шаблонах.\n"
+                 "- `get_document` — повний текст документа за ідентифікатором.\n"
+                 "- `list_policies` — перелік чинних політик компанії.\n\n"
+                 "## Як підключити\n\n"
+                 "1. Скопіюйте endpoint кнопкою «Копіювати».\n"
+                 "2. У Copilot Studio: **Tools → Add tool → Model Context Protocol** "
+                 "і вставте адресу.\n"
+                 "3. Авторизація — через корпоративний обліковий запис, окремий "
+                 "ключ не потрібен.\n\n"
+                 "Доступ лише з внутрішньої мережі або через VPN."),
+    },
+    {
+        "resource_type": "mcp", "name": "MCP: GitHub",
+        "section": "Toolbox", "owner": "Антон Іщенко",
+        "description": "Робота з репозиторіями, issue та pull request прямо з агента.",
+        "category": "Зовнішні сервіси", "tags": "MCP, розробка",
+        "icon_emoji": "🐙", "url": "https://api.githubcopilot.com/mcp/",
+        "link_scope": "external", "tools": "Copilot Studio, Claude Desktop, VS Code",
+        "reuse_level": "ready",
+        "body": ("## Що надає сервер\n\n"
+                 "Публічний MCP-сервер GitHub: читання репозиторіїв, пошук по коду, "
+                 "робота з issue та pull request.\n\n"
+                 "## Як підключити\n\n"
+                 "1. Скопіюйте endpoint кнопкою «Копіювати».\n"
+                 "2. Додайте його у свого MCP-клієнта.\n"
+                 "3. Потрібен персональний токен GitHub із мінімально достатніми "
+                 "правами.\n\n"
+                 "> Перед підключенням до робочих репозиторіїв узгодьте з "
+                 "Governance & Security."),
     },
     {
         "resource_type": "case", "name": "Кейс: автоматизація обробки заявок у HR",

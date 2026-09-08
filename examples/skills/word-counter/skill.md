@@ -1,7 +1,7 @@
 ---
 name: Word Counter
 description: Підраховує слова, символи та рядки у наданому тексті (виконується локально як Python-код).
-author: Smart Digital Skills
+author: Metinvest Digital
 category: Текст
 version: 1.0.0
 runtime: python

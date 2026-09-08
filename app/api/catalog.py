@@ -13,7 +13,7 @@ from app.core.errors import ApiError
 from app.models import (
     CatalogSection, CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
     Skill, SkillFeedback, AppSetting,
-    RESOURCE_TYPES, LINK_TYPES, LINK_SCOPES, ACCENTS,
+    RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
 )
 
@@ -43,12 +43,12 @@ def strict_publish_enabled():
     return AppSetting.get(STRICT_PUBLISH_KEY, "0") == "1"
 
 
-def _clean_url(value, required):
+def _clean_url(value, required, label="посилання"):
     """Валідує посилання: http(s)://… або внутрішній шлях /…"""
     url = (value or "").strip()
     if not url:
         if required:
-            raise ApiError("Вкажіть посилання", 400, "validation_error")
+            raise ApiError(f"Вкажіть {label}", 400, "validation_error")
         return None
     low = url.lower()
     if not (low.startswith("http://") or low.startswith("https://")
@@ -162,17 +162,18 @@ def _apply_fields(res, data, *, creating=False):
         scope = (data.get("link_scope") or "").strip()
         res.link_scope = scope if scope in LINK_SCOPES else None
 
-    # Посилання обов'язкове для агентів і корисних посилань.
+    # Посилання обов'язкове для агентів, MCP-серверів і корисних посилань.
     needs_url = res.resource_type in LINK_TYPES
+    url_label = "endpoint сервера" if res.resource_type == "mcp" else "посилання"
     if "url" in data or (creating and needs_url):
-        res.url = _clean_url(data.get("url"), required=needs_url)
+        res.url = _clean_url(data.get("url"), required=needs_url, label=url_label)
     if needs_url and not res.url:
-        raise ApiError("Вкажіть посилання", 400, "validation_error")
+        raise ApiError(f"Вкажіть {url_label}", 400, "validation_error")
     if needs_url and not res.link_scope:
         res.link_scope = "external"
 
     # Промпт, інструкція та кейс без тексту — беззмістовні.
-    if res.resource_type in ("prompt", "instruction", "case") and creating and not res.body:
+    if res.resource_type in BODY_TYPES and creating and not res.body:
         raise ApiError("Додайте текст матеріалу", 400, "validation_error")
 
 

@@ -20,10 +20,14 @@ def _iso(value):
 
 
 # Типи ресурсів каталогу (навички живуть окремою моделлю Skill).
-RESOURCE_TYPES = ("prompt", "instruction", "case", "agent", "link")
+RESOURCE_TYPES = ("prompt", "instruction", "case", "agent", "mcp", "link")
 
-# Типи, для яких обов'язкове посилання.
-LINK_TYPES = ("agent", "link")
+# Типи, для яких обов'язкове посилання (для MCP це endpoint сервера).
+LINK_TYPES = ("agent", "mcp", "link")
+
+# Типи, які без тексту беззмістовні. MCP сюди не входить: інструкція
+# підключення бажана, але endpoint самодостатній.
+BODY_TYPES = ("prompt", "instruction", "case")
 
 # Область посилання: зовнішній сервіс чи внутрішній ресурс компанії.
 LINK_SCOPES = ("external", "internal")

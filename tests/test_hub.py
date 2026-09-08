@@ -302,3 +302,60 @@ def test_analytics_requires_manager(client):
 def test_case_type_requires_body(client):
     assert _resource(client, _admin(client), resource_type="case",
                      name="Кейс", body="").status_code == 400
+
+
+# ---------------------------- MCP-сервери ----------------------------
+
+def _mcp(client, headers, **over):
+    payload = {"resource_type": "mcp", "name": "MCP: База знань",
+               "description": "Доступ агентів до регламентів компанії",
+               "url": "https://mcp.example.com/sse", "category": "Внутрішні ресурси",
+               "status": "published"}
+    payload.update(over)
+    return client.post("/api/catalog/resources", json=payload, headers=headers)
+
+
+def test_mcp_requires_endpoint(client):
+    res = _mcp(client, _admin(client), url="")
+    assert res.status_code == 400
+    assert "endpoint" in res.get_json()["message"]
+
+
+def test_mcp_created_without_body(client):
+    """Інструкція підключення бажана, але endpoint самодостатній."""
+    res = _mcp(client, _admin(client))
+    assert res.status_code == 201, res.get_json()
+    data = res.get_json()
+    assert data["resource_type"] == "mcp"
+    assert data["url"] == "https://mcp.example.com/sse"
+    assert data["link_scope"] == "external"   # проставляється автоматично
+    assert data["body"] is None
+
+
+def test_mcp_keeps_body_and_scope(client):
+    res = _mcp(client, _admin(client), link_scope="internal",
+               body="## Як підключити\n\n1. Скопіюйте endpoint.")
+    assert res.status_code == 201
+    assert res.get_json()["link_scope"] == "internal"
+    assert res.get_json()["body"].startswith("## Як підключити")
+
+
+def test_mcp_endpoint_must_be_valid_url(client):
+    assert _mcp(client, _admin(client),
+                url="javascript:alert(1)").status_code == 400
+
+
+def test_mcp_type_filter(client):
+    h = _admin(client)
+    _mcp(client, h)
+    _resource(client, h, name="Звичайний промпт")
+
+    items = client.get("/api/catalog/resources?type=mcp", headers=h).get_json()
+    assert [i["name"] for i in items] == ["MCP: База знань"]
+
+
+def test_mcp_counted_in_analytics(client):
+    h = _admin(client)
+    _mcp(client, h)
+    a = client.get("/api/catalog/analytics", headers=h).get_json()
+    assert a["by_type"]["mcp"] == 1

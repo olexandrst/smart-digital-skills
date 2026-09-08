@@ -1,4 +1,4 @@
-"""Фабрика застосунку Smart-ProfiHub."""
+"""Фабрика застосунку AI Knowledge Hub."""
 import os
 from flask import Flask, jsonify, send_from_directory
 
