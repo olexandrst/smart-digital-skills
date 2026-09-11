@@ -11,7 +11,8 @@
 
 > Повні вимоги — у [`PRD.md`](PRD.md), архітектура та схема БД —
 > у [`Architecture.md`](Architecture.md), розгортання на Azure —
-> у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md).
+> у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md), план доробки під бізнес-вимоги
+> AI Knowledge Hub (58% → 100%) — у [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
