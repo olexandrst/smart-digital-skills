@@ -16,12 +16,14 @@ from app.services import (
 )
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
+    CatalogResourceMaturity, HiddenRecommendation, LearningPath, LearningProgress,
     CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, SearchSynonym,
     UserFile,
     Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
+    User,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
-    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, VIEW_TARGETS,
+    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, MULTI_VALUE_TERM_KINDS, VIEW_TARGETS,
     SURVEY_KINDS, SURVEY_SCALES,
 )
 
@@ -120,6 +122,25 @@ def _set_tags(res, value):
         db.session.add(CatalogResourceTag(resource_id=res.id, term_id=term.id))
     # Щоб `res.tag_terms` не віддав кеш попереднього набору в тій самій транзакції.
     db.session.expire(res, ["tag_terms"])
+
+
+def _set_maturity(res, value):
+    """Перезаписує рівні зрілості матеріалу (BR-9). Приймає список id."""
+    if value is None:
+        return
+    ids = value if isinstance(value, (list, tuple)) else [value]
+    terms = []
+    for raw in ids:
+        term_id = _resolve_term("maturity", raw, "рівень зрілості")
+        if term_id is not None and term_id not in terms:
+            terms.append(term_id)
+    if res.id is None:
+        db.session.flush()
+    CatalogResourceMaturity.query.filter_by(resource_id=res.id).delete(
+        synchronize_session=False)
+    for term_id in terms:
+        db.session.add(CatalogResourceMaturity(resource_id=res.id, term_id=term_id))
+    db.session.expire(res, ["maturity_terms"])
 
 
 def _resolve_term(kind, value, label):
@@ -546,6 +567,10 @@ def _term_counts():
         db.session.query(CatalogResourceTag.term_id,
                          func.count(CatalogResourceTag.resource_id))
         .group_by(CatalogResourceTag.term_id).all())
+    for term_id, n in (db.session.query(CatalogResourceMaturity.term_id,
+                                        func.count(CatalogResourceMaturity.resource_id))
+                       .group_by(CatalogResourceMaturity.term_id).all()):
+        counts[term_id] = counts.get(term_id, 0) + n
     for col in (CatalogResource.complexity_id, CatalogResource.business_value_id):
         for term_id, n in (db.session.query(col, func.count(CatalogResource.id))
                            .filter(col.isnot(None)).group_by(col).all()):
@@ -659,11 +684,12 @@ def merge_term(term_id):
     if source.kind == "material_type":
         raise ApiError("Види матеріалів не зливаються", 400, "material_type_fixed")
 
-    if source.kind == "tag":
-        # Картки, що вже мають цільовий тег, інакше отримали б дубль зв'язку.
-        taken = {row.resource_id for row in
-                 CatalogResourceTag.query.filter_by(term_id=target.id)}
-        for row in CatalogResourceTag.query.filter_by(term_id=source.id).all():
+    if source.kind in MULTI_VALUE_TERM_KINDS:
+        link = (CatalogResourceTag if source.kind == "tag"
+                else CatalogResourceMaturity)
+        # Картки, що вже мають цільове значення, інакше отримали б дубль зв'язку.
+        taken = {row.resource_id for row in link.query.filter_by(term_id=target.id)}
+        for row in link.query.filter_by(term_id=source.id).all():
             if row.resource_id in taken:
                 db.session.delete(row)
             else:
@@ -686,9 +712,9 @@ def delete_term(term_id):
     if term.kind == "material_type":
         raise ApiError("Вид матеріалу не видаляється — його можна приховати",
                        400, "material_type_fixed")
-    if term.kind == "tag":
-        CatalogResourceTag.query.filter_by(term_id=term_id).delete(
-            synchronize_session=False)
+    if term.kind in MULTI_VALUE_TERM_KINDS:
+        link = CatalogResourceTag if term.kind == "tag" else CatalogResourceMaturity
+        link.query.filter_by(term_id=term_id).delete(synchronize_session=False)
     else:
         for col in (CatalogResource.complexity_id, CatalogResource.business_value_id):
             CatalogResource.query.filter(col == term_id).update(
@@ -749,6 +775,13 @@ def list_resources():
         term_id = _resolve_term("tag", tag_id, "тег")
         query = query.filter(CatalogResource.id.in_(
             db.session.query(CatalogResourceTag.resource_id)
+            .filter_by(term_id=term_id)))
+
+    maturity_id = request.args.get("maturity_id")
+    if maturity_id:
+        term_id = _resolve_term("maturity", maturity_id, "рівень зрілості")
+        query = query.filter(CatalogResource.id.in_(
+            db.session.query(CatalogResourceMaturity.resource_id)
             .filter_by(term_id=term_id)))
 
     # Інструмент і власник — вільний текст у картці, тому збіг за підрядком.
@@ -881,6 +914,7 @@ def create_resource():
     db.session.add(res)
     db.session.flush()
     _set_tags(res, data.get("tags"))
+    _set_maturity(res, data.get("maturity_ids"))
     if publish:
         _log_review("resource", res, None, "published")
     db.session.commit()
@@ -895,6 +929,8 @@ def update_resource(resource_id):
     _apply_fields(res, data)
     if "tags" in data:
         _set_tags(res, data.get("tags"))
+    if "maturity_ids" in data:
+        _set_maturity(res, data.get("maturity_ids"))
     db.session.commit()
     return jsonify(res.to_dict())
 
@@ -1074,6 +1110,8 @@ def delete_resource(resource_id):
         file_service.remove_stored_file(uf)
         db.session.delete(uf)
     CatalogResourceTag.query.filter_by(resource_id=resource_id)\
+        .delete(synchronize_session=False)
+    CatalogResourceMaturity.query.filter_by(resource_id=resource_id)\
         .delete(synchronize_session=False)
     CatalogFavorite.query.filter_by(item_type="resource", item_id=resource_id)\
         .delete(synchronize_session=False)
@@ -1950,3 +1988,166 @@ def search_analytics():
             "helpful_pct": _pct(helpful, rated),
         },
     })
+
+
+# ------------- Профіль: рівень зрілості та підрозділ (AKH-13) -------------
+
+@bp.patch("/profile")
+@require_auth
+def update_profile():
+    """Користувач сам вказує свій рівень AI-зрілості та підрозділ."""
+    data = request.get_json(silent=True) or {}
+    user = current_user()
+    if "maturity_level_id" in data:
+        user.maturity_level_id = _resolve_term(
+            "maturity", data.get("maturity_level_id"), "рівень зрілості")
+    if "department" in data:
+        value = (data.get("department") or "").strip()
+        user.department = value[:200] or None
+    db.session.commit()
+    return jsonify({"maturity_level_id": user.maturity_level_id,
+                    "department": user.department})
+
+
+def _maturity_ladder():
+    """Рівні зрілості в порядку зростання."""
+    return (CatalogTerm.query.filter_by(kind="maturity", is_active=True)
+            .order_by(CatalogTerm.position, CatalogTerm.id).all())
+
+
+@bp.get("/maturity")
+@require_auth
+def maturity_overview():
+    """Рівень користувача, наступний рівень і матеріали під поточний рівень."""
+    user = current_user()
+    ladder = _maturity_ladder()
+    current = next((t for t in ladder if t.id == user.maturity_level_id), None)
+    nxt = None
+    if current is not None:
+        index = ladder.index(current)
+        nxt = ladder[index + 1] if index + 1 < len(ladder) else None
+
+    ratings = _rating_map("resource")
+    items = []
+    if current is not None:
+        rows = (CatalogResource.query
+                .filter(CatalogResource.status.in_(PUBLIC_STATUSES))
+                .filter(CatalogResource.id.in_(
+                    db.session.query(CatalogResourceMaturity.resource_id)
+                    .filter_by(term_id=current.id)))
+                .order_by(CatalogResource.is_featured.desc(),
+                          CatalogResource.opens_count.desc())
+                .limit(SHOWCASE_LIMIT).all())
+        items = [dict(r.to_dict(), **ratings.get(r.id, _EMPTY_RATING)) for r in rows]
+
+    return jsonify({
+        "levels": [t.to_dict() for t in ladder],
+        "current": current.to_dict() if current else None,
+        "next": nxt.to_dict() if nxt else None,
+        # Підказка «що дає наступний рівень» — з опису самого рівня, щоб текст
+        # редагувався в довіднику, а не жив у коді.
+        "next_hint": nxt.description if nxt else None,
+        "items": items,
+    })
+
+
+# ------------------ Персональні рекомендації (AKH-15) ------------------
+
+RECOMMEND_LIMIT = 6
+
+
+@bp.get("/recommendations")
+@require_auth
+def recommendations():
+    """Добірка «Рекомендовано вам» із поясненням кожної поради.
+
+    Кожна порада має причину, яку видно користувачу: інакше блок виглядає як
+    випадковий набір карток і йому не довіряють. Уже переглянуте й приховане
+    не повертається.
+    """
+    user = current_user()
+    seen = {row.target_id for row in
+            ResourceView.query.filter_by(user_id=user.id, target_type="resource")}
+    hidden = {row.item_id for row in
+              HiddenRecommendation.query.filter_by(user_id=user.id,
+                                                   item_type="resource")}
+    favorites = {row.item_id for row in
+                 CatalogFavorite.query.filter_by(user_id=user.id,
+                                                 item_type="resource")}
+
+    pool = (CatalogResource.query
+            .filter(CatalogResource.status.in_(PUBLIC_STATUSES)).all())
+    available = [r for r in pool if r.id not in seen and r.id not in hidden]
+
+    # Причини в порядку переконливості: рівень → колеги → інтерес → популярне.
+    reasons = {}
+
+    if user.maturity_level_id:
+        level_ids = {row.resource_id for row in CatalogResourceMaturity.query
+                     .filter_by(term_id=user.maturity_level_id)}
+        level = CatalogTerm.query.get(user.maturity_level_id)
+        for r in available:
+            if r.id in level_ids:
+                reasons.setdefault(r.id, f"Відповідає вашому рівню «{level.name}»")
+
+    if user.department:
+        peers = [u.id for u in User.query.filter_by(department=user.department)
+                 if u.id != user.id]
+        if peers:
+            popular_with_peers = dict(
+                db.session.query(ResourceView.target_id, func.count(ResourceView.id))
+                .filter(ResourceView.target_type == "resource",
+                        ResourceView.user_id.in_(peers))
+                .group_by(ResourceView.target_id).all())
+            for r in available:
+                if popular_with_peers.get(r.id):
+                    reasons.setdefault(r.id, f"Популярне у підрозділі "
+                                             f"«{user.department}»")
+
+    # Категорії та теги того, що користувач уже вподобав або дивився.
+    liked = [r for r in pool if r.id in favorites or r.id in seen]
+    liked_categories = {r.category for r in liked if r.category}
+    liked_tags = {t.id for r in liked for t in r.tag_terms}
+    for r in available:
+        if r.category and r.category in liked_categories:
+            reasons.setdefault(r.id, f"Схоже на те, що ви дивилися: "
+                                     f"«{r.category}»")
+        elif liked_tags and {t.id for t in r.tag_terms} & liked_tags:
+            reasons.setdefault(r.id, "Спільні теги з вашими матеріалами")
+
+    # Новому користувачу без історії блок теж має бути осмисленим.
+    for r in available:
+        if r.is_featured:
+            reasons.setdefault(r.id, "Відібрано командою хабу")
+        elif (r.opens_count or 0) > 0:
+            reasons.setdefault(r.id, "Часто відкривають колеги")
+        else:
+            reasons.setdefault(r.id, "Нове в базі знань")
+
+    ratings = _rating_map("resource")
+    ranked = sorted(available,
+                    key=lambda r: (not r.is_featured, -(r.opens_count or 0), -r.id))
+    items = [dict(r.to_dict(), **ratings.get(r.id, _EMPTY_RATING),
+                  recommend_reason=reasons[r.id])
+             for r in ranked[:RECOMMEND_LIMIT]]
+    return jsonify({"items": items})
+
+
+@bp.post("/recommendations/hide")
+@require_auth
+def hide_recommendation():
+    """«Більше не показувати» — назавжди, а не до наступного перерахунку."""
+    data = request.get_json(silent=True) or {}
+    item_id = data.get("item_id")
+    if not isinstance(item_id, int):
+        raise ApiError("Вкажіть item_id", 400, "validation_error")
+    if CatalogResource.query.get(item_id) is None:
+        raise ApiError("Матеріал не знайдено", 404, "not_found")
+    user = current_user()
+    exists = HiddenRecommendation.query.filter_by(
+        user_id=user.id, item_type="resource", item_id=item_id).first()
+    if exists is None:
+        db.session.add(HiddenRecommendation(user_id=user.id, item_type="resource",
+                                            item_id=item_id))
+        db.session.commit()
+    return jsonify({"hidden": True, "item_id": item_id})

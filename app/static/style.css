@@ -1572,3 +1572,77 @@ body.theme-dark .kpi-delta.up { color: #74d18f; }
   background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red);
   box-shadow: none;
 }
+
+/* ===== Рівні зрілості, маршрути, рекомендації (BR-9, AKH-15) ===== */
+.cat-personal { display: flex; flex-direction: column; gap: 26px; margin: 0 0 30px; }
+.lvl-next {
+  margin: 0; padding: 11px 14px; border-radius: 12px; font-size: 13.5px; line-height: 1.5;
+  background: var(--md-red-soft); border: 1px solid rgba(227, 6, 19, 0.2);
+}
+.lvl-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.lvl-opt {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left;
+  padding: 12px 14px; border-radius: 12px; font: inherit; box-shadow: none;
+  background: var(--soft); border: 1px solid var(--md-line); color: var(--text);
+}
+.lvl-opt:hover { border-color: var(--md-red); background: var(--md-red-soft); box-shadow: none; }
+.lvl-opt.active { border-color: var(--md-red); background: var(--md-red-soft); }
+.lvl-opt b { font-size: 14px; }
+.lvl-opt span { font-size: 12.5px; color: var(--muted); }
+.lvl-checks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.lvl-check { display: inline-flex; align-items: center; gap: 6px; width: auto; font-size: 13px; }
+.lvl-check input { width: auto; margin: 0; }
+
+.path-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.path-list { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.path-tile, .path-row-item {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 13px 15px; border-radius: 14px; font: inherit; color: var(--text);
+  background: var(--panel); border: 1px solid var(--md-line); box-shadow: var(--shadow);
+  transition: transform .14s ease, border-color .14s ease;
+}
+.path-tile:hover, .path-row-item:hover { transform: translateY(-2px); border-color: var(--md-red); box-shadow: var(--shadow-lg); }
+.path-ic { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+.path-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.path-body b { font-size: 13.8px; }
+.path-body i { font-size: 11.8px; font-style: normal; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.path-tag { font-size: 10.5px; font-weight: 700; color: var(--md-red); text-transform: uppercase; font-style: normal; }
+.path-bar { display: block; height: 5px; border-radius: 999px; background: var(--soft); overflow: hidden; }
+.path-bar > span { display: block; height: 100%; background: var(--md-red); border-radius: 999px; }
+.path-bar.lg { height: 8px; flex: 1; }
+.path-pct { font-size: 12.5px; font-weight: 700; color: var(--muted); flex: 0 0 auto; }
+.path-progress { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 14px; font-size: 13px; }
+
+.step-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.step-row {
+  display: flex; align-items: flex-start; gap: 12px; padding: 11px 13px;
+  border-radius: 12px; background: var(--soft); border: 1px solid var(--md-line);
+}
+.step-row.done { background: #e7f6ec; border-color: #b9e3c6; }
+body.theme-dark .step-row.done { background: rgba(60, 180, 100, 0.12); border-color: rgba(60, 180, 100, 0.28); }
+.step-row.gone { opacity: .72; }
+.step-check {
+  flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 700; box-shadow: none;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--md-line);
+}
+.step-row.done .step-check { background: #2f9e4f; color: #fff; border-color: #2f9e4f; }
+.step-body { flex: 1; min-width: 0; }
+.step-title { font-size: 13.8px; font-weight: 600; }
+.step-note { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+.step-gone { color: var(--md-red); }
+
+/* Пояснення, чому матеріал порадили + кнопка «більше не показувати». */
+.rec-why {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+  padding-top: 10px; border-top: 1px solid var(--md-line);
+  font-size: 11.8px; color: var(--muted);
+}
+.rec-why span { flex: 1; min-width: 0; }
+.rec-hide {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  background: none; border: none; color: var(--muted); font-size: 15px;
+  line-height: 1; box-shadow: none;
+}
+.rec-hide:hover { background: var(--md-red-soft); color: var(--md-red); box-shadow: none; }

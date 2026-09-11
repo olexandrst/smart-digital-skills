@@ -183,6 +183,10 @@ erDiagram
 | `survey_responses` | Відповіді NPS / CSAT / CES |
 | `survey_prompts` | Коли користувача востаннє питали — щоб не питати надто часто |
 | `search_synonyms` | Словник формулювань задач: «як питають» → «за чим шукати» |
+| `catalog_resource_maturity` | Зв'язок «картка ↔ рівень AI-зрілості» |
+| `learning_paths` / `learning_path_steps` | Навчальні маршрути та їхні кроки |
+| `learning_progress` | Пройдені кроки маршруту за користувачем |
+| `hidden_recommendations` | Рекомендації, які користувач приховав назавжди |
 | `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
 | `search_query_logs` | Пошукові запити користувачів для аналітики хабу |
 | `group_skills` | Призначення скілів групам (груповий доступ) |
@@ -366,6 +370,42 @@ CREATE TABLE ideas (
     status_note        TEXT,                       -- рішення, яке бачить автор
     created_at         TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Навчальний маршрут: упорядкована послідовність матеріалів (BR-9).
+CREATE TABLE learning_paths (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    name              TEXT NOT NULL UNIQUE,
+    description       TEXT,
+    icon_emoji        TEXT,
+    maturity_level_id INTEGER REFERENCES catalog_terms(id),
+    audience_role     TEXT,
+    is_starter        INTEGER NOT NULL DEFAULT 0,   -- пропонувати новачкам
+    position          INTEGER NOT NULL DEFAULT 0,
+    is_active         INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Крок маршруту. resource_id БЕЗ каскаду: якщо картку вилучили з каталогу,
+-- крок лишається й позначається недоступним — інакше маршрут мовчки коротшав
+-- би, а прогрес користувачів «зсувався».
+CREATE TABLE learning_path_steps (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    path_id      INTEGER NOT NULL REFERENCES learning_paths(id) ON DELETE CASCADE,
+    position     INTEGER NOT NULL DEFAULT 0,
+    title        TEXT,
+    note         TEXT,
+    resource_id  INTEGER REFERENCES catalog_resources(id),
+    external_url TEXT
+);
+
+CREATE TABLE learning_progress (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    path_id      INTEGER NOT NULL REFERENCES learning_paths(id) ON DELETE CASCADE,
+    step_id      INTEGER NOT NULL REFERENCES learning_path_steps(id) ON DELETE CASCADE,
+    completed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (user_id, step_id)
 );
 
 -- Словник формулювань задач (BR-07). Користувач шукає свою задачу

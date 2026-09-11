@@ -48,6 +48,9 @@ class User(db.Model):
     is_system_admin = db.Column(db.Boolean, nullable=False, default=False)
     # GUID-назва підкаталогу для файлів користувача (instance/user_files/<uid>).
     storage_uid = db.Column(db.String, unique=True, default=_uid)
+    # Рівень AI-зрілості з довідника (BR-9): користувач вказує його сам.
+    maturity_level_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
+    department = db.Column(db.String)     # підрозділ — розріз для рекомендацій
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
@@ -79,6 +82,8 @@ class User(db.Model):
             "is_active": self.is_active,
             "is_system_admin": self.is_system_admin,
             "roles": self.role_codes,
+            "maturity_level_id": self.maturity_level_id,
+            "department": self.department,
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

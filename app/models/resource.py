@@ -53,10 +53,13 @@ ACCENTS = ("red", "ink", "steel", "amber", "green")
 # business_value — бізнес-цінність (один на картку);
 # material_type  — вид матеріалу; значення прив'язані до RESOURCE_TYPES кодом,
 #                  через довідник керуються лише назва, порядок і видимість.
-TERM_KINDS = ("tag", "complexity", "business_value", "material_type")
+TERM_KINDS = ("tag", "complexity", "business_value", "material_type", "maturity")
 
 # Довідники, значення яких вибираються по одному на картку.
 SINGLE_VALUE_TERM_KINDS = ("complexity", "business_value")
+
+# Довідники, у яких на картку можна обрати кілька значень.
+MULTI_VALUE_TERM_KINDS = ("tag", "maturity")
 
 # Початкове наповнення довідників: (назва, опис). Порядок = порядок у списках.
 DEFAULT_TERMS = {
@@ -70,6 +73,15 @@ DEFAULT_TERMS = {
         ("Якість рішень", "Зменшує кількість помилок або підвищує точність"),
         ("Масштабування досвіду", "Дає змогу повторити рішення в інших підрозділах"),
         ("Нова можливість", "Робить здійсненним те, чого раніше не робили"),
+    ],
+    # Рівні AI-зрілості (BR-9). Порядок = шлях зростання, тому позиція тут
+    # має сенс: вона визначає, який рівень вважається наступним.
+    "maturity": [
+        ("Aware", "Знає, що таке AI, і бачить приклади застосування"),
+        ("User", "Користується готовими рішеннями у своїй роботі"),
+        ("Integrator", "Вбудовує AI у власні процеси й адаптує чужі рішення"),
+        ("Innovator", "Створює нові рішення та агентів під свої задачі"),
+        ("Transformer", "Перебудовує процеси підрозділу навколо AI"),
     ],
 }
 
@@ -250,6 +262,25 @@ DEFAULT_SYNONYMS = (
 )
 
 
+class CatalogResourceMaturity(db.Model):
+    """Зв'язок «картка ↔ рівень зрілості» (BR-9).
+
+    Рівнів може бути кілька: та сама інструкція буває корисною і для Aware,
+    і для User. Матеріал без жодного рівня лишається видимим усім — рівень
+    звужує добірку, а не обмежує доступ.
+    """
+    __tablename__ = "catalog_resource_maturity"
+    __table_args__ = (db.UniqueConstraint("resource_id", "term_id"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    resource_id = db.Column(db.Integer,
+                            db.ForeignKey("catalog_resources.id", ondelete="CASCADE"),
+                            nullable=False)
+    term_id = db.Column(db.Integer,
+                        db.ForeignKey("catalog_terms.id", ondelete="CASCADE"),
+                        nullable=False)
+
+
 class CatalogResourceTag(db.Model):
     """Зв'язок «картка ↔ тег» (FR-02): теги керовані, а не рядок через кому."""
     __tablename__ = "catalog_resource_tags"
@@ -312,6 +343,9 @@ class CatalogResource(db.Model):
     tag_terms = db.relationship(
         "CatalogTerm", lazy="selectin", order_by="CatalogTerm.name",
         secondary="catalog_resource_tags", viewonly=True)
+    maturity_terms = db.relationship(
+        "CatalogTerm", lazy="selectin", order_by="CatalogTerm.position",
+        secondary="catalog_resource_maturity", viewonly=True)
 
     def tag_list(self):
         """Назви тегів матеріалу — з довідника, у стабільному порядку."""
@@ -348,6 +382,8 @@ class CatalogResource(db.Model):
             "next_review_at": _iso(self.next_review_at),
             "review_overdue": self.is_review_overdue(),
             "tags": self.tag_list(),
+            "maturity_ids": [t.id for t in self.maturity_terms],
+            "maturity_names": [t.name for t in self.maturity_terms],
             "body": self.body,
             "url": self.url,
             "link_scope": self.link_scope,

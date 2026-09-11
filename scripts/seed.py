@@ -149,6 +149,9 @@ def seed():
         # 12. Наповнення каталогу: промпти, інструкції, кейси, агенти, посилання
         _seed_catalog_resources(admin, sections, folders)
 
+        # 13. Навчальні маршрути поверх наявних карток
+        _seed_learning_paths()
+
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
         print("  Skill-менеджер: skillmanager / Skill123!")
@@ -299,6 +302,42 @@ DEMO_FOLDER_BY_TYPE = {
     ("Toolbox", "agent"): "Created Agents",
     ("Toolbox", "mcp"): "AI Solutions",
 }
+
+# Рівні AI-зрілості, для яких призначено матеріал (за видом).
+DEMO_MATURITY_BY_TYPE = {
+    "prompt": ["User"],
+    "instruction": ["Aware", "User"],
+    "case": ["Integrator", "Innovator"],
+    "agent": ["User", "Integrator"],
+    "mcp": ["Innovator", "Transformer"],
+    "link": ["Aware"],
+}
+
+# Демо-маршрути: назва, опис, емодзі, рівень, стартовий, кроки за назвами карток.
+LEARNING_PATHS = [
+    {
+        "name": "Старт з AI за тиждень", "icon_emoji": "🚀", "is_starter": True,
+        "maturity": "Aware",
+        "description": "Мінімум, щоб почати користуватися AI у щоденній роботі.",
+        "steps": [
+            ("Як писати ефективні промпти", "Прочитайте і спробуйте на власному завданні."),
+            ("Робота з конфіденційними даними в ШІ", "Звірте свої дані з правилами."),
+            ("Протокол наради за стенограмою", "Застосуйте до найближчої наради."),
+            ("AI Coffee: як приєднатися та що це дає", "Додайте зустріч у календар."),
+        ],
+    },
+    {
+        "name": "Від користувача до інтегратора", "icon_emoji": "⚙️",
+        "maturity": "Integrator",
+        "description": "Як перейти від готових рішень до вбудовування AI у свої процеси.",
+        "steps": [
+            ("Кейс: автоматизація обробки заявок у HR", "Розберіть, як влаштовано рішення."),
+            ("Асистент технічної підтримки", "Подивіться готового агента в дії."),
+            ("MCP: Корпоративна база знань", "Підключіть сервер до свого клієнта."),
+            ("Заявка на доступ до моделі", "Оформіть доступ під власний пілот."),
+        ],
+    },
+]
 
 # Демо-значення керованих довідників за видом матеріалу.
 DEMO_TERMS_BY_TYPE = {
@@ -501,7 +540,7 @@ CATALOG_DEMO = [
 def _seed_catalog_resources(admin, sections, folders):
     """Демо-наповнення каталогу: промпти, інструкції, кейси, агенти, посилання."""
     from datetime import datetime, timedelta
-    from app.models import CatalogResource, CatalogTerm
+    from app.models import CatalogResource, CatalogTerm, CatalogResourceMaturity
     from app.core.schema import migrate_legacy_tags
 
     term_ids = {(t.kind, t.name): t.id for t in CatalogTerm.query.all()}
@@ -514,14 +553,22 @@ def _seed_catalog_resources(admin, sections, folders):
         section_name = fields.pop("section", None)
         rtype = fields["resource_type"]
         complexity, value = DEMO_TERMS_BY_TYPE.get(rtype, (None, None))
-        db.session.add(CatalogResource(
+        maturity = DEMO_MATURITY_BY_TYPE.get(rtype, [])
+        resource = CatalogResource(
             **fields, section_id=sections.get(section_name),
             folder_id=folders.get(DEMO_FOLDER_BY_TYPE.get((section_name, rtype))),
             complexity_id=term_ids.get(("complexity", complexity)),
             business_value_id=term_ids.get(("business_value", value)),
             status="published", published_at=now,
             reviewed_at=now, next_review_at=now + timedelta(days=180),
-            author="Metinvest Digital", created_by=admin.id))
+            author="Metinvest Digital", created_by=admin.id)
+        db.session.add(resource)
+        db.session.flush()
+        for level in maturity:
+            term_id = term_ids.get(("maturity", level))
+            if term_id:
+                db.session.add(CatalogResourceMaturity(resource_id=resource.id,
+                                                       term_id=term_id))
         created += 1
     if created:
         db.session.commit()
@@ -548,6 +595,39 @@ def _seed_catalog_resources(admin, sections, folders):
             skill.folder_id = skills_folder
         if homeless:
             db.session.commit()
+
+def _seed_learning_paths():
+    """Демо-маршрути з кроків, що посилаються на вже створені картки."""
+    from app.models import (
+        LearningPath, LearningPathStep, CatalogResource, CatalogTerm,
+    )
+
+    levels = {t.name: t.id for t in CatalogTerm.query.filter_by(kind="maturity")}
+    created = 0
+    for position, spec in enumerate(LEARNING_PATHS):
+        if LearningPath.query.filter_by(name=spec["name"]).first():
+            continue
+        path = LearningPath(
+            name=spec["name"], description=spec["description"],
+            icon_emoji=spec["icon_emoji"], position=position,
+            is_starter=spec.get("is_starter", False),
+            maturity_level_id=levels.get(spec.get("maturity")),
+        )
+        db.session.add(path)
+        db.session.flush()
+        step_index = 0
+        for resource_name, note in spec["steps"]:
+            resource = CatalogResource.query.filter_by(name=resource_name).first()
+            if resource is None:
+                continue      # картки немає — крок просто не створюємо
+            db.session.add(LearningPathStep(
+                path_id=path.id, position=step_index,
+                resource_id=resource.id, note=note))
+            step_index += 1
+        created += 1
+    if created:
+        db.session.commit()
+        print(f"  Каталог: додано навчальних маршрутів — {created}")
 
 
 if __name__ == "__main__":

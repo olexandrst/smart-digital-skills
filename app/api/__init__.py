@@ -10,6 +10,7 @@ from app.api.chat import bp as chat_bp
 from app.api.usage import bp as usage_bp
 from app.api.files import bp as files_bp
 from app.api.ideas import bp as ideas_bp
+from app.api.paths import bp as paths_bp
 
 
 def register_blueprints(app):
@@ -24,3 +25,4 @@ def register_blueprints(app):
     app.register_blueprint(usage_bp, url_prefix="/api/usage")
     app.register_blueprint(files_bp, url_prefix="/api/files")
     app.register_blueprint(ideas_bp, url_prefix="/api/ideas")
+    app.register_blueprint(paths_bp, url_prefix="/api/paths")

@@ -15,13 +15,18 @@ from app.models.chat import (
 )
 from app.models.resource import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
+    CatalogResourceMaturity,
     CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, SearchSynonym,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
-    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, DEFAULT_TERMS, DEFAULT_FOLDERS,
+    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, MULTI_VALUE_TERM_KINDS,
+    DEFAULT_TERMS, DEFAULT_FOLDERS,
     DEFAULT_SYNONYMS,
 )
 from app.models.idea import Idea, IDEA_STATUSES, IDEA_CLOSED_STATUSES
+from app.models.learning import (
+    LearningPath, LearningPathStep, LearningProgress, HiddenRecommendation,
+)
 from app.models.usage import (
     UserSession, ResourceView, SESSION_IDLE_MINUTES, VIEW_TARGETS,
 )
@@ -57,6 +62,7 @@ __all__ = [
     "CatalogFolder",
     "CatalogTerm",
     "CatalogResourceTag",
+    "CatalogResourceMaturity",
     "CatalogResource",
     "CatalogFavorite",
     "ReviewLog",
@@ -65,6 +71,7 @@ __all__ = [
     "DEFAULT_SYNONYMS",
     "TERM_KINDS",
     "SINGLE_VALUE_TERM_KINDS",
+    "MULTI_VALUE_TERM_KINDS",
     "DEFAULT_TERMS",
     "DEFAULT_FOLDERS",
     "RESOURCE_STATUSES",
@@ -76,6 +83,10 @@ __all__ = [
     "LINK_SCOPES",
     "ACCENTS",
     "Idea",
+    "LearningPath",
+    "LearningPathStep",
+    "LearningProgress",
+    "HiddenRecommendation",
     "IDEA_STATUSES",
     "IDEA_CLOSED_STATUSES",
     "UserSession",

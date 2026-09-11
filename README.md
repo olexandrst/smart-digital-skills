@@ -491,6 +491,16 @@ smart-digital-skills/
 | POST | `/catalog/assistant` | Відповідь помічника: добірка карток із бази + пояснення | авторизовані |
 | POST | `/catalog/assistant/feedback` | Оцінка відповіді помічника | авторизовані |
 | GET | `/catalog/search-analytics` | Теми запитів, глухі кути, користь помічника | Admin/Skill Manager |
+| PATCH | `/catalog/profile` | Власний рівень AI-зрілості та підрозділ | авторизовані |
+| GET | `/catalog/maturity` | Рівень користувача, наступний крок і матеріали під рівень | авторизовані |
+| GET | `/catalog/recommendations` | «Рекомендовано вам» із поясненням кожної поради | авторизовані |
+| POST | `/catalog/recommendations/hide` | Приховати рекомендацію назавжди | авторизовані |
+| GET/POST | `/paths` | Навчальні маршрути з прогресом (`?mine=1`, `?starter=1`) | читання: усі, зміна: Admin/Skill Manager |
+| GET/PATCH/DELETE | `/paths/{id}` | Маршрут: перегляд, редагування, видалення | читання: усі, зміна: Admin/Skill Manager |
+| POST | `/paths/{id}/steps` | Додати крок (матеріал каталогу або посилання) | Admin/Skill Manager |
+| PATCH/DELETE | `/paths/{id}/steps/{sid}` | Редагувати / видалити крок | Admin/Skill Manager |
+| POST | `/paths/{id}/steps/reorder` | Новий порядок кроків | Admin/Skill Manager |
+| POST | `/paths/{id}/steps/{sid}/complete` | Позначити крок пройденим (`done`) | авторизовані |
 | POST | `/catalog/survey` | Відповідь на NPS/CSAT/CES або закриття без відповіді | авторизовані |
 | GET | `/ideas` | Ідеї (`?status=`, `?mine=1`); свої — всім, усі — менеджеру | авторизовані |
 | POST | `/ideas` | Подати ідею | авторизовані |
