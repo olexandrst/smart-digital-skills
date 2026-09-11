@@ -20,6 +20,7 @@ from app.models.resource import (
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
     TERM_KINDS, SINGLE_VALUE_TERM_KINDS, DEFAULT_TERMS, DEFAULT_FOLDERS,
 )
+from app.models.idea import Idea, IDEA_STATUSES, IDEA_CLOSED_STATUSES
 from app.models.file import UserFile
 from app.models.setting import AppSetting
 
@@ -65,6 +66,9 @@ __all__ = [
     "BODY_TYPES",
     "LINK_SCOPES",
     "ACCENTS",
+    "Idea",
+    "IDEA_STATUSES",
+    "IDEA_CLOSED_STATUSES",
     "UserFile",
     "AppSetting",
 ]

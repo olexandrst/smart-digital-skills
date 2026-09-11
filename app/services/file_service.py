@@ -52,7 +52,8 @@ def user_dir(user):
     return path
 
 
-def save_bytes(user, filename, data, source="upload", skill_id=None):
+def save_bytes(user, filename, data, source="upload", skill_id=None,
+               resource_id=None):
     """Зберігає байти як файл користувача; повертає UserFile."""
     max_bytes = current_app.config.get("USER_FILE_MAX_BYTES", 25 * 1024 * 1024)
     if len(data) > max_bytes:
@@ -74,6 +75,7 @@ def save_bytes(user, filename, data, source="upload", skill_id=None):
         size=len(data),
         source=source,
         skill_id=skill_id,
+        resource_id=resource_id,
     )
     db.session.add(uf)
     db.session.commit()
@@ -88,8 +90,30 @@ def save_path(user, src_path, display_name=None, source="skill_run", skill_id=No
 
 
 def list_files(user):
-    return (UserFile.query.filter_by(user_id=user.id)
+    """Особисті файли користувача.
+
+    Вкладення до карток каталогу сюди не потрапляють: вони є вмістом картки й
+    керуються з неї, хоч і лежать у сховищі того, хто їх завантажив.
+    """
+    return (UserFile.query.filter_by(user_id=user.id, resource_id=None)
             .order_by(UserFile.created_at.desc()).all())
+
+
+def remove_stored_file(uf):
+    """Прибирає фізичний файл будь-якого власника (для вкладень і каскадів).
+
+    На відміну від delete_file, не перевіряє, чий це файл — виклик має сам
+    вирішити питання прав.
+    """
+    owner = uf.user
+    if owner is None:
+        return
+    path = os.path.join(user_dir(owner), uf.stored_name)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def get_owned_file(user, file_id):

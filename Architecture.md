@@ -177,6 +177,7 @@ erDiagram
 | `catalog_resource_tags` | Зв'язок «картка ↔ тег» |
 | `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання |
 | `catalog_favorites` | «Обране» користувача (спільне для скілів і ресурсів каталогу) |
+| `ideas` | Воронка ідей: подання, життєвий цикл, маршрутизація до процесу оцінки |
 | `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
 | `search_query_logs` | Пошукові запити користувачів для аналітики хабу |
 | `group_skills` | Призначення скілів групам (груповий доступ) |
@@ -228,9 +229,12 @@ CREATE TABLE user_files (
     stored_name  TEXT NOT NULL,                  -- фізична назва у теці користувача
     content_type TEXT,
     size         INTEGER NOT NULL DEFAULT 0,
-    source       TEXT NOT NULL DEFAULT 'upload'  -- 'upload' | 'skill_run'
-                 CHECK (source IN ('upload','skill_run')),
+    source       TEXT NOT NULL DEFAULT 'upload'
+                 CHECK (source IN ('upload','skill_run','attachment')),
     skill_id     INTEGER REFERENCES skills(id),  -- якщо створено скілом
+    -- Вкладення до картки каталогу: файл лежить у сховищі того, хто його
+    -- завантажив, але належить картці й зникає разом із нею.
+    resource_id  INTEGER REFERENCES catalog_resources(id),
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -336,6 +340,29 @@ CREATE TABLE catalog_sections (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Воронка ідей: вхідна точка процесу збору ідей (BR-15, FR-10).
+-- Hub збирає й маршрутизує ідеї; опрацювання ведеться у зовнішньому процесі,
+-- посилання на який зберігається в external_url.
+CREATE TABLE ideas (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    title              TEXT NOT NULL,
+    body               TEXT NOT NULL,              -- суть ідеї
+    problem            TEXT,                       -- бізнес-задача
+    expected_effect    TEXT,                       -- очікуваний ефект
+    contact            TEXT,                       -- як зв'язатися з автором
+    author_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    author_name        TEXT,                       -- знімок імені на момент подання
+    source_resource_id INTEGER REFERENCES catalog_resources(id),  -- звідки виникла
+    resource_id        INTEGER REFERENCES catalog_resources(id),  -- що з неї вийшло
+    external_url       TEXT,                       -- картка у процесі оцінки
+    status             TEXT NOT NULL DEFAULT 'submitted'
+                       CHECK (status IN ('submitted','in_review','accepted',
+                                         'rejected','implemented')),
+    status_note        TEXT,                       -- рішення, яке бачить автор
+    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Колекції всередині розділу — третій рівень моделі Warehouse → Boxes → Folders → Files.
 CREATE TABLE catalog_folders (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -388,6 +415,8 @@ CREATE TABLE catalog_resources (
     business_value_id  INTEGER REFERENCES catalog_terms(id),
     author         TEXT,
     owner          TEXT,                         -- відповідальний за матеріал
+    owner_contact  TEXT,                         -- email або посилання для зв'язку
+    reuse_guidance TEXT,                         -- покроково «як повторити рішення»
     tags           TEXT,                         -- спадщина: до переходу на catalog_resource_tags
     body           TEXT,                         -- текст промпту / інструкції (Markdown)
     url            TEXT,                         -- посилання (agent | link)

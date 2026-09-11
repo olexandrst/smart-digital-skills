@@ -827,3 +827,79 @@ def test_filters_combine(client):
 def test_filter_by_unknown_folder_is_not_found(client):
     assert client.get("/api/catalog/resources?folder_id=9999",
                       headers=_admin(client)).status_code == 404
+
+
+# ------------ Повторне використання та вітрина (AKH-04, AKH-05) ------------
+
+def test_reuse_guidance_saved_and_returned(client):
+    h = _admin(client)
+    rid = _resource(client, h, reuse_level="adaptable",
+                    owner="Марина Кондратенко",
+                    owner_contact="hr@example.com",
+                    reuse_guidance="### Кроки\n\n1. Зберіть звернення.").get_json()["id"]
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert item["reuse_guidance"].startswith("### Кроки")
+    assert item["owner_contact"] == "hr@example.com"
+    assert item["reuse_level"] == "adaptable"
+
+
+def test_reuse_guidance_cleared_by_empty_value(client):
+    h = _admin(client)
+    rid = _resource(client, h, reuse_guidance="Текст").get_json()["id"]
+    updated = client.patch(f"/api/catalog/resources/{rid}",
+                           json={"reuse_guidance": "   "}, headers=h)
+    assert updated.get_json()["reuse_guidance"] is None
+
+
+def test_showcase_blocks_for_plain_user(client):
+    h = _admin(client)
+    _resource(client, h, name="Рекомендований", is_featured=True)
+    _resource(client, h, name="Звичайний")
+    blocks = client.get("/api/catalog/showcase", headers=_login(client, "u1")).get_json()
+
+    keys = [b["key"] for b in blocks]
+    assert "featured" in keys and "recent" in keys
+    assert "needs_update" not in keys          # блок стану контенту — не для всіх
+    featured = next(b for b in blocks if b["key"] == "featured")
+    assert [i["name"] for i in featured["items"]] == ["Рекомендований"]
+
+
+def test_showcase_hides_empty_blocks(client):
+    """Порожній блок не повертається — фронт не малює рамку без вмісту."""
+    h = _admin(client)
+    _resource(client, h)
+    keys = [b["key"] for b in client.get("/api/catalog/showcase", headers=h).get_json()]
+    assert "featured" not in keys              # рекомендованих немає
+    assert "popular" not in keys               # відкриттів ще не було
+    assert "recent" in keys
+
+
+def test_showcase_popular_counts_opens(client):
+    h = _admin(client)
+    rid = _resource(client, h, name="Популярний").get_json()["id"]
+    _resource(client, h, name="Непопулярний")
+    client.post(f"/api/catalog/resources/{rid}/open", headers=h)
+
+    blocks = client.get("/api/catalog/showcase", headers=h).get_json()
+    popular = next(b for b in blocks if b["key"] == "popular")
+    assert [i["name"] for i in popular["items"]] == ["Популярний"]
+
+
+def test_showcase_needs_update_visible_to_manager(client):
+    h = _admin(client)
+    rid = _resource(client, h, name="Застарілий").get_json()["id"]
+    client.post(f"/api/catalog/resources/{rid}/status",
+                json={"status": "needs_update"}, headers=h)
+
+    blocks = client.get("/api/catalog/showcase", headers=h).get_json()
+    stale = next(b for b in blocks if b["key"] == "needs_update")
+    assert [i["name"] for i in stale["items"]] == ["Застарілий"]
+    assert stale["manager_only"] is True
+
+
+def test_showcase_skips_drafts(client):
+    h = _admin(client)
+    _resource(client, h, name="Чернетка", status="draft")
+    blocks = client.get("/api/catalog/showcase", headers=h).get_json()
+    names = [i["name"] for b in blocks for i in b["items"]]
+    assert "Чернетка" not in names

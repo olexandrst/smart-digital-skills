@@ -461,7 +461,12 @@ smart-digital-skills/
 | POST | `/catalog/terms/{id}/merge` | Злиття значення в інше (`{"into": id}`) | Admin/Skill Manager |
 | DELETE | `/catalog/terms/{id}` | Видалення значення (посилання в картках знімаються) | Admin/Skill Manager |
 | GET | `/catalog/resources` | Матеріали з фільтрами: `type`, `section_id`, `folder_id`, `status`, `complexity_id`, `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q` | авторизовані |
+| GET | `/catalog/showcase` | Блоки головної: рекомендовані, нові, популярні, потребують оновлення | авторизовані |
 | GET | `/catalog/resources/{id}` | Детальна картка ресурсу | авторизовані |
+| GET | `/catalog/resources/{id}/files` | Вкладення картки | усі, хто бачить картку |
+| POST | `/catalog/resources/{id}/files` | Додати вкладення (multipart `file`) | автор картки / менеджер |
+| GET | `/catalog/resources/{id}/files/{fid}/download` | Звантажити вкладення | усі, хто бачить картку |
+| DELETE | `/catalog/resources/{id}/files/{fid}` | Видалити вкладення | той, хто додав / автор / менеджер |
 | POST | `/catalog/resources` | Створення ресурсу | Admin/Skill Manager |
 | PATCH | `/catalog/resources/{id}` | Редагування ресурсу | Admin/Skill Manager |
 | POST | `/catalog/resources/{id}/status` | Життєвий цикл: `draft\|published\|needs_update\|archived` | Admin/Skill Manager |
@@ -476,6 +481,13 @@ smart-digital-skills/
 | GET | `/catalog/settings` | Налаштування каталогу (сувора публікація) | авторизовані |
 | POST | `/catalog/settings` | Зміна налаштувань каталогу | Admin/Skill Manager |
 | GET | `/catalog/analytics` | Аналітика хабу: наповнення, актуальність, пошук | Admin/Skill Manager |
+| GET | `/ideas` | Ідеї (`?status=`, `?mine=1`); свої — всім, усі — менеджеру | авторизовані |
+| POST | `/ideas` | Подати ідею | авторизовані |
+| GET | `/ideas/{id}` | Картка ідеї | автор або менеджер |
+| PATCH | `/ideas/{id}` | Маршрутизація: `external_url`, `resource_id` | Admin/Skill Manager |
+| POST | `/ideas/{id}/status` | Життєвий цикл: `submitted\|in_review\|accepted\|rejected\|implemented` (закриття потребує `note`) | Admin/Skill Manager |
+| GET | `/ideas/{id}/log` | Історія рішень за ідеєю | автор або менеджер |
+| GET | `/ideas/stats` | Кількість ідей за статусами | Admin/Skill Manager |
 | GET/POST | `/chat/sessions` | Список / створення сесій чату (з `model_id`) | авторизовані |
 | GET/DELETE | `/chat/sessions/{id}` | Перегляд / видалення сесії | власник |
 | POST | `/chat/sessions/{id}/messages` | Надіслати повідомлення (опц. `skill_id`) | власник |

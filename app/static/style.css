@@ -339,8 +339,14 @@ button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
 .btn-newchat:hover { background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red); box-shadow: none; }
 .btn-newchat svg { width: 16px; height: 16px; }
 
-.top-right { display: flex; align-items: center; gap: 12px; }
-.top-right .user-card { display: flex; align-items: center; gap: 10px; }
+/* min-width:0 — щоб довга назва сторінки чи ім'я стискалися з трикрапкою,
+   а не розпирали шапку за межі екрана. */
+.top-left { min-width: 0; }
+.page-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-newchat { flex: 0 0 auto; }
+.top-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.top-right .user-card { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.top-right .logout { flex: 0 0 auto; }
 .top-right .logout {
   padding: 7px 16px; background: transparent; color: var(--appbar-text);
   border: 1px solid var(--appbar-btn-line); box-shadow: none;
@@ -371,6 +377,19 @@ button:disabled { opacity: .6; cursor: not-allowed; box-shadow: none; }
   .sidebar { width: 100%; flex: none; height: auto; position: static; }
   .side-nav { flex-direction: row; flex-wrap: wrap; }
   .nav-item { width: auto; }
+
+  .topbar { padding: 0 14px; gap: 10px; }
+  .top-left { gap: 12px; }
+  .page-title { font-size: 17px; }
+}
+
+/* На телефоні в шапці лишаються дії, а не підписи: ім'я та роль читаються
+   з аватара й бічного меню, тож вони поступаються місцем кнопкам. */
+@media (max-width: 560px) {
+  .user-meta { display: none; }
+  .btn-newchat { padding: 8px 12px; gap: 6px; }
+  .top-right .logout { padding: 7px 12px; }
+  .view { padding: 18px 14px; }
 }
 
 .card {
@@ -548,6 +567,70 @@ body.theme-dark .cat-hero {
 }
 .cat-reset:hover { background: var(--panel); border-color: var(--md-line); color: var(--text); box-shadow: none; }
 
+/* ===== Вітрина головної сторінки (BR-01) ===== */
+.cat-hero-acts { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+.cat-hero-acts .mdc-act, .cat-hero-acts .ghost-act { width: auto; }
+.cat-hero-acts .ghost-act {
+  padding: 10px 20px; border-radius: 999px; font-weight: 600;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--md-line);
+  box-shadow: none;
+}
+.cat-hero-acts .ghost-act:hover {
+  background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red);
+  box-shadow: none;
+}
+
+/* Швидкі входи до ключових розділів — усе важливе за один клік. */
+.cat-quick {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px; margin: 0 0 22px;
+}
+.quick-tile {
+  display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  padding: 12px 14px; border-radius: 14px; box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--md-line); color: var(--text);
+  font: inherit; transition: transform .14s ease, border-color .14s ease, box-shadow .14s ease;
+}
+.quick-tile:hover { transform: translateY(-2px); border-color: rgba(227, 6, 19, 0.38); box-shadow: var(--shadow-lg); }
+.quick-ic { font-size: 21px; line-height: 1; flex: 0 0 auto; }
+.quick-body { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.quick-body b { font-size: 13.5px; font-weight: 700; }
+.quick-body i { font-size: 11.5px; font-style: normal; color: var(--muted); }
+
+.cat-showcase { display: flex; flex-direction: column; gap: 26px; margin: 0 0 30px; }
+.show-block { display: flex; flex-direction: column; gap: 12px; }
+.show-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.show-head h2 { margin: 0; font-size: 18px; color: var(--md-ink); }
+.show-head p { margin: 2px 0 0; font-size: 12.5px; }
+.show-head .ghost-act { width: auto; padding: 7px 15px; border-radius: 999px; font-size: 13px; }
+.show-only {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); background: var(--soft); border: 1px solid var(--md-line);
+  border-radius: 999px; padding: 2px 8px; vertical-align: middle;
+}
+.show-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+
+/* ===== Воронка ідей (BR-15, FR-10) ===== */
+.idea-list { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.idea-row {
+  padding: 14px 16px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--md-line);
+}
+.idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.idea-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.idea-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.idea-body { margin: 10px 0 0; font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; }
+.idea-note {
+  margin: 10px 0 0; padding: 9px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5;
+  background: var(--soft); border: 1px solid var(--md-line);
+}
+.idea-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.idea-acts .idea-status { width: auto; min-width: 150px; }
+.idea-source {
+  margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; font-size: 13px;
+  background: var(--md-red-soft); border: 1px solid rgba(227, 6, 19, 0.22); color: var(--text);
+}
+
 /* ----- Колекції всередині розділу (третій рівень навігації) ----- */
 .cat-folders { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: -6px 0 18px; }
 .cat-crumb { font-size: 12.5px; font-weight: 700; color: var(--muted); }
@@ -685,8 +768,47 @@ body.theme-dark .cat-hero {
 .sm-attr-k { font-weight: 600; font-size: 13.5px; color: var(--muted); }
 .sm-attr-v { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
 @media (max-width: 560px) { .sm-attr { grid-template-columns: 1fr; gap: 3px; } }
-.sm-actions { margin: 10px 0 2px; }
-.sm-actions .mdc-act { width: 100%; }
+.sm-actions { margin: 10px 0 2px; display: flex; flex-direction: column; gap: 8px; }
+.sm-actions .mdc-act, .sm-actions .ghost-act { width: 100%; }
+/* Друга дія картки — «поділитися ідеєю»: помітна, але не конкурує з головною. */
+.sm-actions .ghost-act {
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--md-line); box-shadow: none;
+  padding: 10px 18px; border-radius: 999px; font-weight: 600;
+}
+.sm-actions .ghost-act:hover {
+  background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red);
+  box-shadow: none;
+}
+
+/* ----- Повторити рішення (BR-14) ----- */
+.reuse-block .reuse-level { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.reuse-badge {
+  display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; border: 1px solid transparent;
+}
+.reuse-badge.r-ready { color: #15662f; background: #e7f6ec; border-color: #b9e3c6; }
+.reuse-badge.r-adaptable { color: #8a5a00; background: #fff5e0; border-color: #f0d9a8; }
+.reuse-badge.r-reference { color: var(--muted); background: var(--soft); border-color: var(--md-line); }
+body.theme-dark .reuse-badge.r-ready { color: #74d18f; background: rgba(60, 180, 100, 0.14); border-color: rgba(60, 180, 100, 0.3); }
+body.theme-dark .reuse-badge.r-adaptable { color: #f0b752; background: rgba(240, 160, 32, 0.14); border-color: rgba(240, 160, 32, 0.32); }
+.reuse-hint { font-size: 12.5px; color: var(--muted); }
+.reuse-empty { margin: 0 0 10px; font-size: 13.5px; line-height: 1.55; color: var(--muted); }
+.reuse-contact { display: inline-flex; width: auto; text-decoration: none; }
+
+/* ----- Вкладення до картки (FR-03) ----- */
+.sm-files { margin-top: 14px; }
+.file-pick { cursor: pointer; }
+.res-file {
+  display: flex; align-items: center; gap: 10px; padding: 9px 0;
+  border-top: 1px solid var(--md-line);
+}
+.res-file > svg { width: 20px; height: 20px; fill: var(--muted); flex: 0 0 auto; }
+.res-file-main { display: flex; flex-direction: column; min-width: 0; gap: 1px; flex: 1; }
+.res-file-name { font-size: 13.5px; font-weight: 600; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.res-file-name:hover { color: var(--md-red); text-decoration: underline; }
+.res-file-meta { font-size: 11.5px; color: var(--muted); }
+.res-file-empty { margin: 6px 0 0; font-size: 13px; }
 .sm-feedback h3 { margin: 4px 0 4px; }
 .sm-feedback textarea { min-height: 70px; }
 

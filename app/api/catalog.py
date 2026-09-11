@@ -3,16 +3,18 @@
 Навички лишаються у /api/skills — тут усе інше наповнення каталогу.
 Керування ресурсами й розділами: Admin / Skill Manager. Перегляд — усі.
 """
+import os
 from datetime import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_from_directory
 from sqlalchemy import func
 from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
+from app.services import file_service
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
-    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
+    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, UserFile,
     Skill, SkillFeedback, AppSetting,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
@@ -209,10 +211,18 @@ def _apply_fields(res, data, *, creating=False):
     if creating or "description" in data:
         res.description = (data.get("description") or "").strip()
 
-    for field in ("category", "author", "icon_emoji", "owner", "tools"):
+    for field in ("category", "author", "icon_emoji", "owner", "owner_contact",
+                  "tools"):
         if field in data:
             value = (data.get(field) or "").strip()
             setattr(res, field, value or None)
+
+    if "reuse_guidance" in data:
+        guidance = (data.get("reuse_guidance") or "").strip()
+        if len(guidance) > MAX_BODY:
+            raise ApiError("Сценарій повторного використання завеликий",
+                           400, "validation_error")
+        res.reuse_guidance = guidance or None
 
     _apply_placement(res, data)
 
@@ -771,6 +781,62 @@ def list_resources():
                     for r in items])
 
 
+SHOWCASE_LIMIT = 6
+
+
+@bp.get("/showcase")
+@require_auth
+def showcase():
+    """Блоки головної сторінки: стан бази знань, а не лише перелік розділів (BR-01).
+
+    Порожні блоки не повертаються взагалі — фронт не має вирішувати, чи
+    малювати рамку без вмісту.
+    """
+    manager = _is_manager(current_user())
+    ratings = _rating_map("resource")
+
+    def pack(items):
+        return [dict(r.to_dict(), **ratings.get(r.id, _EMPTY_RATING)) for r in items]
+
+    public = CatalogResource.query.filter(
+        CatalogResource.status.in_(PUBLIC_STATUSES))
+
+    featured = (public.filter_by(is_featured=True)
+                .order_by(CatalogResource.updated_at.desc())
+                .limit(SHOWCASE_LIMIT).all())
+    recent = (public.order_by(CatalogResource.published_at.desc().nullslast(),
+                              CatalogResource.id.desc())
+              .limit(SHOWCASE_LIMIT).all())
+    popular = (public.filter(CatalogResource.opens_count > 0)
+               .order_by(CatalogResource.opens_count.desc())
+               .limit(SHOWCASE_LIMIT).all())
+
+    blocks = [
+        {"key": "featured", "title": "Рекомендовані рішення",
+         "hint": "Відібрані командою хабу", "items": pack(featured)},
+        {"key": "recent", "title": "Нещодавно додані",
+         "hint": "Що з'явилося останнім", "items": pack(recent)},
+        {"key": "popular", "title": "Найчастіше повторно використовувані",
+         "hint": "За кількістю відкриттів і копіювань", "items": pack(popular)},
+    ]
+
+    # Стан контенту — робота власників і менеджерів, а не вітрина для всіх.
+    if manager:
+        now = datetime.utcnow()
+        stale = (CatalogResource.query
+                 .filter(db.or_(CatalogResource.status == "needs_update",
+                                db.and_(CatalogResource.next_review_at.isnot(None),
+                                        CatalogResource.next_review_at < now,
+                                        CatalogResource.status.in_(PUBLIC_STATUSES))))
+                 .order_by(CatalogResource.next_review_at.asc().nullslast())
+                 .limit(SHOWCASE_LIMIT).all())
+        blocks.append({"key": "needs_update", "title": "Потребують оновлення",
+                       "hint": "Прострочений перегляд або позначка «потребує оновлення»",
+                       "manager_only": True, "items": pack(stale)})
+
+    return jsonify([b for b in blocks if b["items"]])
+
+
 _EMPTY_RATING = {"rating_avg": None, "rating_count": 0}
 
 
@@ -876,10 +942,91 @@ def register_open(resource_id):
     return jsonify({"opens_count": res.opens_count})
 
 
+# --------------------- Вкладення до картки (FR-03) ---------------------
+
+def _visible_resource(resource_id):
+    """Картка, яку поточний користувач має право бачити."""
+    res = CatalogResource.query.get_or_404(resource_id)
+    if res.status not in PUBLIC_STATUSES and not _is_manager(current_user()):
+        raise ApiError("Ресурс недоступний", 403, "forbidden")
+    return res
+
+
+def _may_attach(res, user):
+    """Наповнювати картку файлами може її автор або менеджер каталогу.
+
+    Поле `owner` — вільний текст (прізвище відповідального), а не посилання на
+    користувача, тому правами воно керувати не може: звірятися з ним означало б
+    видавати доступ за збігом рядків.
+    """
+    return _is_manager(user) or res.created_by == user.id
+
+
+@bp.get("/resources/<int:resource_id>/files")
+@require_auth
+def list_resource_files(resource_id):
+    """Вкладення картки — видно всім, хто бачить саму картку."""
+    _visible_resource(resource_id)
+    rows = (UserFile.query.filter_by(resource_id=resource_id)
+            .order_by(UserFile.created_at.desc()).all())
+    return jsonify([f.to_dict() for f in rows])
+
+
+@bp.post("/resources/<int:resource_id>/files")
+@require_auth
+def upload_resource_file(resource_id):
+    res = _visible_resource(resource_id)
+    user = current_user()
+    if not _may_attach(res, user):
+        raise ApiError("Додавати файли до цієї картки може її автор або менеджер",
+                       403, "forbidden")
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
+    uf = file_service.save_bytes(user, file.filename, file.read(),
+                                 source="attachment", resource_id=res.id)
+    return jsonify(uf.to_dict()), 201
+
+
+@bp.get("/resources/<int:resource_id>/files/<int:file_id>/download")
+@require_auth
+def download_resource_file(resource_id, file_id):
+    """Звантаження вкладення — для всіх, хто бачить картку, а не лише для власника."""
+    _visible_resource(resource_id)
+    uf = UserFile.query.filter_by(id=file_id, resource_id=resource_id).first()
+    if uf is None:
+        raise ApiError("Файл не знайдено", 404, "not_found")
+    return send_from_directory(
+        file_service.user_dir(uf.user), uf.stored_name, as_attachment=True,
+        download_name=os.path.basename(uf.filename) or uf.stored_name)
+
+
+@bp.delete("/resources/<int:resource_id>/files/<int:file_id>")
+@require_auth
+def delete_resource_file(resource_id, file_id):
+    res = _visible_resource(resource_id)
+    user = current_user()
+    uf = UserFile.query.filter_by(id=file_id, resource_id=resource_id).first()
+    if uf is None:
+        raise ApiError("Файл не знайдено", 404, "not_found")
+    if not (_may_attach(res, user) or uf.user_id == user.id):
+        raise ApiError("Видалити вкладення може той, хто його додав, "
+                       "автор картки або менеджер", 403, "forbidden")
+    file_service.remove_stored_file(uf)
+    db.session.delete(uf)
+    db.session.commit()
+    return jsonify({"message": "Вкладення видалено"})
+
+
 @bp.delete("/resources/<int:resource_id>")
 @require_global_role("admin", "skill_manager")
 def delete_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
+    # Вкладення живуть лише разом із карткою — інакше у сховищі лишаються
+    # файли, до яких більше немає жодного шляху з інтерфейсу.
+    for uf in UserFile.query.filter_by(resource_id=resource_id).all():
+        file_service.remove_stored_file(uf)
+        db.session.delete(uf)
     CatalogResourceTag.query.filter_by(resource_id=resource_id)\
         .delete(synchronize_session=False)
     CatalogFavorite.query.filter_by(item_type="resource", item_id=resource_id)\

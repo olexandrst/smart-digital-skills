@@ -240,8 +240,11 @@ class CatalogResource(db.Model):
     complexity_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
     business_value_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
     owner = db.Column(db.String)         # відповідальний за матеріал (BR-11)
+    owner_contact = db.Column(db.String)  # email або посилання для зв'язку з власником
     tools = db.Column(db.String)         # інструменти та платформи
     reuse_level = db.Column(db.String)   # ready | adaptable | reference (BR-14)
+    # Покроковий сценарій «як повторити це рішення у себе» (BR-14).
+    reuse_guidance = db.Column(db.Text)
     reviewed_at = db.Column(db.DateTime)      # дата останнього перегляду
     next_review_at = db.Column(db.DateTime)   # дата наступного перегляду
     icon_emoji = db.Column(db.String)    # емодзі-іконка у плитці
@@ -292,8 +295,10 @@ class CatalogResource(db.Model):
                                     if self.business_value else None),
             "author": self.author,
             "owner": self.owner,
+            "owner_contact": self.owner_contact,
             "tools": self.tools,
             "reuse_level": self.reuse_level,
+            "reuse_guidance": self.reuse_guidance,
             "reviewed_at": _iso(self.reviewed_at),
             "next_review_at": _iso(self.next_review_at),
             "review_overdue": self.is_review_overdue(),
@@ -307,6 +312,7 @@ class CatalogResource(db.Model):
             "status": self.status,
             "version": self.version,
             "opens_count": self.opens_count,
+            "created_by": self.created_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "published_at": self.published_at.isoformat() if self.published_at else None,
