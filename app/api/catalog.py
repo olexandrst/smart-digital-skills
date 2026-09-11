@@ -4,21 +4,22 @@
 Керування ресурсами й розділами: Admin / Skill Manager. Перегляд — усі.
 """
 import os
-from datetime import datetime
-from flask import Blueprint, request, jsonify, send_from_directory
+from datetime import datetime, timedelta
+from flask import Blueprint, request, jsonify, send_from_directory, Response
 from sqlalchemy import func
 from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.services import file_service
+from app.services import file_service, usage_service
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
     CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, UserFile,
-    Skill, SkillFeedback, AppSetting,
+    Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
-    TERM_KINDS, SINGLE_VALUE_TERM_KINDS,
+    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, VIEW_TARGETS,
+    SURVEY_KINDS, SURVEY_SCALES,
 )
 
 bp = Blueprint("catalog", __name__)
@@ -933,13 +934,55 @@ def resource_review_log(resource_id):
 @bp.post("/resources/<int:resource_id>/open")
 @require_auth
 def register_open(resource_id):
-    """Лічильник відкриттів/копіювань — для сортування «за популярністю»."""
+    """Лічильник відкриттів плюс запис перегляду для аналітики (FR-11).
+
+    `opens_count` лишається як був — він живить сортування «за популярністю»;
+    `resource_views` додає розрізи за користувачами й періодами, яких лічильник
+    дати не може.
+    """
     res = CatalogResource.query.get_or_404(resource_id)
-    if res.status not in PUBLIC_STATUSES and not _is_manager(current_user()):
+    user = current_user()
+    if res.status not in PUBLIC_STATUSES and not _is_manager(user):
         raise ApiError("Ресурс недоступний", 403, "forbidden")
     res.opens_count = (res.opens_count or 0) + 1
+    usage_service.record_view(user, "resource", res.id, res.name)
     db.session.commit()
     return jsonify({"opens_count": res.opens_count})
+
+
+@bp.post("/views")
+@require_auth
+def register_view():
+    """Перегляд розділу, колекції чи навички — те, що не має свого лічильника.
+
+    Аналітика не має заважати роботі, тому помилка запису не валить запит:
+    фронт викликає цей ендпоінт «у фоні» й ігнорує відповідь.
+    """
+    data = request.get_json(silent=True) or {}
+    target_type = (data.get("target_type") or "").strip()
+    if target_type not in VIEW_TARGETS:
+        raise ApiError("target_type має бути одним із: " + ", ".join(VIEW_TARGETS),
+                       400, "validation_error")
+    try:
+        target_id = int(data.get("target_id"))
+    except (TypeError, ValueError):
+        raise ApiError("Вкажіть target_id", 400, "validation_error")
+
+    name = (data.get("target_name") or "").strip() or None
+    if target_type == "section":
+        section = CatalogSection.query.get(target_id)
+        if section is None:
+            raise ApiError("Розділ не знайдено", 404, "not_found")
+        name = section.name
+    elif target_type == "folder":
+        folder = CatalogFolder.query.get(target_id)
+        if folder is None:
+            raise ApiError("Колекцію не знайдено", 404, "not_found")
+        name = folder.name
+
+    usage_service.record_view(current_user(), target_type, target_id, name)
+    db.session.commit()
+    return jsonify({"ok": True}), 201
 
 
 # --------------------- Вкладення до картки (FR-03) ---------------------
@@ -1171,19 +1214,43 @@ def log_search_opened(log_id):
 @bp.get("/settings")
 @require_auth
 def catalog_settings():
-    """Налаштування каталогу для UI."""
-    return jsonify({"strict_publish": strict_publish_enabled()})
+    """Налаштування каталогу для UI (разом із частотою опитувань)."""
+    out = {"strict_publish": strict_publish_enabled()}
+    out.update({key: _survey_setting(key) for key in SURVEY_SETTINGS})
+    return jsonify(out)
 
 
 @bp.post("/settings")
 @require_global_role("admin", "skill_manager")
 def set_catalog_settings():
+    """Зміна налаштувань. Частота опитувань керується звідси, а не з коду."""
     data = request.get_json(silent=True) or {}
-    if "strict_publish" not in data:
-        raise ApiError("Вкажіть strict_publish", 400, "validation_error")
-    AppSetting.set(STRICT_PUBLISH_KEY, "1" if data["strict_publish"] else "0")
+    known = {"strict_publish", *SURVEY_SETTINGS}
+    if not known & set(data):
+        raise ApiError("Вкажіть щонайменше одне налаштування: "
+                       + ", ".join(sorted(known)), 400, "validation_error")
+
+    if "strict_publish" in data:
+        AppSetting.set(STRICT_PUBLISH_KEY, "1" if data["strict_publish"] else "0")
+    for key in SURVEY_SETTINGS:
+        if key not in data:
+            continue
+        value = data[key]
+        if key == "survey_enabled":
+            AppSetting.set(key, "1" if value else "0")
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            raise ApiError(f"Налаштування «{key}» має бути числом",
+                           400, "validation_error")
+        if number < 0:
+            raise ApiError(f"Налаштування «{key}» не може бути від'ємним",
+                           400, "validation_error")
+        AppSetting.set(key, str(number))
+
     db.session.commit()
-    return jsonify({"strict_publish": strict_publish_enabled()})
+    return jsonify(catalog_settings().get_json())
 
 
 @bp.get("/analytics")
@@ -1276,3 +1343,389 @@ def analytics():
         "feedback_unread": SkillFeedback.query.filter_by(is_read=False).count(),
         "strict_publish": strict_publish_enabled(),
     })
+
+
+# --------------------------- Дашборд KPI (BR-16) ---------------------------
+
+# Дозволені періоди дашборда: скільки днів назад від сьогодні.
+KPI_PERIODS = {"7d": 7, "30d": 30, "90d": 90}
+DEFAULT_KPI_PERIOD = "30d"
+
+
+def _kpi_range(period, now=None):
+    """Поточний і попередній проміжки однакової довжини — для порівняння."""
+    now = now or datetime.utcnow()
+    days = KPI_PERIODS[period]
+    today = now.date()
+    current_from = today - timedelta(days=days - 1)
+    previous_to = current_from - timedelta(days=1)
+    previous_from = previous_to - timedelta(days=days - 1)
+    return current_from, today, previous_from, previous_to
+
+
+def _delta(current, previous):
+    """Напрям і величина зміни. None, якщо порівнювати нема з чим."""
+    if previous in (None, 0):
+        return {"value": current, "previous": previous,
+                "change_pct": None if not previous else 0.0}
+    change = (current - previous) / previous * 100
+    return {"value": current, "previous": previous, "change_pct": round(change, 1)}
+
+
+def _pct(part, whole):
+    return round(part / whole * 100, 1) if whole else None
+
+
+@bp.get("/kpi")
+@require_global_role("admin", "skill_manager")
+def kpi():
+    """Показники розділу 11 BRD за період із порівнянням до попереднього.
+
+    `?period=7d|30d|90d`. Кожне число рахується запитом до бази; перебору
+    історії в Python немає, тому дашборд не «важчає» з накопиченням переглядів.
+    """
+    period = request.args.get("period", DEFAULT_KPI_PERIOD)
+    if period not in KPI_PERIODS:
+        raise ApiError("Період має бути одним із: " + ", ".join(KPI_PERIODS),
+                       400, "validation_error")
+    # Висячі сесії закриваємо перед підрахунком, інакше тривалість завищена.
+    usage_service.close_stale_sessions()
+    now = datetime.utcnow()
+    cur_from, cur_to, prev_from, prev_to = _kpi_range(period, now)
+    today = now.date()
+
+    dau = usage_service.active_users(today)
+    wau = usage_service.active_users(today - timedelta(days=6))
+    mau = usage_service.active_users(today - timedelta(days=29))
+
+    views_now = usage_service.views_count(cur_from, cur_to)
+    views_prev = usage_service.views_count(prev_from, prev_to)
+    users_now = usage_service.active_users(cur_from, cur_to)
+    users_prev = usage_service.active_users(prev_from, prev_to)
+
+    sessions_now = usage_service.session_metrics(cur_from, cur_to)
+    sessions_prev = usage_service.session_metrics(prev_from, prev_to)
+
+    resources = CatalogResource.query.all()
+    published = [r for r in resources if r.status in PUBLIC_STATUSES]
+    by_type = {t: 0 for t in RESOURCE_TYPES}
+    for r in resources:
+        by_type[r.resource_type] = by_type.get(r.resource_type, 0) + 1
+    by_type["skill"] = Skill.query.count()
+    total_items = sum(by_type.values())
+
+    sections = CatalogSection.query.order_by(CatalogSection.position,
+                                             CatalogSection.id).all()
+    skills = Skill.query.all()
+    by_section = [{
+        "id": s.id, "name": s.name,
+        "items": sum(1 for r in resources if r.section_id == s.id)
+                 + sum(1 for k in skills if k.section_id == s.id),
+    } for s in sections]
+    for row in by_section:
+        row["share_pct"] = _pct(row["items"], total_items)
+
+    def _search_stats(since, until):
+        total = SearchQueryLog.query.filter(
+            func.date(SearchQueryLog.created_at) >= since,
+            func.date(SearchQueryLog.created_at) <= until).count()
+        opened = SearchQueryLog.query.filter(
+            func.date(SearchQueryLog.created_at) >= since,
+            func.date(SearchQueryLog.created_at) <= until,
+            SearchQueryLog.opened_item_type.isnot(None)).count()
+        empty = SearchQueryLog.query.filter(
+            func.date(SearchQueryLog.created_at) >= since,
+            func.date(SearchQueryLog.created_at) <= until,
+            SearchQueryLog.results_count == 0).count()
+        return {"total": total, "success_pct": _pct(opened, total),
+                "no_results_pct": _pct(empty, total)}
+
+    search_now = _search_stats(cur_from, cur_to)
+    search_prev = _search_stats(prev_from, prev_to)
+
+    # «Повторні використання» — відкриття матеріалів, позначених як придатні до
+    # повторного використання: саме вони означають, що рішення пішло далі.
+    reusable_ids = [r.id for r in resources if r.reuse_level in ("ready", "adaptable")]
+    reuse_views = 0
+    if reusable_ids:
+        reuse_views = int(db.session.query(func.count(ResourceView.id))
+                          .filter(ResourceView.target_type == "resource",
+                                  ResourceView.target_id.in_(reusable_ids),
+                                  ResourceView.day >= cur_from,
+                                  ResourceView.day <= cur_to).scalar() or 0)
+
+    survey = _survey_summary(cur_from, cur_to)
+
+    return jsonify({
+        "period": period,
+        "range": {"from": cur_from.isoformat(), "to": cur_to.isoformat(),
+                  "previous_from": prev_from.isoformat(),
+                  "previous_to": prev_to.isoformat()},
+        "audience": {
+            "dau": dau, "wau": wau, "mau": mau,
+            # Липкість: яка частка місячної аудиторії заходить щодня.
+            "stickiness_pct": _pct(dau, mau),
+            "active_users": _delta(users_now, users_prev),
+            "churn": {
+                "gap_30": usage_service.returning_gap(30, now),
+                "gap_60": usage_service.returning_gap(60, now),
+                "gap_90": usage_service.returning_gap(90, now),
+            },
+        },
+        "engagement": {
+            "views": _delta(views_now, views_prev),
+            "views_per_item": round(views_now / total_items, 1) if total_items else None,
+            "avg_session_seconds": _delta(sessions_now["avg_duration_seconds"] or 0,
+                                          sessions_prev["avg_duration_seconds"] or 0),
+            "avg_depth": sessions_now["avg_depth"],
+            "sessions": _delta(sessions_now["sessions"], sessions_prev["sessions"]),
+            "reuse_views": reuse_views,
+            "top_viewed": usage_service.top_viewed(cur_from, cur_to),
+            "daily": usage_service.daily_series(cur_from, cur_to),
+        },
+        "content": {
+            "total": total_items,
+            "by_type": by_type,
+            "by_section": by_section,
+            "published_pct": _pct(len(published), len(resources)),
+            "needs_update_pct": _pct(sum(1 for r in resources
+                                         if r.status == "needs_update"), len(resources)),
+        },
+        "search": {
+            "total": _delta(search_now["total"], search_prev["total"]),
+            "success_pct": search_now["success_pct"],
+            "success_pct_previous": search_prev["success_pct"],
+            "no_results_pct": search_now["no_results_pct"],
+            "no_results_pct_previous": search_prev["no_results_pct"],
+        },
+        "survey": survey,
+    })
+
+
+@bp.get("/kpi/export")
+@require_global_role("admin", "skill_manager")
+def kpi_export():
+    """Ті самі числа, що й на екрані, у вигляді CSV.
+
+    Формується з відповіді `kpi()`, а не окремими запитами: інакше вивантаження
+    з часом розійшлося б із дашбордом.
+    """
+    import csv
+    import io as _io
+
+    # Той самий обробник, той самий `request` — тому числа збігаються з екраном
+    # за побудовою, а не за домовленістю.
+    data = kpi().get_json()
+
+    buf = _io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(["Показник", "Значення", "Попередній період", "Зміна, %"])
+
+    def row(label, block, key=None):
+        if key is None:
+            writer.writerow([label, block, "", ""])
+            return
+        cell = block.get(key)
+        if isinstance(cell, dict):
+            writer.writerow([label, cell.get("value"), cell.get("previous"),
+                             cell.get("change_pct")])
+        else:
+            writer.writerow([label, cell, "", ""])
+
+    a, e, c, s = data["audience"], data["engagement"], data["content"], data["search"]
+    writer.writerow([f"Період: {data['range']['from']} — {data['range']['to']}", "", "", ""])
+    row("Унікальні користувачі за день", a["dau"])
+    row("Унікальні користувачі за тиждень", a["wau"])
+    row("Унікальні користувачі за місяць", a["mau"])
+    row("Липкість DAU/MAU, %", a["stickiness_pct"])
+    row("Активні користувачі за період", a, "active_users")
+    row("Не поверталися понад 30 днів", a["churn"]["gap_30"])
+    row("Не поверталися понад 60 днів", a["churn"]["gap_60"])
+    row("Не поверталися понад 90 днів", a["churn"]["gap_90"])
+    row("Відкриттів карток", e, "views")
+    row("Переглядів на матеріал", e["views_per_item"])
+    row("Середня тривалість сесії, с", e, "avg_session_seconds")
+    row("Глибина перегляду за сесію", e["avg_depth"])
+    row("Сесій", e, "sessions")
+    row("Відкриттів матеріалів для повторного використання", e["reuse_views"])
+    row("Усього матеріалів", c["total"])
+    row("Опубліковано, %", c["published_pct"])
+    row("Потребують оновлення, %", c["needs_update_pct"])
+    row("Пошукових запитів", s, "total")
+    row("Запитів із відкриттям матеріалу, %", s["success_pct"])
+    row("Запитів без результатів, %", s["no_results_pct"])
+    if data["survey"]["nps"]["responses"]:
+        row("NPS", data["survey"]["nps"]["score"])
+    if data["survey"]["csat"]["responses"]:
+        row("CSAT (середня)", data["survey"]["csat"]["avg"])
+    if data["survey"]["ces"]["responses"]:
+        row("CES (середня)", data["survey"]["ces"]["avg"])
+
+    writer.writerow([])
+    writer.writerow(["Матеріал", "Переглядів", "", ""])
+    for item in e["top_viewed"]:
+        writer.writerow([item["name"] or f"#{item['target_id']}", item["views"], "", ""])
+
+    # BOM — щоб Excel відкрив кирилицю без танців із кодуванням.
+    payload = "﻿" + buf.getvalue()
+    return Response(payload, mimetype="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="ai-knowledge-hub-kpi-'
+                               f'{data["range"]["from"]}_{data["range"]["to"]}.csv"',
+    })
+
+
+# ------------------- Опитування NPS / CSAT / CES (BR-16) -------------------
+
+# Налаштування частоти показу — керуються без зміни коду (через /catalog/settings).
+SURVEY_SETTINGS = {
+    # Скільки днів не питати після відповіді / після закриття без відповіді.
+    "survey_days_after_answer": "90",
+    "survey_days_after_dismiss": "14",
+    # Скільки карток треба відкрити, перш ніж узагалі щось запитати.
+    "survey_min_views": "5",
+    # Глобальний вимикач опитувань.
+    "survey_enabled": "1",
+}
+
+SURVEY_QUESTIONS = {
+    "nps": {"title": "Наскільки ймовірно, що порекомендуєте AI Knowledge Hub колезі?",
+            "low": "0 — точно ні", "high": "10 — точно так"},
+    "csat": {"title": "Наскільки ви задоволені контентом і пошуком у хабі?",
+             "low": "1 — зовсім ні", "high": "5 — цілком"},
+    "ces": {"title": "Наскільки легко було знайти потрібне й застосувати його?",
+            "low": "1 — дуже важко", "high": "5 — дуже легко"},
+}
+
+
+def _survey_setting(key):
+    return AppSetting.get(key, SURVEY_SETTINGS[key])
+
+
+def _survey_int(key):
+    try:
+        return int(_survey_setting(key))
+    except (TypeError, ValueError):
+        return int(SURVEY_SETTINGS[key])
+
+
+@bp.get("/survey/due")
+@require_auth
+def survey_due():
+    """Чи час питати цього користувача — і про що саме.
+
+    Повертає щонайбільше одне опитування за раз: показувати три підряд означає
+    гарантовано не отримати відповіді на жодне.
+    """
+    user = current_user()
+    if _survey_setting("survey_enabled") != "1":
+        return jsonify({"due": None})
+
+    views = ResourceView.query.filter_by(user_id=user.id).count()
+    if views < _survey_int("survey_min_views"):
+        return jsonify({"due": None})
+
+    now = datetime.utcnow()
+    after_answer = timedelta(days=_survey_int("survey_days_after_answer"))
+    after_dismiss = timedelta(days=_survey_int("survey_days_after_dismiss"))
+    prompts = {p.kind: p for p in SurveyPrompt.query.filter_by(user_id=user.id)}
+
+    for kind in SURVEY_KINDS:
+        prompt = prompts.get(kind)
+        if prompt is None:
+            break
+        wait = after_answer if prompt.answered else after_dismiss
+        if now - prompt.shown_at >= wait:
+            break
+    else:
+        return jsonify({"due": None})
+
+    low, high = SURVEY_SCALES[kind]
+    return jsonify({"due": {"kind": kind, "min": low, "max": high,
+                            **SURVEY_QUESTIONS[kind]}})
+
+
+@bp.post("/survey")
+@require_auth
+def submit_survey():
+    """Відповідь на опитування або закриття без відповіді (`dismissed: true`)."""
+    data = request.get_json(silent=True) or {}
+    kind = (data.get("kind") or "").strip()
+    if kind not in SURVEY_KINDS:
+        raise ApiError("Тип опитування має бути одним із: " + ", ".join(SURVEY_KINDS),
+                       400, "validation_error")
+    user = current_user()
+    now = datetime.utcnow()
+
+    prompt = SurveyPrompt.query.filter_by(user_id=user.id, kind=kind).first()
+    if prompt is None:
+        prompt = SurveyPrompt(user_id=user.id, kind=kind)
+        db.session.add(prompt)
+    prompt.shown_at = now
+
+    if data.get("dismissed"):
+        # Закрите без відповіді не повертається одразу — але повернеться раніше,
+        # ніж до того, хто відповів.
+        prompt.answered = False
+        db.session.commit()
+        return jsonify({"recorded": False})
+
+    low, high = SURVEY_SCALES[kind]
+    try:
+        score = int(data.get("score"))
+    except (TypeError, ValueError):
+        raise ApiError(f"Оцінка має бути числом від {low} до {high}",
+                       400, "validation_error")
+    if not low <= score <= high:
+        raise ApiError(f"Оцінка має бути числом від {low} до {high}",
+                       400, "validation_error")
+
+    comment = (data.get("comment") or "").strip()
+    if len(comment) > 2000:
+        raise ApiError("Коментар завеликий (максимум 2000 символів)",
+                       400, "validation_error")
+
+    prompt.answered = True
+    db.session.add(SurveyResponse(
+        kind=kind, score=score, comment=comment or None,
+        user_id=user.id,
+        user_role="manager" if _is_manager(user) else "user",
+        context=(data.get("context") or "catalog")[:50],
+        context_id=data.get("context_id") if isinstance(data.get("context_id"), int) else None,
+        created_at=now, day=now.date(),
+    ))
+    db.session.commit()
+    return jsonify({"recorded": True}), 201
+
+
+def _survey_summary(since=None, until=None):
+    """Підсумки опитувань: NPS, середні CSAT/CES і вільні коментарі."""
+    def _scoped(query):
+        if since is not None:
+            query = query.filter(SurveyResponse.day >= since)
+        if until is not None:
+            query = query.filter(SurveyResponse.day <= until)
+        return query
+
+    out = {}
+    for kind in SURVEY_KINDS:
+        rows = _scoped(SurveyResponse.query.filter_by(kind=kind)).all()
+        block = {"responses": len(rows), "avg": None}
+        if rows:
+            block["avg"] = round(sum(r.score for r in rows) / len(rows), 2)
+        if kind == "nps":
+            buckets = {"promoter": 0, "passive": 0, "detractor": 0}
+            for r in rows:
+                buckets[SurveyResponse.nps_bucket(r.score)] += 1
+            block["buckets"] = buckets
+            block["score"] = (round((buckets["promoter"] - buckets["detractor"])
+                                    / len(rows) * 100) if rows else None)
+            for name, n in buckets.items():
+                block[f"{name}_pct"] = _pct(n, len(rows))
+        out[kind] = block
+
+    comments = (_scoped(SurveyResponse.query.filter(SurveyResponse.comment.isnot(None)))
+                .order_by(SurveyResponse.created_at.desc()).limit(20).all())
+    out["comments"] = [{"kind": c.kind, "score": c.score, "comment": c.comment,
+                        "role": c.user_role,
+                        "created_at": c.created_at.isoformat()} for c in comments]
+    return out

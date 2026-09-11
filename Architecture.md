@@ -178,6 +178,10 @@ erDiagram
 | `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання |
 | `catalog_favorites` | «Обране» користувача (спільне для скілів і ресурсів каталогу) |
 | `ideas` | Воронка ідей: подання, життєвий цикл, маршрутизація до процесу оцінки |
+| `user_sessions` | Сесія роботи в хабі (розрив після 30 хв бездіяльності) |
+| `resource_views` | Перегляди карток, розділів і колекцій — джерело для DAU/WAU/MAU |
+| `survey_responses` | Відповіді NPS / CSAT / CES |
+| `survey_prompts` | Коли користувача востаннє питали — щоб не питати надто часто |
 | `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
 | `search_query_logs` | Пошукові запити користувачів для аналітики хабу |
 | `group_skills` | Призначення скілів групам (груповий доступ) |
@@ -361,6 +365,58 @@ CREATE TABLE ideas (
     status_note        TEXT,                       -- рішення, яке бачить автор
     created_at         TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Сесія роботи в хабі. `ended_at` заповнюється ліниво — наступною дією
+-- користувача або запитом аналітики; фонового процесу не потрібно.
+CREATE TABLE user_sessions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ended_at     TEXT,
+    views_count  INTEGER NOT NULL DEFAULT 0,   -- глибина перегляду за сесію
+    day          DATE NOT NULL                 -- агрегати за днями без функцій по даті
+);
+
+-- Перегляди. Один матеріал за сесію рахується один раз: інакше «відкрив і
+-- скопіював» дало б два перегляди. Лічильник catalog_resources.opens_count
+-- живе окремо й рахує саме дії.
+CREATE TABLE resource_views (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    target_type TEXT NOT NULL DEFAULT 'resource'
+                CHECK (target_type IN ('resource','skill','section','folder')),
+    target_id   INTEGER NOT NULL,
+    target_name TEXT,                          -- знімок назви на момент перегляду
+    session_id  INTEGER REFERENCES user_sessions(id) ON DELETE SET NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    day         DATE NOT NULL
+);
+
+-- Опитування задоволеності: NPS 0–10, CSAT 1–5, CES 1–5.
+CREATE TABLE survey_responses (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind       TEXT NOT NULL CHECK (kind IN ('nps','csat','ces')),
+    score      INTEGER NOT NULL,
+    comment    TEXT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_role  TEXT,                           -- роль на момент відповіді
+    context    TEXT,                           -- де саме запитали
+    context_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    day        DATE NOT NULL
+);
+
+-- Коли користувача востаннє питали. Рядок на пару «користувач + тип»:
+-- закрити NPS не має відкладати CSAT.
+CREATE TABLE survey_prompts (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind     TEXT NOT NULL,
+    shown_at TEXT NOT NULL DEFAULT (datetime('now')),
+    answered INTEGER NOT NULL DEFAULT 0,       -- 0 = закрив без відповіді
+    UNIQUE (user_id, kind)
 );
 
 -- Колекції всередині розділу — третій рівень моделі Warehouse → Boxes → Folders → Files.

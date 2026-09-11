@@ -21,6 +21,12 @@ from app.models.resource import (
     TERM_KINDS, SINGLE_VALUE_TERM_KINDS, DEFAULT_TERMS, DEFAULT_FOLDERS,
 )
 from app.models.idea import Idea, IDEA_STATUSES, IDEA_CLOSED_STATUSES
+from app.models.usage import (
+    UserSession, ResourceView, SESSION_IDLE_MINUTES, VIEW_TARGETS,
+)
+from app.models.survey import (
+    SurveyResponse, SurveyPrompt, SURVEY_KINDS, SURVEY_SCALES,
+)
 from app.models.file import UserFile
 from app.models.setting import AppSetting
 
@@ -69,6 +75,14 @@ __all__ = [
     "Idea",
     "IDEA_STATUSES",
     "IDEA_CLOSED_STATUSES",
+    "UserSession",
+    "ResourceView",
+    "SESSION_IDLE_MINUTES",
+    "VIEW_TARGETS",
+    "SurveyResponse",
+    "SurveyPrompt",
+    "SURVEY_KINDS",
+    "SURVEY_SCALES",
     "UserFile",
     "AppSetting",
 ]

@@ -481,6 +481,11 @@ smart-digital-skills/
 | GET | `/catalog/settings` | Налаштування каталогу (сувора публікація) | авторизовані |
 | POST | `/catalog/settings` | Зміна налаштувань каталогу | Admin/Skill Manager |
 | GET | `/catalog/analytics` | Аналітика хабу: наповнення, актуальність, пошук | Admin/Skill Manager |
+| POST | `/catalog/views` | Облік перегляду розділу, колекції чи матеріалу | авторизовані |
+| GET | `/catalog/kpi` | KPI за період (`?period=7d\|30d\|90d`) з порівнянням | Admin/Skill Manager |
+| GET | `/catalog/kpi/export` | Ті самі KPI у CSV | Admin/Skill Manager |
+| GET | `/catalog/survey/due` | Чи час питати користувача і про що | авторизовані |
+| POST | `/catalog/survey` | Відповідь на NPS/CSAT/CES або закриття без відповіді | авторизовані |
 | GET | `/ideas` | Ідеї (`?status=`, `?mine=1`); свої — всім, усі — менеджеру | авторизовані |
 | POST | `/ideas` | Подати ідею | авторизовані |
 | GET | `/ideas/{id}` | Картка ідеї | автор або менеджер |
