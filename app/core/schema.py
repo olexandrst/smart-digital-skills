@@ -1,8 +1,13 @@
-"""Легка additive-автоміграція схеми для SQLite (MVP без Alembic).
+"""Схема та довідкові дані.
 
-Створює відсутні таблиці, дописує відсутні колонки (з коректним DEFAULT/NOT NULL
-для бекфілу наявних рядків) і за потреби знімає NOT NULL через перебудову
-таблиці. Покриває лише безпечні additive-зміни; складні міграції — через Alembic.
+**Схема** від хвилі 6 ведеться версійними міграціями Alembic:
+`alembic upgrade head`. Функція `sync_schema()` лишається запасним шляхом для
+дрібних інсталяцій (AUTO_MIGRATE=1) і для оновлення баз, створених до переходу
+на міграції; вона вміє лише безпечні additive-зміни й написана під SQLite.
+
+**Довідкові дані** (`sync_reference_data`) — окрема річ: набір значень
+довідників і словник формулювань не є схемою, тож синхронізуються при кожному
+старті незалежно від того, чим накатувалася схема. Усі операції ідемпотентні.
 """
 import sqlalchemy as sa
 from app.extensions import db
@@ -72,8 +77,18 @@ def sync_schema():
                 conn.execute(sa.text(f'ALTER TABLE "{table.name}" ADD COLUMN {ddl}'))
 
     # Зняти NOT NULL зі skills.model_id (потрібно для скілів-пакетів).
-    relax_not_null("skills", "model_id")
+    # SQLite-специфічно: на PostgreSQL цю зміну робить Alembic-міграція.
+    if engine.dialect.name == "sqlite":
+        relax_not_null("skills", "model_id")
 
+
+def sync_reference_data():
+    """Довідники й словники — не схема, тому синхронізуються завжди.
+
+    Викликається при старті незалежно від AUTO_MIGRATE: після
+    `alembic upgrade head` таблиці вже є, але порожні, а застосунок без
+    довідника видів матеріалів не працює.
+    """
     seed_catalog_terms()
     seed_search_synonyms()
     migrate_legacy_tags()
@@ -104,7 +119,10 @@ def seed_catalog_terms():
     Ідемпотентно: наявні значення не чіпаються, тож перейменування, зроблені
     менеджером, переживають перезапуск застосунку.
     """
-    from app.models import CatalogTerm, DEFAULT_TERMS, RESOURCE_TYPES
+    from app.models import (
+        CatalogTerm, DEFAULT_TERMS, DEFAULT_MATERIAL_TYPES,
+        DEFAULT_STATUS_TERMS, DEFAULT_REUSE_TERMS,
+    )
 
     existing = {(t.kind, t.name_norm) for t in CatalogTerm.query.all()}
     added = False
@@ -119,17 +137,55 @@ def seed_catalog_terms():
             existing.add(key)
             added = True
 
-    # Види матеріалів: запис довідника на кожен код із RESOURCE_TYPES.
+    # Види матеріалів: запис довідника з поведінкою та оформленням. Саме ці
+    # поля роблять вид даними, а не константою — новий вид додається з
+    # інтерфейсу й одразу працює в каталозі, фільтрах і редакторі.
     have_codes = {t.code for t in CatalogTerm.query.filter_by(kind="material_type")}
-    labels = {"prompt": "Промпти", "instruction": "Інструкції", "case": "Кейси",
-              "agent": "Агенти", "mcp": "MCP-сервери", "link": "Корисні посилання"}
-    for position, code in enumerate(RESOURCE_TYPES):
+    for position, spec in enumerate(DEFAULT_MATERIAL_TYPES):
+        code, name, icon, color, needs_url, needs_body, scope, url_label, body_label = spec
         if code in have_codes:
             continue
-        name = labels.get(code, code)
         db.session.add(CatalogTerm(
             kind="material_type", code=code, name=name,
-            name_norm=CatalogTerm.normalize(name), position=position))
+            name_norm=CatalogTerm.normalize(name), position=position,
+            icon_emoji=icon, color=color, requires_url=needs_url,
+            requires_body=needs_body, has_scope=scope,
+            url_label=url_label, body_label=body_label))
+        added = True
+
+    # Статуси життєвого циклу й акценти оформлення — теж записи довідника:
+    # назву, іконку та колір змінює адміністратор, коди лишаються за кодом.
+    have_status = {t.code for t in CatalogTerm.query.filter_by(kind="status")}
+    for position, (code, name, icon, color) in enumerate(DEFAULT_STATUS_TERMS):
+        if code in have_status:
+            continue
+        db.session.add(CatalogTerm(
+            kind="status", code=code, name=name,
+            name_norm=CatalogTerm.normalize(name), position=position,
+            icon_emoji=icon, color=color))
+        added = True
+
+    have_reuse = {t.code for t in CatalogTerm.query.filter_by(kind="reuse_level")}
+    for position, (code, name, description) in enumerate(DEFAULT_REUSE_TERMS):
+        if code in have_reuse:
+            continue
+        db.session.add(CatalogTerm(
+            kind="reuse_level", code=code, name=name,
+            name_norm=CatalogTerm.normalize(name), position=position,
+            description=description))
+        added = True
+
+    have_accent = {t.code for t in CatalogTerm.query.filter_by(kind="accent")}
+    accent_names = {"red": "Червоний", "ink": "Графітовий", "steel": "Сталевий",
+                    "amber": "Бурштиновий", "green": "Зелений"}
+    from app.models import ACCENTS
+    for position, code in enumerate(ACCENTS):
+        if code in have_accent:
+            continue
+        name = accent_names.get(code, code)
+        db.session.add(CatalogTerm(
+            kind="accent", code=code, name=name,
+            name_norm=CatalogTerm.normalize(name), position=position, color=code))
         added = True
 
     if added:

@@ -12,7 +12,7 @@ from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.services import (
-    file_service, usage_service, search_service, assistant_service,
+    file_service, usage_service, search_service, assistant_service, review_service,
 )
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
@@ -20,10 +20,12 @@ from app.models import (
     CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, SearchSynonym,
     UserFile,
     Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
+    Notification,
     User,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
-    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, MULTI_VALUE_TERM_KINDS, VIEW_TARGETS,
+    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, MULTI_VALUE_TERM_KINDS,
+    CODE_BOUND_TERM_KINDS, VIEW_TARGETS,
     SURVEY_KINDS, SURVEY_SCALES,
 )
 
@@ -42,6 +44,47 @@ REQUIRED_ON_PUBLISH = (
     ("owner", "власник матеріалу"),
     ("next_review_at", "дата наступного перегляду"),
 )
+
+
+def material_types():
+    """Активні види матеріалів із довідника (BR/NFR-05).
+
+    Довідник — джерело правди; константи RESOURCE_TYPES лишаються запасним
+    варіантом лише для порожньої бази, щоб застосунок піднявся до першого
+    наповнення довідників.
+    """
+    rows = (CatalogTerm.query.filter_by(kind="material_type", is_active=True)
+            .order_by(CatalogTerm.position, CatalogTerm.id).all())
+    if rows:
+        return {r.code: r for r in rows if r.code}
+    return {}
+
+
+def known_type_codes():
+    """Коди видів матеріалів, які застосунок приймає зараз."""
+    codes = list(material_types())
+    return codes or list(RESOURCE_TYPES)
+
+
+def type_behaviour(code):
+    """Поведінка виду: чи потрібні посилання, текст, область і як їх підписати."""
+    term = material_types().get(code)
+    if term is not None:
+        return {
+            "requires_url": bool(term.requires_url),
+            "requires_body": bool(term.requires_body),
+            "has_scope": bool(term.has_scope),
+            "url_label": term.url_label or "посилання",
+            "body_label": term.body_label or "Текст",
+        }
+    # Порожній довідник — поведінка з констант, щоб нічого не зламалося.
+    return {
+        "requires_url": code in LINK_TYPES,
+        "requires_body": code in BODY_TYPES,
+        "has_scope": code in ("mcp", "link"),
+        "url_label": "endpoint сервера" if code == "mcp" else "посилання",
+        "body_label": "Текст",
+    }
 
 
 def _is_manager(user):
@@ -221,10 +264,10 @@ def _apply_fields(res, data, *, creating=False):
     """Переносить поля запиту в ресурс із валідацією (спільне для POST/PATCH)."""
     if creating or "resource_type" in data:
         rtype = (data.get("resource_type") or "").strip()
-        if rtype not in RESOURCE_TYPES:
-            raise ApiError(
-                "Тип ресурсу має бути одним із: " + ", ".join(RESOURCE_TYPES),
-                400, "validation_error")
+        allowed = known_type_codes()
+        if rtype not in allowed:
+            raise ApiError("Тип ресурсу має бути одним із: " + ", ".join(allowed),
+                           400, "validation_error")
         res.resource_type = rtype
 
     if creating or "name" in data:
@@ -291,9 +334,10 @@ def _apply_fields(res, data, *, creating=False):
         scope = (data.get("link_scope") or "").strip()
         res.link_scope = scope if scope in LINK_SCOPES else None
 
-    # Посилання обов'язкове для агентів, MCP-серверів і корисних посилань.
-    needs_url = res.resource_type in LINK_TYPES
-    url_label = "endpoint сервера" if res.resource_type == "mcp" else "посилання"
+    # Що саме обов'язкове — вирішує запис довідника, а не константа в коді.
+    behaviour = type_behaviour(res.resource_type)
+    needs_url = behaviour["requires_url"]
+    url_label = behaviour["url_label"]
     if "url" in data or (creating and needs_url):
         res.url = _clean_url(data.get("url"), required=needs_url, label=url_label)
     if needs_url and not res.url:
@@ -301,8 +345,8 @@ def _apply_fields(res, data, *, creating=False):
     if needs_url and not res.link_scope:
         res.link_scope = "external"
 
-    # Промпт, інструкція та кейс без тексту — беззмістовні.
-    if res.resource_type in BODY_TYPES and creating and not res.body:
+    # Види, які без тексту беззмістовні (теж із довідника).
+    if behaviour["requires_body"] and creating and not res.body:
         raise ApiError("Додайте текст матеріалу", 400, "validation_error")
 
     # Теги живуть в окремій таблиці й потребують id матеріалу — їх застосовує
@@ -612,12 +656,13 @@ def list_terms():
 def create_term():
     data = request.get_json(silent=True) or {}
     kind = _require_term_kind((data.get("kind") or "").strip())
-    if kind == "material_type":
-        # Вид матеріалу задає поведінку (обов'язковість посилання чи тексту),
-        # тому нові коди додаються разом із кодом, а не через довідник.
-        raise ApiError("Види матеріалів додаються разом із підтримкою в коді — "
-                       "тут можна змінити назву, порядок і видимість наявних",
-                       400, "material_type_fixed")
+    if kind in CODE_BOUND_TERM_KINDS:
+        # Статуси й акценти зав'язані на логіку життєвого циклу та оформлення:
+        # додавати коди без підтримки в коді не можна, але назву, іконку,
+        # колір і видимість наявних змінювати вільно.
+        raise ApiError(f"Довідник «{kind}» має фіксований набір значень — "
+                       f"тут можна змінити назву, оформлення й видимість",
+                       400, "term_kind_fixed")
     name = " ".join((data.get("name") or "").split())
     if not name:
         raise ApiError("Назва значення не може бути порожньою",
@@ -625,10 +670,35 @@ def create_term():
     if _term_by_name(kind, name) is not None:
         raise ApiError("Таке значення вже є в довіднику", 409, "term_exists")
     term = CatalogTerm(kind=kind, name=name, name_norm=CatalogTerm.normalize(name))
+    if kind == "material_type":
+        term.code = _new_type_code(data.get("code"), name)
     _apply_term_fields(term, data)
     db.session.add(term)
     db.session.commit()
     return jsonify(term.to_dict()), 201
+
+
+def _new_type_code(raw, name):
+    """Код нового виду матеріалу: латиницею, унікальний, придатний для URL."""
+    import re as _re
+    from unicodedata import normalize as _norm
+
+    base = (raw or name or "").strip().lower()
+    translit = str.maketrans({
+        "а": "a", "б": "b", "в": "v", "г": "h", "ґ": "g", "д": "d", "е": "e",
+        "є": "ie", "ж": "zh", "з": "z", "и": "y", "і": "i", "ї": "i", "й": "i",
+        "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r",
+        "с": "s", "т": "t", "у": "u", "ф": "f", "х": "kh", "ц": "ts", "ч": "ch",
+        "ш": "sh", "щ": "shch", "ь": "", "ю": "iu", "я": "ia", " ": "_", "-": "_",
+    })
+    code = _re.sub(r"[^a-z0-9_]", "", _norm("NFC", base).translate(translit))[:40]
+    if not code:
+        raise ApiError("Не вдалося скласти код виду — вкажіть його латиницею",
+                       400, "validation_error")
+    taken = {t.code for t in CatalogTerm.query.filter_by(kind="material_type")}
+    if code in taken:
+        raise ApiError("Вид матеріалу з таким кодом уже існує", 409, "term_exists")
+    return code
 
 
 def _apply_term_fields(term, data):
@@ -641,6 +711,13 @@ def _apply_term_fields(term, data):
             raise ApiError("Позиція має бути числом", 400, "validation_error")
     if "is_active" in data:
         term.is_active = bool(data.get("is_active"))
+    for field in ("icon_emoji", "color", "url_label", "body_label"):
+        if field in data:
+            value = (data.get(field) or "").strip()
+            setattr(term, field, value or None)
+    for flag in ("requires_url", "requires_body", "has_scope"):
+        if flag in data:
+            setattr(term, flag, bool(data.get(flag)))
 
 
 @bp.patch("/terms/<int:term_id>")
@@ -681,8 +758,9 @@ def merge_term(term_id):
                        400, "validation_error")
     if target.id == source.id:
         raise ApiError("Не можна злити значення саме в себе", 400, "validation_error")
-    if source.kind == "material_type":
-        raise ApiError("Види матеріалів не зливаються", 400, "material_type_fixed")
+    if source.kind in CODE_BOUND_TERM_KINDS or source.kind == "material_type":
+        raise ApiError("Значення цього довідника не зливаються",
+                       400, "term_kind_fixed")
 
     if source.kind in MULTI_VALUE_TERM_KINDS:
         link = (CatalogResourceTag if source.kind == "tag"
@@ -709,9 +787,15 @@ def merge_term(term_id):
 def delete_term(term_id):
     """Видаляє значення довідника. Посилання на нього в картках знімаються."""
     term = CatalogTerm.query.get_or_404(term_id)
+    if term.kind in CODE_BOUND_TERM_KINDS:
+        raise ApiError("Значення цього довідника не видаляється — його можна "
+                       "приховати", 400, "term_kind_fixed")
     if term.kind == "material_type":
-        raise ApiError("Вид матеріалу не видаляється — його можна приховати",
-                       400, "material_type_fixed")
+        used = CatalogResource.query.filter_by(resource_type=term.code).count()
+        if used:
+            raise ApiError(f"Вид використовують {used} матеріалів — спершу "
+                           f"перенесіть їх або приховайте вид",
+                           409, "term_in_use")
     if term.kind in MULTI_VALUE_TERM_KINDS:
         link = CatalogResourceTag if term.kind == "tag" else CatalogResourceMaturity
         link.query.filter_by(term_id=term_id).delete(synchronize_session=False)
@@ -743,7 +827,7 @@ def list_resources():
 
     rtype = request.args.get("type")
     if rtype:
-        if rtype not in RESOURCE_TYPES:
+        if rtype not in known_type_codes():
             raise ApiError("Невідомий тип ресурсу", 400, "validation_error")
         query = query.filter_by(resource_type=rtype)
 
@@ -2151,3 +2235,105 @@ def hide_recommendation():
                                             item_id=item_id))
         db.session.commit()
     return jsonify({"hidden": True, "item_id": item_id})
+
+
+# ---------- Сповіщення та перегляд власного контенту (AKH-18) ----------
+
+@bp.get("/notifications")
+@require_auth
+def list_notifications():
+    """Сповіщення користувача, найновіші згори."""
+    rows = (Notification.query.filter_by(user_id=current_user().id)
+            .order_by(Notification.created_at.desc()).limit(50).all())
+    return jsonify({"items": [n.to_dict() for n in rows],
+                    "unread": sum(1 for n in rows if not n.is_read)})
+
+
+@bp.post("/notifications/read")
+@require_auth
+def mark_notifications_read():
+    """Позначає сповіщення прочитаними (усі або перелічені в `ids`)."""
+    data = request.get_json(silent=True) or {}
+    query = Notification.query.filter_by(user_id=current_user().id, is_read=False)
+    ids = data.get("ids")
+    if isinstance(ids, list) and ids:
+        query = query.filter(Notification.id.in_(ids))
+    query.update({Notification.is_read: True}, synchronize_session=False)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@bp.get("/my-content")
+@require_auth
+def my_content():
+    """Матеріали, за які відповідає користувач, з простроченим переглядом.
+
+    Одне місце, з якого власник бачить усе своє й може одразу діяти, — інакше
+    нагадування веде в нікуди.
+    """
+    user = current_user()
+    names = {(user.full_name or "").casefold(), (user.username or "").casefold()}
+    names.discard("")
+    now = datetime.utcnow()
+
+    rows = (CatalogResource.query
+            .filter(CatalogResource.owner.isnot(None))
+            .order_by(CatalogResource.next_review_at.asc().nullslast()).all())
+    mine = [r for r in rows if (r.owner or "").strip().casefold() in names]
+
+    def pack(r):
+        due = r.next_review_at.date() if r.next_review_at else None
+        return dict(r.to_dict(),
+                    review_state=("overdue" if due and due < now.date()
+                                  else "soon" if due and (due - now.date()).days <= 7
+                                  else "ok"))
+    items = [pack(r) for r in mine]
+    return jsonify({
+        "items": items,
+        "overdue": sum(1 for i in items if i["review_state"] == "overdue"),
+        "soon": sum(1 for i in items if i["review_state"] == "soon"),
+        "email_digest": review_service.email_digest_enabled(user),
+    })
+
+
+@bp.post("/my-content/email-digest")
+@require_auth
+def toggle_email_digest():
+    """Вмикає чи вимикає щотижневий підсумок на пошту."""
+    data = request.get_json(silent=True) or {}
+    if "enabled" not in data:
+        raise ApiError("Вкажіть enabled", 400, "validation_error")
+    enabled = review_service.set_email_digest(current_user(), bool(data["enabled"]))
+    return jsonify({"email_digest": enabled})
+
+
+@bp.post("/resources/<int:resource_id>/confirm-review")
+@require_auth
+def confirm_review(resource_id):
+    """Власник підтверджує, що матеріал актуальний, прямо зі списку.
+
+    Дія пише в той самий журнал перегляду, що й зміна статусу: інакше в історії
+    матеріалу з'явиться діра між «нагадали» і «щось сталося».
+    """
+    res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    names = {(user.full_name or "").casefold(), (user.username or "").casefold()}
+    if (res.owner or "").strip().casefold() not in names and not _is_manager(user):
+        raise ApiError("Підтвердити актуальність може власник матеріалу або менеджер",
+                       403, "forbidden")
+
+    data = request.get_json(silent=True) or {}
+    try:
+        months = int(data.get("months", 6))
+    except (TypeError, ValueError):
+        raise ApiError("Період має бути числом місяців", 400, "validation_error")
+    months = max(1, min(months, 36))
+
+    res.reviewed_at = datetime.utcnow()
+    res.next_review_at = datetime.utcnow() + timedelta(days=30 * months)
+    if res.status == "needs_update":
+        res.status = "published"
+    _log_review("resource", res, res.status, res.status,
+                f"Актуальність підтверджено, наступний перегляд через {months} міс.")
+    db.session.commit()
+    return jsonify(res.to_dict())

@@ -549,18 +549,56 @@ def test_plain_user_may_not_manage_terms(client):
     assert _term(client, _login(client, "u1"), "tag", "RAG").status_code == 403
 
 
-def test_material_types_not_addable_via_dictionary(client, app):
-    """Вид матеріалу задає поведінку коду — через довідник його не додати."""
+def test_new_material_type_added_from_interface(client, app):
+    """Вид матеріалу — дані, а не константа: новий додається без релізу (AKH-17)."""
     _seed_terms(app)
     h = _admin(client)
-    res = _term(client, h, "material_type", "Відеокурс")
-    assert res.status_code == 400
-    type_term = _terms_of(client, h, "material_type")[0]
-    assert client.delete(f"/api/catalog/terms/{type_term['id']}",
+    created = _term(client, h, "material_type", "Відеокурс",
+                    requires_url=True, has_scope=True, url_label="Посилання на відео")
+    assert created.status_code == 201, created.get_json()
+    code = created.get_json()["code"]
+    assert code and code.isascii()        # код придатний для URL і фільтрів
+
+    # І одразу працює в каталозі: поведінка береться з довідника.
+    made = _resource(client, h, resource_type=code, name="Курс",
+                     url="https://video.example.com/1", body="")
+    assert made.status_code == 201, made.get_json()
+    assert [i["name"] for i in
+            client.get(f"/api/catalog/resources?type={code}",
+                       headers=h).get_json()] == ["Курс"]
+
+    # Без обов'язкового посилання новий вид не збережеться — правило з довідника.
+    assert _resource(client, h, resource_type=code, name="Без посилання",
+                     url="", body="").status_code == 400
+
+
+def test_used_material_type_not_deleted(client, app):
+    _seed_terms(app)
+    h = _admin(client)
+    code = _term(client, h, "material_type", "Відеокурс",
+                 requires_url=True).get_json()["code"]
+    tid = next(t["id"] for t in _terms_of(client, h, "material_type")
+               if t["code"] == code)
+    _resource(client, h, resource_type=code, name="Курс",
+              url="https://v.example.com", body="")
+    assert client.delete(f"/api/catalog/terms/{tid}", headers=h).status_code == 409
+
+
+def test_statuses_and_accents_stay_code_bound(client, app):
+    """Статуси й акценти зав'язані на логіку — назву міняємо, набір ні."""
+    _seed_terms(app)
+    h = _admin(client)
+    assert _term(client, h, "status", "Напівопублікований").status_code == 400
+    assert _term(client, h, "accent", "Фіолетовий").status_code == 400
+
+    status_term = _terms_of(client, h, "status")[0]
+    assert client.delete(f"/api/catalog/terms/{status_term['id']}",
                          headers=h).status_code == 400
-    renamed = client.patch(f"/api/catalog/terms/{type_term['id']}",
-                           json={"name": "Готові промпти"}, headers=h)
-    assert renamed.status_code == 200     # назву міняти можна
+    renamed = client.patch(f"/api/catalog/terms/{status_term['id']}",
+                           json={"name": "Чернетка матеріалу", "icon_emoji": "📝"},
+                           headers=h)
+    assert renamed.status_code == 200     # назву й оформлення міняти можна
+    assert renamed.get_json()["icon_emoji"] == "📝"
 
 
 def test_renaming_term_shows_in_cards(client):

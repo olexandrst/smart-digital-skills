@@ -234,8 +234,9 @@ def test_plain_user_may_not_edit_synonyms(client):
 def test_default_synonyms_seeded(client, app):
     _seed_synonyms(app)
     _seed_synonyms(app)          # ідемпотентно
+    from app.models import DEFAULT_SYNONYMS
     rows = client.get("/api/catalog/synonyms", headers=_admin(client)).get_json()
-    assert len(rows) == 16
+    assert len(rows) == len(DEFAULT_SYNONYMS)
     assert any(r["phrase"] == "обробляти документи" for r in rows)
 
 

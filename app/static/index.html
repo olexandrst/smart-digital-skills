@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Knowledge Hub</title>
-  <link rel="stylesheet" href="style.css?v=54">
+  <link rel="stylesheet" href="style.css?v=57">
 </head>
 <body>
   <!-- Екран входу -->
@@ -38,6 +38,12 @@
       <form id="login-form" class="login-card">
         <h2>З поверненням</h2>
         <p class="card-sub">Увійдіть до свого робочого простору</p>
+
+        <a id="entra-btn" class="btn-entra hidden" href="/api/auth/entra/start">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8.5v8.5H3V3Zm9.5 0H21v8.5h-8.5V3ZM3 12.5h8.5V21H3v-8.5Zm9.5 0H21V21h-8.5v-8.5Z"/></svg>
+          Увійти через корпоративний акаунт
+        </a>
+        <div id="login-or" class="login-or hidden"><span>або</span></div>
 
         <div class="input-wrap">
           <svg class="input-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -128,6 +134,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=54"></script>
+  <script src="app.js?v=57"></script>
 </body>
 </html>

@@ -25,11 +25,24 @@ def create_app(config_object=None):
     register_error_handlers(app)
     _register_jwt_handlers()
 
-    # Additive-автоміграція схеми (SQLite, MVP без Alembic).
-    if app.config.get("AUTO_MIGRATE", True):
+    # Схема ведеться Alembic (`alembic upgrade head`). AUTO_MIGRATE=1 лишає
+    # запасне additive-доповнення для дрібних інсталяцій і для баз, створених
+    # до переходу на версійні міграції.
+    if app.config.get("AUTO_MIGRATE", False):
         from app.core.schema import sync_schema
         with app.app_context():
             sync_schema()
+
+    # Довідкові дані — не схема: синхронізуються завжди, бо після міграції
+    # таблиці довідників існують, але порожні.
+    if app.config.get("SYNC_REFERENCE_DATA", True):
+        from app.core.schema import sync_reference_data
+        with app.app_context():
+            try:
+                sync_reference_data()
+            except Exception as exc:   # база ще не мігрована — не валимо старт
+                app.logger.warning("Довідники не синхронізовано: %s. "
+                                   "Виконайте `alembic upgrade head`.", exc)
 
     # Планувальник тижневого скидання квот (понеділок 00:05 UTC).
     if app.config.get("ENABLE_SCHEDULER", True):
@@ -75,15 +88,29 @@ def _start_scheduler(app):
                            "лише «ліниво» за зсувом тижневого вікна.")
         return
 
-    from app.services import quota_service
+    from app.services import quota_service, review_service
 
-    def _job():
+    def _quota_job():
         with app.app_context():
             quota_service.reset_all()
 
+    def _review_job():
+        """Нагадування власникам про перегляд матеріалів (AKH-18).
+
+        Дублювання при кількох процесах неможливе не через «запускаємо в одному
+        воркері», а через унікальний ключ сповіщення в базі: навіть якщо job
+        відпрацює у трьох процесах, запис буде один.
+        """
+        with app.app_context():
+            created = review_service.create_reminders()
+            if created:
+                app.logger.info("Нагадувань про перегляд створено: %s", created)
+
     _scheduler = BackgroundScheduler(daemon=True, timezone="UTC")
-    _scheduler.add_job(_job, "cron", day_of_week="mon", hour=0, minute=5,
+    _scheduler.add_job(_quota_job, "cron", day_of_week="mon", hour=0, minute=5,
                        id="weekly_quota_reset", replace_existing=True)
+    _scheduler.add_job(_review_job, "cron", hour=7, minute=0,
+                       id="daily_review_reminders", replace_existing=True)
     _scheduler.start()
 
 

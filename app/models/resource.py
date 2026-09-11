@@ -20,7 +20,9 @@ def _iso(value):
     return value.isoformat() if value else None
 
 
-# Типи ресурсів каталогу (навички живуть окремою моделлю Skill).
+# Види матеріалів. Від хвилі 6 джерело правди — довідник `catalog_terms`
+# (kind='material_type'), а ці константи лишаються початковим наповненням і
+# запасним варіантом для порожньої бази: новий вид додається з інтерфейсу.
 RESOURCE_TYPES = ("prompt", "instruction", "case", "agent", "mcp", "link")
 
 # Типи, для яких обов'язкове посилання (для MCP це endpoint сервера).
@@ -29,6 +31,32 @@ LINK_TYPES = ("agent", "mcp", "link")
 # Типи, які без тексту беззмістовні. MCP сюди не входить: інструкція
 # підключення бажана, але endpoint самодостатній.
 BODY_TYPES = ("prompt", "instruction", "case")
+
+# Поведінка й оформлення типових видів матеріалу — для первинного наповнення
+# довідника. Формат: код → (назва, іконка, колір, url?, текст?, область?,
+# підпис посилання, підпис тексту).
+DEFAULT_MATERIAL_TYPES = (
+    ("prompt", "Промпти", "✨", "ink", False, True, False, None, "Текст промпту"),
+    ("instruction", "Інструкції", "📄", "steel", False, True, False, None, "Інструкція"),
+    ("case", "Кейси", "💼", "green", False, True, False, None, "Опис кейсу"),
+    ("agent", "Агенти", "🤖", "amber", True, False, False, "Посилання", None),
+    ("mcp", "MCP-сервери", "🔌", "steel", True, False, True,
+     "Endpoint сервера", "Як підключити"),
+    ("link", "Корисні посилання", "🔗", "green", True, False, True, "Посилання", None),
+)
+
+DEFAULT_STATUS_TERMS = (
+    ("draft", "Чернетка", "✏️", "ink"),
+    ("published", "Опублікований", "✅", "green"),
+    ("needs_update", "Потребує оновлення", "⚠️", "amber"),
+    ("archived", "Архів", "📦", "steel"),
+)
+
+DEFAULT_REUSE_TERMS = (
+    ("ready", "Готове до використання", "Можна застосувати як є"),
+    ("adaptable", "Потребує адаптації", "Основа робоча, деталі під свій процес"),
+    ("reference", "Довідково", "Приклад для орієнтира"),
+)
 
 # Область посилання: зовнішній сервіс чи внутрішній ресурс компанії.
 LINK_SCOPES = ("external", "internal")
@@ -53,7 +81,13 @@ ACCENTS = ("red", "ink", "steel", "amber", "green")
 # business_value — бізнес-цінність (один на картку);
 # material_type  — вид матеріалу; значення прив'язані до RESOURCE_TYPES кодом,
 #                  через довідник керуються лише назва, порядок і видимість.
-TERM_KINDS = ("tag", "complexity", "business_value", "material_type", "maturity")
+TERM_KINDS = ("tag", "complexity", "business_value", "material_type", "maturity",
+              "status", "reuse_level", "accent")
+
+# Довідники, чий набір кодів визначає поведінку застосунку: додати значення
+# можна, але код кожного запису має бути відомий — від нього залежить логіка
+# життєвого циклу й оформлення.
+CODE_BOUND_TERM_KINDS = ("status", "accent")
 
 # Довідники, значення яких вибираються по одному на картку.
 SINGLE_VALUE_TERM_KINDS = ("complexity", "business_value")
@@ -192,10 +226,20 @@ class CatalogTerm(db.Model):
     name = db.Column(db.String, nullable=False)
     # Нижній регістр без крайніх пробілів — щоб «RAG» і « rag » не роз'їхалися.
     name_norm = db.Column(db.String, nullable=False)
-    code = db.Column(db.String)                   # лише для material_type
+    code = db.Column(db.String)                   # material_type, status, accent
     description = db.Column(db.Text)
     position = db.Column(db.Integer, nullable=False, default=0)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    # Оформлення запису: емодзі-іконка та колірний акцент плитки.
+    icon_emoji = db.Column(db.String)
+    color = db.Column(db.String)
+    # Поведінка виду матеріалу як ДАНІ, а не як константи в коді. Саме це
+    # дозволяє додати новий вид з інтерфейсу й одразу ним користуватися.
+    requires_url = db.Column(db.Boolean, nullable=False, default=False)
+    requires_body = db.Column(db.Boolean, nullable=False, default=False)
+    has_scope = db.Column(db.Boolean, nullable=False, default=False)
+    url_label = db.Column(db.String)               # напр. «endpoint сервера»
+    body_label = db.Column(db.String)              # напр. «Як підключити»
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
     @staticmethod
@@ -211,6 +255,13 @@ class CatalogTerm(db.Model):
             "description": self.description,
             "position": self.position,
             "is_active": self.is_active,
+            "icon_emoji": self.icon_emoji,
+            "color": self.color,
+            "requires_url": self.requires_url,
+            "requires_body": self.requires_body,
+            "has_scope": self.has_scope,
+            "url_label": self.url_label,
+            "body_label": self.body_label,
         }
         if counts is not None:
             data["items_count"] = counts.get(self.id, 0)
@@ -252,6 +303,8 @@ DEFAULT_SYNONYMS = (
     ("перекласти текст", "переклад, текст, мова"),
     ("знайти інформацію", "пошук, база знань, довідка"),
     ("навчитися працювати з ші", "навчання, інструкція, основи, промпт"),
+    ("з чого почати", "основи, промпт, навчання, ефективні"),
+    ("як почати працювати з ші", "основи, промпт, навчання, ефективні"),
     ("зробити презентацію", "презентація, слайди, текст, шаблон"),
     ("відповідати на звернення", "звернення, підтримка, агент, заявка"),
     ("аналіз даних", "аналітика, дані, звіт, показники"),

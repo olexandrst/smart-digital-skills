@@ -17,6 +17,7 @@ class TestConfig(BaseConfig):
     JWT_SECRET_KEY = "test"
     SECRET_KEY = "test"
     AUTO_MIGRATE = False  # тести керують схемою самостійно
+    SYNC_REFERENCE_DATA = False  # довідники наповнюються явно в тестах
     ENABLE_SCHEDULER = False  # без фонового планувальника у тестах
     CHAT_AUTONAME = False  # без фонового іменування чатів у тестах
     # Артефакти тестів — у тимчасову теку, не у instance/.

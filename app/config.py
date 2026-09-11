@@ -27,8 +27,26 @@ class BaseConfig:
         "sqlite:///" + os.path.join(INSTANCE_DIR, "profihub.db"),
     )
 
-    # Additive-автоміграція схеми при старті (SQLite, MVP без Alembic).
-    AUTO_MIGRATE = os.getenv("AUTO_MIGRATE", "1") == "1"
+    # --- Вхід через Microsoft Entra ID (NFR-04) ---
+    # Порожній TENANT або CLIENT вимикає корпоративний вхід: застосунок
+    # лишається на парольному, як у MVP.
+    ENTRA_TENANT_ID = os.getenv("ENTRA_TENANT_ID", "")
+    ENTRA_CLIENT_ID = os.getenv("ENTRA_CLIENT_ID", "")
+    ENTRA_CLIENT_SECRET = os.getenv("ENTRA_CLIENT_SECRET", "")
+    # URI повернення; має збігатися із зареєстрованим у застосунку Entra.
+    ENTRA_REDIRECT_URI = os.getenv("ENTRA_REDIRECT_URI", "")
+    # Групи каталогу (object id через кому), які дають ролі застосунку.
+    ENTRA_ADMIN_GROUPS = os.getenv("ENTRA_ADMIN_GROUPS", "")
+    ENTRA_MANAGER_GROUPS = os.getenv("ENTRA_MANAGER_GROUPS", "")
+    # Парольний вхід лишається для сервісних облікових записів; вимикається
+    # ENTRA_ALLOW_PASSWORD_LOGIN=0, коли всі входять через каталог.
+    ENTRA_ALLOW_PASSWORD_LOGIN = os.getenv("ENTRA_ALLOW_PASSWORD_LOGIN", "1") == "1"
+
+    # Схема ведеться Alembic: `alembic upgrade head`. AUTO_MIGRATE=1 вмикає
+    # запасне additive-доповнення схеми при старті (як було до хвилі 6).
+    AUTO_MIGRATE = os.getenv("AUTO_MIGRATE", "0") == "1"
+    # Синхронізація довідників і словників при старті (ідемпотентна).
+    SYNC_REFERENCE_DATA = os.getenv("SYNC_REFERENCE_DATA", "1") == "1"
 
     # Глобальний перемикач моку для всіх LLM-провайдерів.
     # За замовчуванням увімкнено (MVP працює без зовнішніх ключів).

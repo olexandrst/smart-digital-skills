@@ -19,3 +19,6 @@ instance/
 .vscode/
 .idea/
 .DS_Store
+
+# Кеш Alembic (сама історія міграцій — у migrations/versions і комітиться)
+migrations/versions/__pycache__/
