@@ -359,3 +359,471 @@ def test_mcp_counted_in_analytics(client):
     _mcp(client, h)
     a = client.get("/api/catalog/analytics", headers=h).get_json()
     assert a["by_type"]["mcp"] == 1
+
+
+# ------------------------------ Колекції ------------------------------
+
+def _folder(client, headers, section_id, **over):
+    payload = {"name": "Use Cases", "section_id": section_id,
+               "description": "Кейси застосування AI", "icon_emoji": "💼"}
+    payload.update(over)
+    return client.post("/api/catalog/folders", json=payload, headers=headers)
+
+
+def test_folder_crud(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+
+    res = _folder(client, h, sid)
+    assert res.status_code == 201, res.get_json()
+    fid = res.get_json()["id"]
+    assert res.get_json()["section_name"] == "Toolbox"
+
+    patched = client.patch(f"/api/catalog/folders/{fid}",
+                           json={"name": "Практичні кейси", "position": 3},
+                           headers=h)
+    assert patched.status_code == 200
+    assert patched.get_json()["name"] == "Практичні кейси"
+    assert patched.get_json()["position"] == 3
+
+    assert client.delete(f"/api/catalog/folders/{fid}", headers=h).status_code == 200
+    assert client.get("/api/catalog/folders", headers=h).get_json() == []
+
+
+def test_folder_requires_section(client):
+    h = _admin(client)
+    res = client.post("/api/catalog/folders", json={"name": "Без розділу"}, headers=h)
+    assert res.status_code == 400
+    assert "розділ" in res.get_json()["message"]
+
+
+def test_folder_name_unique_within_section_only(client):
+    """Однакові назви в різних розділах дозволені, у межах одного — ні."""
+    h = _admin(client)
+    first = _section(client, h).get_json()["id"]
+    second = _section(client, h, name="Learning Space").get_json()["id"]
+
+    assert _folder(client, h, first).status_code == 201
+    assert _folder(client, h, first, name="use cases").status_code == 409
+    assert _folder(client, h, second).status_code == 201
+
+
+def test_plain_user_may_not_create_folder(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    assert _folder(client, _login(client, "u1"), sid).status_code == 403
+
+
+def test_folder_sets_section_of_resource(client):
+    """Колекція задає розділ: шлях «розділ → колекція → картка» не суперечливий."""
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    other = _section(client, h, name="Insight Center").get_json()["id"]
+    fid = _folder(client, h, sid).get_json()["id"]
+
+    created = _resource(client, h, folder_id=fid, section_id=other)
+    assert created.status_code == 201
+    assert created.get_json()["section_id"] == sid
+    assert created.get_json()["folder_name"] == "Use Cases"
+
+
+def test_changing_section_detaches_foreign_folder(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    other = _section(client, h, name="Insight Center").get_json()["id"]
+    fid = _folder(client, h, sid).get_json()["id"]
+    rid = _resource(client, h, folder_id=fid).get_json()["id"]
+
+    moved = client.patch(f"/api/catalog/resources/{rid}",
+                         json={"section_id": other}, headers=h)
+    assert moved.status_code == 200
+    assert moved.get_json()["section_id"] == other
+    assert moved.get_json()["folder_id"] is None
+
+
+def test_deleting_folder_keeps_resources(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    fid = _folder(client, h, sid).get_json()["id"]
+    rid = _resource(client, h, folder_id=fid).get_json()["id"]
+
+    client.delete(f"/api/catalog/folders/{fid}", headers=h)
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert item["folder_id"] is None
+    assert item["section_id"] == sid          # матеріал лишився в розділі
+
+
+def test_deleting_section_removes_its_folders(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    fid = _folder(client, h, sid).get_json()["id"]
+    rid = _resource(client, h, folder_id=fid).get_json()["id"]
+
+    client.delete(f"/api/catalog/sections/{sid}", headers=h)
+    assert client.get("/api/catalog/folders", headers=h).get_json() == []
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert item["folder_id"] is None and item["section_id"] is None
+    assert fid  # колекція існувала до видалення розділу
+
+
+def test_moving_folder_moves_its_resources(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    other = _section(client, h, name="Insight Center").get_json()["id"]
+    fid = _folder(client, h, sid).get_json()["id"]
+    rid = _resource(client, h, folder_id=fid).get_json()["id"]
+
+    assert client.patch(f"/api/catalog/folders/{fid}", json={"section_id": other},
+                        headers=h).status_code == 200
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert item["section_id"] == other and item["folder_id"] == fid
+
+
+def test_folder_counts_resources(client):
+    h = _admin(client)
+    sid = _section(client, h).get_json()["id"]
+    fid = _folder(client, h, sid).get_json()["id"]
+    _resource(client, h, folder_id=fid)
+    _resource(client, h, name="Чернетка", folder_id=fid, status="draft")
+
+    folders = client.get("/api/catalog/folders", headers=h).get_json()
+    assert folders[0]["items_count"] == 2          # менеджер бачить і чернетку
+    plain = client.get("/api/catalog/folders", headers=_login(client, "u1")).get_json()
+    assert plain[0]["items_count"] == 1
+
+
+# ------------------------ Довідники метаданих ------------------------
+
+def _seed_terms(app):
+    """Наповнює довідники так, як це робить старт застосунку."""
+    from app.core.schema import seed_catalog_terms
+    with app.app_context():
+        seed_catalog_terms()
+
+
+def _term(client, headers, kind, name, **over):
+    payload = {"kind": kind, "name": name}
+    payload.update(over)
+    return client.post("/api/catalog/terms", json=payload, headers=headers)
+
+
+def _terms_of(client, headers, kind):
+    return client.get(f"/api/catalog/terms?kind={kind}", headers=headers).get_json()
+
+
+def test_default_terms_seeded(client, app):
+    _seed_terms(app)
+    h = _admin(client)
+    assert len(_terms_of(client, h, "complexity")) == 3
+    assert len(_terms_of(client, h, "business_value")) == 4
+    types = _terms_of(client, h, "material_type")
+    assert {t["code"] for t in types} == {"prompt", "instruction", "case",
+                                          "agent", "mcp", "link"}
+
+
+def test_seeding_terms_is_idempotent(client, app):
+    _seed_terms(app)
+    _seed_terms(app)
+    assert len(_terms_of(client, _admin(client), "complexity")) == 3
+
+
+def test_term_crud_and_duplicate_guard(client):
+    h = _admin(client)
+    created = _term(client, h, "complexity", "Базовий")
+    assert created.status_code == 201
+    tid = created.get_json()["id"]
+
+    assert _term(client, h, "complexity", " базовий ").status_code == 409
+    renamed = client.patch(f"/api/catalog/terms/{tid}", json={"name": "Початковий"},
+                           headers=h)
+    assert renamed.status_code == 200
+    assert renamed.get_json()["name"] == "Початковий"
+    assert client.delete(f"/api/catalog/terms/{tid}", headers=h).status_code == 200
+
+
+def test_unknown_term_kind_rejected(client):
+    assert _term(client, _admin(client), "colour", "Синій").status_code == 400
+
+
+def test_plain_user_may_not_manage_terms(client):
+    assert _term(client, _login(client, "u1"), "tag", "RAG").status_code == 403
+
+
+def test_material_types_not_addable_via_dictionary(client, app):
+    """Вид матеріалу задає поведінку коду — через довідник його не додати."""
+    _seed_terms(app)
+    h = _admin(client)
+    res = _term(client, h, "material_type", "Відеокурс")
+    assert res.status_code == 400
+    type_term = _terms_of(client, h, "material_type")[0]
+    assert client.delete(f"/api/catalog/terms/{type_term['id']}",
+                         headers=h).status_code == 400
+    renamed = client.patch(f"/api/catalog/terms/{type_term['id']}",
+                           json={"name": "Готові промпти"}, headers=h)
+    assert renamed.status_code == 200     # назву міняти можна
+
+
+def test_renaming_term_shows_in_cards(client):
+    h = _admin(client)
+    tid = _term(client, h, "complexity", "Базовий").get_json()["id"]
+    rid = _resource(client, h, complexity_id=tid).get_json()["id"]
+
+    client.patch(f"/api/catalog/terms/{tid}", json={"name": "Початковий"}, headers=h)
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert item["complexity_name"] == "Початковий"
+
+
+def test_complexity_outside_dictionary_rejected(client):
+    h = _admin(client)
+    tag = _term(client, h, "tag", "RAG").get_json()["id"]
+    assert _resource(client, h, complexity_id=9999).status_code == 400
+    # Термін іншого довідника теж не приймається.
+    assert _resource(client, h, name="Інший", complexity_id=tag).status_code == 400
+
+
+def test_tags_create_dictionary_entries(client):
+    h = _admin(client)
+    created = _resource(client, h, tags="RAG, Аналітика")
+    assert created.get_json()["tags"] == ["RAG", "Аналітика"]
+    assert {t["name"] for t in _terms_of(client, h, "tag")} == {"RAG", "Аналітика"}
+
+
+def test_tags_deduplicated_by_case_and_spaces(client):
+    h = _admin(client)
+    created = _resource(client, h, tags="RAG,  rag , RAG  ")
+    assert created.get_json()["tags"] == ["RAG"]
+    assert len(_terms_of(client, h, "tag")) == 1
+
+
+def test_tags_replaced_on_update(client):
+    h = _admin(client)
+    rid = _resource(client, h, tags="RAG, Аналітика").get_json()["id"]
+    updated = client.patch(f"/api/catalog/resources/{rid}",
+                           json={"tags": "Аналітика"}, headers=h)
+    assert updated.get_json()["tags"] == ["Аналітика"]
+
+
+def test_renaming_tag_shows_in_cards(client):
+    h = _admin(client)
+    rid = _resource(client, h, tags="RAG").get_json()["id"]
+    tid = _terms_of(client, h, "tag")[0]["id"]
+
+    client.patch(f"/api/catalog/terms/{tid}", json={"name": "Retrieval"}, headers=h)
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert item["tags"] == ["Retrieval"]
+
+
+def test_merging_tags_moves_cards_without_duplicates(client):
+    h = _admin(client)
+    both = _resource(client, h, tags="RAG, Пошук").get_json()["id"]
+    one = _resource(client, h, name="Другий", tags="RAG").get_json()["id"]
+    terms = {t["name"]: t["id"] for t in _terms_of(client, h, "tag")}
+
+    merged = client.post(f"/api/catalog/terms/{terms['RAG']}/merge",
+                         json={"into": terms["Пошук"]}, headers=h)
+    assert merged.status_code == 200
+    assert [t["name"] for t in _terms_of(client, h, "tag")] == ["Пошук"]
+    assert client.get(f"/api/catalog/resources/{both}",
+                      headers=h).get_json()["tags"] == ["Пошук"]
+    assert client.get(f"/api/catalog/resources/{one}",
+                      headers=h).get_json()["tags"] == ["Пошук"]
+
+
+def test_merging_complexity_moves_cards(client):
+    h = _admin(client)
+    src = _term(client, h, "complexity", "Складний").get_json()["id"]
+    dst = _term(client, h, "complexity", "Просунутий").get_json()["id"]
+    rid = _resource(client, h, complexity_id=src).get_json()["id"]
+
+    assert client.post(f"/api/catalog/terms/{src}/merge", json={"into": dst},
+                       headers=h).status_code == 200
+    assert client.get(f"/api/catalog/resources/{rid}",
+                      headers=h).get_json()["complexity_id"] == dst
+
+
+def test_merging_across_dictionaries_rejected(client):
+    h = _admin(client)
+    tag = _term(client, h, "tag", "RAG").get_json()["id"]
+    level = _term(client, h, "complexity", "Базовий").get_json()["id"]
+    assert client.post(f"/api/catalog/terms/{tag}/merge", json={"into": level},
+                       headers=h).status_code == 400
+
+
+def test_deleting_term_clears_it_in_cards(client):
+    h = _admin(client)
+    tid = _term(client, h, "complexity", "Базовий").get_json()["id"]
+    rid = _resource(client, h, complexity_id=tid).get_json()["id"]
+
+    client.delete(f"/api/catalog/terms/{tid}", headers=h)
+    assert client.get(f"/api/catalog/resources/{rid}",
+                      headers=h).get_json()["complexity_id"] is None
+
+
+def test_legacy_tags_migrated_into_dictionary(client, app):
+    """Старі теги рядком через кому переносяться в довідник без втрат і дублів."""
+    from app.extensions import db
+    from app.models import CatalogResource
+    from app.core.schema import migrate_legacy_tags
+
+    h = _admin(client)
+    rid = _resource(client, h).get_json()["id"]
+    with app.app_context():
+        # Імітуємо стан бази до появи довідника.
+        CatalogResource.query.filter_by(id=rid).update(
+            {CatalogResource.tags: "RAG, аналітика ,  RAG , Copilot"})
+        db.session.commit()
+        migrate_legacy_tags()
+        migrate_legacy_tags()        # повторний запуск нічого не дублює
+
+    item = client.get(f"/api/catalog/resources/{rid}", headers=h).get_json()
+    assert sorted(item["tags"]) == ["Copilot", "RAG", "аналітика"]
+    assert len(_terms_of(client, h, "tag")) == 3
+
+
+def test_migration_skips_resources_with_tags_already_linked(client, app):
+    from app.extensions import db
+    from app.models import CatalogResource
+    from app.core.schema import migrate_legacy_tags
+
+    h = _admin(client)
+    rid = _resource(client, h, tags="Актуальний").get_json()["id"]
+    with app.app_context():
+        CatalogResource.query.filter_by(id=rid).update(
+            {CatalogResource.tags: "Застарілий"})
+        db.session.commit()
+        migrate_legacy_tags()
+
+    assert client.get(f"/api/catalog/resources/{rid}",
+                      headers=h).get_json()["tags"] == ["Актуальний"]
+
+
+# ------------------------- Фільтри каталогу -------------------------
+
+def _names(client, headers, query=""):
+    res = client.get(f"/api/catalog/resources{query}", headers=headers)
+    assert res.status_code == 200, res.get_json()
+    return sorted(i["name"] for i in res.get_json())
+
+
+def _filter_fixture(client, headers):
+    """Два матеріали, що різняться кожним атрибутом фільтрації."""
+    sid = _section(client, headers).get_json()["id"]
+    other_section = _section(client, headers, name="Insight Center").get_json()["id"]
+    fid = _folder(client, headers, sid).get_json()["id"]
+    other_folder = _folder(client, headers, other_section,
+                           name="AI Solutions").get_json()["id"]
+    easy = _term(client, headers, "complexity", "Базовий").get_json()["id"]
+    hard = _term(client, headers, "complexity", "Просунутий").get_json()["id"]
+    time_saved = _term(client, headers, "business_value", "Економія часу").get_json()["id"]
+    quality = _term(client, headers, "business_value", "Якість рішень").get_json()["id"]
+
+    _resource(client, headers, name="Альфа", folder_id=fid, complexity_id=easy,
+              business_value_id=time_saved, reuse_level="ready", tools="Copilot",
+              owner="Іваненко", tags="RAG", category="Аналітика")
+    _resource(client, headers, name="Бета", folder_id=other_folder,
+              complexity_id=hard, business_value_id=quality, reuse_level="reference",
+              tools="Power Automate", owner="Петренко", tags="Автоматизація",
+              category="Автоматизація")
+    return {"section": sid, "folder": fid, "complexity": easy,
+            "business_value": time_saved, "other_section": other_section}
+
+
+def test_filter_by_folder(client):
+    h = _admin(client)
+    ids = _filter_fixture(client, h)
+    assert _names(client, h, f"?folder_id={ids['folder']}") == ["Альфа"]
+
+
+def test_filter_by_section(client):
+    h = _admin(client)
+    ids = _filter_fixture(client, h)
+    assert _names(client, h, f"?section_id={ids['section']}") == ["Альфа"]
+
+
+def test_filter_by_complexity(client):
+    h = _admin(client)
+    ids = _filter_fixture(client, h)
+    assert _names(client, h, f"?complexity_id={ids['complexity']}") == ["Альфа"]
+
+
+def test_filter_by_business_value(client):
+    h = _admin(client)
+    ids = _filter_fixture(client, h)
+    assert _names(client, h,
+                  f"?business_value_id={ids['business_value']}") == ["Альфа"]
+
+
+def test_filter_by_reuse_level(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    assert _names(client, h, "?reuse_level=ready") == ["Альфа"]
+    assert client.get("/api/catalog/resources?reuse_level=maybe",
+                      headers=h).status_code == 400
+
+
+def test_filter_by_tool(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    assert _names(client, h, "?tool=copilot") == ["Альфа"]      # без урахування регістру
+
+
+def test_filter_by_owner(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    assert _names(client, h, "?owner=Петренко") == ["Бета"]
+
+
+def test_filter_by_tag(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    tag = next(t for t in _terms_of(client, h, "tag") if t["name"] == "RAG")
+    assert _names(client, h, f"?tag_id={tag['id']}") == ["Альфа"]
+
+
+def test_filter_by_type(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    _resource(client, h, name="Посилання", resource_type="link",
+              url="https://example.com", body="")
+    assert _names(client, h, "?type=link") == ["Посилання"]
+
+
+def test_filter_by_status(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    _resource(client, h, name="Чернетка", status="draft")
+    assert _names(client, h, "?status=draft") == ["Чернетка"]
+    assert client.get("/api/catalog/resources?status=deleted",
+                      headers=h).status_code == 400
+
+
+def test_plain_user_may_not_filter_hidden_statuses(client):
+    h = _admin(client)
+    _resource(client, h, name="Чернетка", status="draft")
+    user = _login(client, "u1")
+    assert client.get("/api/catalog/resources?status=draft",
+                      headers=user).status_code == 403
+    assert _names(client, user, "?status=published") == []
+
+
+def test_filter_by_text_query(client):
+    h = _admin(client)
+    _filter_fixture(client, h)
+    assert _names(client, h, "?q=льф") == ["Альфа"]
+    assert _names(client, h, "?q=Петренко") == ["Бета"]
+
+
+def test_filters_combine(client):
+    h = _admin(client)
+    ids = _filter_fixture(client, h)
+    assert _names(client, h,
+                  f"?section_id={ids['section']}&reuse_level=ready&tool=Copilot"
+                  ) == ["Альфа"]
+    # Комбінація, що не має спільного результату, повертає порожній список.
+    assert _names(client, h,
+                  f"?section_id={ids['section']}&reuse_level=reference") == []
+
+
+def test_filter_by_unknown_folder_is_not_found(client):
+    assert client.get("/api/catalog/resources?folder_id=9999",
+                      headers=_admin(client)).status_code == 404

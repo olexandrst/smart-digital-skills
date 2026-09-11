@@ -74,6 +74,88 @@ def sync_schema():
     # Зняти NOT NULL зі skills.model_id (потрібно для скілів-пакетів).
     relax_not_null("skills", "model_id")
 
+    seed_catalog_terms()
+    migrate_legacy_tags()
+
+
+def seed_catalog_terms():
+    """Наповнює керовані довідники метаданих значеннями за замовчуванням (FR-04).
+
+    Ідемпотентно: наявні значення не чіпаються, тож перейменування, зроблені
+    менеджером, переживають перезапуск застосунку.
+    """
+    from app.models import CatalogTerm, DEFAULT_TERMS, RESOURCE_TYPES
+
+    existing = {(t.kind, t.name_norm) for t in CatalogTerm.query.all()}
+    added = False
+    for kind, values in DEFAULT_TERMS.items():
+        for position, (name, description) in enumerate(values):
+            key = (kind, CatalogTerm.normalize(name))
+            if key in existing:
+                continue
+            db.session.add(CatalogTerm(
+                kind=kind, name=name, name_norm=key[1],
+                description=description, position=position))
+            existing.add(key)
+            added = True
+
+    # Види матеріалів: запис довідника на кожен код із RESOURCE_TYPES.
+    have_codes = {t.code for t in CatalogTerm.query.filter_by(kind="material_type")}
+    labels = {"prompt": "Промпти", "instruction": "Інструкції", "case": "Кейси",
+              "agent": "Агенти", "mcp": "MCP-сервери", "link": "Корисні посилання"}
+    for position, code in enumerate(RESOURCE_TYPES):
+        if code in have_codes:
+            continue
+        name = labels.get(code, code)
+        db.session.add(CatalogTerm(
+            kind="material_type", code=code, name=name,
+            name_norm=CatalogTerm.normalize(name), position=position))
+        added = True
+
+    if added:
+        db.session.commit()
+
+
+def migrate_legacy_tags():
+    """Переносить теги зі старого рядка через кому в керований довідник (FR-02).
+
+    Одноразова операція: матеріал із уже створеними зв'язками пропускається,
+    тому повторний запуск нічого не змінює. Значення, що відрізняються лише
+    регістром чи пробілами, зводяться до одного терміна.
+    """
+    from app.models import CatalogTerm, CatalogResource, CatalogResourceTag
+
+    pending = (CatalogResource.query
+               .filter(CatalogResource.tags.isnot(None))
+               .filter(CatalogResource.tags != "").all())
+    if not pending:
+        return
+    linked = {row.resource_id for row in
+              db.session.query(CatalogResourceTag.resource_id).distinct()}
+    known = {t.name_norm: t for t in CatalogTerm.query.filter_by(kind="tag")}
+
+    changed = False
+    for res in pending:
+        if res.id in linked:
+            continue
+        seen = set()
+        for raw in res.tags.split(","):
+            name = " ".join(raw.split())
+            norm = CatalogTerm.normalize(name)
+            if not name or norm in seen:
+                continue
+            seen.add(norm)
+            term = known.get(norm)
+            if term is None:
+                term = CatalogTerm(kind="tag", name=name, name_norm=norm)
+                db.session.add(term)
+                db.session.flush()
+                known[norm] = term
+            db.session.add(CatalogResourceTag(resource_id=res.id, term_id=term.id))
+            changed = True
+    if changed:
+        db.session.commit()
+
 
 def relax_not_null(table_name, column_name):
     """Робить колонку nullable у SQLite через перебудову таблиці (якщо потрібно)."""

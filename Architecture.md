@@ -172,6 +172,9 @@ erDiagram
 | `skills` | Каталог скілів, життєвий цикл, версія, лічильник активацій |
 | `skill_inputs` | Параметри вхідних даних скіла (обов'язкові/опціональні) |
 | `catalog_sections` | Розділи каталогу («Business Box») — друга вісь навігації хабу |
+| `catalog_folders` | Колекції всередині розділу («Folder») — третій рівень навігації |
+| `catalog_terms` | Керовані довідники: теги, складність, бізнес-цінність, види матеріалів |
+| `catalog_resource_tags` | Зв'язок «картка ↔ тег» |
 | `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання |
 | `catalog_favorites` | «Обране» користувача (спільне для скілів і ресурсів каталогу) |
 | `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
@@ -333,6 +336,43 @@ CREATE TABLE catalog_sections (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Колекції всередині розділу — третій рівень моделі Warehouse → Boxes → Folders → Files.
+CREATE TABLE catalog_folders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_id  INTEGER NOT NULL REFERENCES catalog_sections(id),
+    name        TEXT NOT NULL,
+    description TEXT,                          -- призначення колекції
+    icon_emoji  TEXT,
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (section_id, name)
+);
+
+-- Керовані довідники метаданих. Картка посилається на термін за id, тому
+-- перейменування одразу видно в усіх матеріалах.
+-- code заповнений лише для material_type — прив'язка до констант у коді.
+CREATE TABLE catalog_terms (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL
+                CHECK (kind IN ('tag','complexity','business_value','material_type')),
+    name        TEXT NOT NULL,
+    name_norm   TEXT NOT NULL,                 -- нижній регістр без зайвих пробілів
+    code        TEXT,
+    description TEXT,
+    position    INTEGER NOT NULL DEFAULT 0,
+    is_active   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (kind, name_norm)
+);
+
+CREATE TABLE catalog_resource_tags (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    resource_id INTEGER NOT NULL REFERENCES catalog_resources(id) ON DELETE CASCADE,
+    term_id     INTEGER NOT NULL REFERENCES catalog_terms(id) ON DELETE CASCADE,
+    UNIQUE (resource_id, term_id)
+);
+
 -- Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання
 CREATE TABLE catalog_resources (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -343,9 +383,12 @@ CREATE TABLE catalog_resources (
     description    TEXT NOT NULL DEFAULT '',
     category       TEXT,
     section_id     INTEGER REFERENCES catalog_sections(id),
+    folder_id      INTEGER REFERENCES catalog_folders(id),
+    complexity_id      INTEGER REFERENCES catalog_terms(id),
+    business_value_id  INTEGER REFERENCES catalog_terms(id),
     author         TEXT,
     owner          TEXT,                         -- відповідальний за матеріал
-    tags           TEXT,                         -- через кому
+    tags           TEXT,                         -- спадщина: до переходу на catalog_resource_tags
     body           TEXT,                         -- текст промпту / інструкції (Markdown)
     url            TEXT,                         -- посилання (agent | link)
     link_scope     TEXT CHECK (link_scope IN ('external','internal')),

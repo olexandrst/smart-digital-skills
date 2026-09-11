@@ -141,8 +141,13 @@ def seed():
         # 10. Розділи каталогу (дзеркало меню корпоративного AI Knowledge Hub)
         sections = _seed_catalog_sections()
 
-        # 11. Наповнення каталогу: промпти, інструкції, кейси, агенти, посилання
-        _seed_catalog_resources(admin, sections)
+        # 11. Колекції та довідники метаданих
+        folders = _seed_catalog_folders(sections)
+        from app.core.schema import seed_catalog_terms
+        seed_catalog_terms()
+
+        # 12. Наповнення каталогу: промпти, інструкції, кейси, агенти, посилання
+        _seed_catalog_resources(admin, sections, folders)
 
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
@@ -246,6 +251,59 @@ def _seed_catalog_sections():
         db.session.commit()
         print(f"  Каталог: додано розділів — {created}")
     return {s.name: s.id for s in CatalogSection.query.all()}
+
+
+# Типові колекції з BRD (BR-04) та розділ, у якому кожна живе.
+CATALOG_FOLDERS = [
+    ("Toolbox", "Created Agents", "Готові агенти, створені в компанії", "🤖"),
+    ("Toolbox", "Practical Skills", "Навички щоденної роботи з AI", "🎯"),
+    ("Toolbox", "AI Solutions", "Впроваджені AI-рішення та сервіси", "⚙️"),
+    ("Insight Center", "Templates & Prompts", "Шаблони документів і перевірені промпти", "📝"),
+    ("Insight Center", "Use Cases", "Кейси застосування AI у бізнес-процесах", "💼"),
+    ("Learning Space", "Cataloging Knowledge", "Правила ведення бази знань і метадані", "🗂️"),
+]
+
+
+def _seed_catalog_folders(sections):
+    """Створює типові колекції (ідемпотентно). Повертає мапу назва → id."""
+    from app.models import CatalogFolder
+
+    created = 0
+    for position, (section_name, name, description, emoji) in enumerate(CATALOG_FOLDERS):
+        section_id = sections.get(section_name)
+        if section_id is None:
+            continue
+        if CatalogFolder.query.filter_by(section_id=section_id, name=name).first():
+            continue
+        db.session.add(CatalogFolder(
+            section_id=section_id, name=name, description=description,
+            icon_emoji=emoji, position=position))
+        created += 1
+    if created:
+        db.session.commit()
+        print(f"  Каталог: додано колекцій — {created}")
+    return {f.name: f.id for f in CatalogFolder.query.all()}
+
+
+# Куди складати демо-матеріали: (розділ, вид матеріалу) → колекція.
+# Частина матеріалів навмисно лишається без колекції — вони мають бути
+# доступні на рівні розділу, а не зникати з каталогу.
+DEMO_FOLDER_BY_TYPE = {
+    ("Insight Center", "prompt"): "Templates & Prompts",
+    ("Insight Center", "case"): "Use Cases",
+    ("Toolbox", "agent"): "Created Agents",
+    ("Toolbox", "mcp"): "AI Solutions",
+}
+
+# Демо-значення керованих довідників за видом матеріалу.
+DEMO_TERMS_BY_TYPE = {
+    "prompt": ("Базовий", "Економія часу"),
+    "instruction": ("Базовий", "Якість рішень"),
+    "case": ("Середній", "Масштабування досвіду"),
+    "agent": ("Середній", "Економія часу"),
+    "mcp": ("Просунутий", "Нова можливість"),
+    "link": ("Базовий", "Якість рішень"),
+}
 
 
 CATALOG_DEMO = [
@@ -403,11 +461,13 @@ CATALOG_DEMO = [
 ]
 
 
-def _seed_catalog_resources(admin, sections):
+def _seed_catalog_resources(admin, sections, folders):
     """Демо-наповнення каталогу: промпти, інструкції, кейси, агенти, посилання."""
     from datetime import datetime, timedelta
-    from app.models import CatalogResource
+    from app.models import CatalogResource, CatalogTerm
+    from app.core.schema import migrate_legacy_tags
 
+    term_ids = {(t.kind, t.name): t.id for t in CatalogTerm.query.all()}
     now = datetime.utcnow()
     created = 0
     for spec in CATALOG_DEMO:
@@ -415,8 +475,13 @@ def _seed_catalog_resources(admin, sections):
             continue
         fields = dict(spec)
         section_name = fields.pop("section", None)
+        rtype = fields["resource_type"]
+        complexity, value = DEMO_TERMS_BY_TYPE.get(rtype, (None, None))
         db.session.add(CatalogResource(
             **fields, section_id=sections.get(section_name),
+            folder_id=folders.get(DEMO_FOLDER_BY_TYPE.get((section_name, rtype))),
+            complexity_id=term_ids.get(("complexity", complexity)),
+            business_value_id=term_ids.get(("business_value", value)),
             status="published", published_at=now,
             reviewed_at=now, next_review_at=now + timedelta(days=180),
             author="Metinvest Digital", created_by=admin.id))
@@ -425,7 +490,12 @@ def _seed_catalog_resources(admin, sections):
         db.session.commit()
         print(f"  Каталог: додано ресурсів — {created}")
 
-    # Навички теж належать до розділу — щоб вісь працювала для всього каталогу.
+    # Теги демо-матеріалів задані рядком через кому — тим самим переносом,
+    # що й для старих баз, розкладаємо їх у керований довідник.
+    migrate_legacy_tags()
+
+    # Навички теж належать до розділу й колекції — щоб обидві осі навігації
+    # працювали для всього каталогу, а не лише для ресурсів.
     toolbox_id = sections.get("Toolbox")
     if toolbox_id:
         unassigned = Skill.query.filter_by(section_id=None).all()
@@ -433,6 +503,13 @@ def _seed_catalog_resources(admin, sections):
             skill.section_id = toolbox_id
             skill.owner = skill.owner or "Антон Іщенко"
         if unassigned:
+            db.session.commit()
+    skills_folder = folders.get("Practical Skills")
+    if skills_folder:
+        homeless = Skill.query.filter_by(folder_id=None, section_id=toolbox_id).all()
+        for skill in homeless:
+            skill.folder_id = skills_folder
+        if homeless:
             db.session.commit()
 
 

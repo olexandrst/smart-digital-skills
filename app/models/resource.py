@@ -4,8 +4,9 @@
 «ресурси» з єдиною моделлю: різниця лише в `resource_type` та наборі
 заповнених полів (текст промпту/інструкції або посилання на агента/сервіс).
 
-Тут же — друга вісь навігації (`CatalogSection`), журнал перегляду матеріалів
-та лог пошукових запитів для аналітики хабу.
+Тут же — навігація каталогу (`CatalogSection` → `CatalogFolder`), керовані
+довідники метаданих (`CatalogTerm`), журнал перегляду матеріалів та лог
+пошукових запитів для аналітики хабу.
 """
 from datetime import datetime
 from app.extensions import db
@@ -46,6 +47,43 @@ REUSE_LEVELS = ("ready", "adaptable", "reference")
 # Акцент кольорової плитки-іконки у стилі Metinvest Digital.
 ACCENTS = ("red", "ink", "steel", "amber", "green")
 
+# Види керованих довідників метаданих (FR-04).
+# tag            — теги матеріалів (багато на картку);
+# complexity     — рівень складності (один на картку);
+# business_value — бізнес-цінність (один на картку);
+# material_type  — вид матеріалу; значення прив'язані до RESOURCE_TYPES кодом,
+#                  через довідник керуються лише назва, порядок і видимість.
+TERM_KINDS = ("tag", "complexity", "business_value", "material_type")
+
+# Довідники, значення яких вибираються по одному на картку.
+SINGLE_VALUE_TERM_KINDS = ("complexity", "business_value")
+
+# Початкове наповнення довідників: (назва, опис). Порядок = порядок у списках.
+DEFAULT_TERMS = {
+    "complexity": [
+        ("Базовий", "Застосовується без підготовки"),
+        ("Середній", "Потрібне розуміння інструменту"),
+        ("Просунутий", "Потрібні технічні навички або налаштування"),
+    ],
+    "business_value": [
+        ("Економія часу", "Скорочує тривалість рутинної роботи"),
+        ("Якість рішень", "Зменшує кількість помилок або підвищує точність"),
+        ("Масштабування досвіду", "Дає змогу повторити рішення в інших підрозділах"),
+        ("Нова можливість", "Робить здійсненним те, чого раніше не робили"),
+    ],
+}
+
+# Типові колекції з BRD (BR-04). Ключ — назва розділу, у якому створюється
+# колекція під час первинного наповнення; порядок збережено.
+DEFAULT_FOLDERS = (
+    ("Created Agents", "Готові агенти, створені в компанії", "🤖"),
+    ("Practical Skills", "Навички та практики щоденної роботи з AI", "🎯"),
+    ("AI Solutions", "Впроваджені AI-рішення та їхні результати", "⚙️"),
+    ("Templates & Prompts", "Шаблони документів і перевірені промпти", "📝"),
+    ("Use Cases", "Кейси застосування AI у бізнес-процесах", "💼"),
+    ("Cataloging Knowledge", "Правила ведення бази знань і метадані", "🗂️"),
+)
+
 
 class CatalogSection(db.Model):
     """Розділ каталогу («Business Box» із BRD) — друга вісь навігації.
@@ -83,6 +121,104 @@ class CatalogSection(db.Model):
         return data
 
 
+class CatalogFolder(db.Model):
+    """Колекція матеріалів усередині розділу — третій рівень навігації (BR-03).
+
+    Модель BRD: Warehouse → Boxes → Folders → Files. «Box» — це `CatalogSection`,
+    «Folder» — ця колекція, «File» — картка матеріалу. Колекція завжди належить
+    розділу: без нього шлях навігації обривається. Матеріал може бути без
+    колекції — тоді він доступний на рівні розділу й у пошуку.
+    """
+    __tablename__ = "catalog_folders"
+    __table_args__ = (db.UniqueConstraint("section_id", "name"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    section_id = db.Column(db.Integer, db.ForeignKey("catalog_sections.id"),
+                           nullable=False)
+    name = db.Column(db.String, nullable=False)
+    description = db.Column(db.Text)      # призначення колекції (BR-04)
+    icon_emoji = db.Column(db.String)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+    section = db.relationship("CatalogSection", lazy="joined")
+
+    def to_dict(self, counts=None):
+        data = {
+            "id": self.id,
+            "section_id": self.section_id,
+            "section_name": self.section.name if self.section else None,
+            "name": self.name,
+            "description": self.description,
+            "icon_emoji": self.icon_emoji,
+            "position": self.position,
+            "is_active": self.is_active,
+        }
+        if counts is not None:
+            data["items_count"] = counts.get(self.id, 0)
+        return data
+
+
+class CatalogTerm(db.Model):
+    """Значення керованого довідника метаданих (FR-04).
+
+    Один довідник на кожен `kind` із TERM_KINDS. Картка посилається на термін
+    за id, тому перейменування терміна одразу видно в усіх картках — у цьому й
+    сенс довідника порівняно з вільним текстом.
+
+    `code` заповнений лише для `material_type`: він прив'язує запис довідника до
+    константи RESOURCE_TYPES, від якої залежить поведінка коду (обов'язковість
+    посилання чи тексту). Додавання видів матеріалів із новою поведінкою —
+    окрема задача; тут керуються назва, порядок і видимість.
+    """
+    __tablename__ = "catalog_terms"
+    __table_args__ = (db.UniqueConstraint("kind", "name_norm"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String, nullable=False)   # TERM_KINDS
+    name = db.Column(db.String, nullable=False)
+    # Нижній регістр без крайніх пробілів — щоб «RAG» і « rag » не роз'їхалися.
+    name_norm = db.Column(db.String, nullable=False)
+    code = db.Column(db.String)                   # лише для material_type
+    description = db.Column(db.Text)
+    position = db.Column(db.Integer, nullable=False, default=0)
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+    @staticmethod
+    def normalize(name):
+        return " ".join(str(name or "").split()).casefold()
+
+    def to_dict(self, counts=None):
+        data = {
+            "id": self.id,
+            "kind": self.kind,
+            "name": self.name,
+            "code": self.code,
+            "description": self.description,
+            "position": self.position,
+            "is_active": self.is_active,
+        }
+        if counts is not None:
+            data["items_count"] = counts.get(self.id, 0)
+        return data
+
+
+class CatalogResourceTag(db.Model):
+    """Зв'язок «картка ↔ тег» (FR-02): теги керовані, а не рядок через кому."""
+    __tablename__ = "catalog_resource_tags"
+    __table_args__ = (db.UniqueConstraint("resource_id", "term_id"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    resource_id = db.Column(db.Integer,
+                            db.ForeignKey("catalog_resources.id", ondelete="CASCADE"),
+                            nullable=False)
+    term_id = db.Column(db.Integer,
+                        db.ForeignKey("catalog_terms.id", ondelete="CASCADE"),
+                        nullable=False)
+
+
 class CatalogResource(db.Model):
     __tablename__ = "catalog_resources"
 
@@ -92,11 +228,17 @@ class CatalogResource(db.Model):
     description = db.Column(db.Text, nullable=False, default="")
     category = db.Column(db.String)
     author = db.Column(db.String)
-    tags = db.Column(db.String)          # через кому: "RAG, аналітика"
+    # Спадщина: теги рядком через кому. Тепер джерело правди — catalog_resource_tags;
+    # ця колонка лишена тільки як вхід для одноразового перенесення старих даних
+    # (app/core/schema.py) і більше не пишеться.
+    tags = db.Column(db.String)
     body = db.Column(db.Text)            # текст промпту або інструкції (Markdown)
     url = db.Column(db.String)           # посилання (агенти, корисні посилання)
     link_scope = db.Column(db.String)    # external | internal (для посилань)
     section_id = db.Column(db.Integer, db.ForeignKey("catalog_sections.id"))
+    folder_id = db.Column(db.Integer, db.ForeignKey("catalog_folders.id"))
+    complexity_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
+    business_value_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
     owner = db.Column(db.String)         # відповідальний за матеріал (BR-11)
     tools = db.Column(db.String)         # інструменти та платформи
     reuse_level = db.Column(db.String)   # ready | adaptable | reference (BR-14)
@@ -114,9 +256,18 @@ class CatalogResource(db.Model):
     published_at = db.Column(db.DateTime)
 
     section = db.relationship("CatalogSection", lazy="joined")
+    folder = db.relationship("CatalogFolder", lazy="joined")
+    complexity = db.relationship("CatalogTerm", lazy="joined",
+                                 foreign_keys=[complexity_id])
+    business_value = db.relationship("CatalogTerm", lazy="joined",
+                                     foreign_keys=[business_value_id])
+    tag_terms = db.relationship(
+        "CatalogTerm", lazy="selectin", order_by="CatalogTerm.name",
+        secondary="catalog_resource_tags", viewonly=True)
 
     def tag_list(self):
-        return [t.strip() for t in (self.tags or "").split(",") if t.strip()]
+        """Назви тегів матеріалу — з довідника, у стабільному порядку."""
+        return [t.name for t in self.tag_terms]
 
     def is_review_overdue(self):
         """Чи минула дата наступного перегляду (для звіту про актуальність)."""
@@ -132,6 +283,13 @@ class CatalogResource(db.Model):
             "category": self.category,
             "section_id": self.section_id,
             "section_name": self.section.name if self.section else None,
+            "folder_id": self.folder_id,
+            "folder_name": self.folder.name if self.folder else None,
+            "complexity_id": self.complexity_id,
+            "complexity_name": self.complexity.name if self.complexity else None,
+            "business_value_id": self.business_value_id,
+            "business_value_name": (self.business_value.name
+                                    if self.business_value else None),
             "author": self.author,
             "owner": self.owner,
             "tools": self.tools,

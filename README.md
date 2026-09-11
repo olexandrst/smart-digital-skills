@@ -451,7 +451,16 @@ smart-digital-skills/
 | POST | `/catalog/sections` | Створення розділу | Admin/Skill Manager |
 | PATCH | `/catalog/sections/{id}` | Редагування розділу | Admin/Skill Manager |
 | DELETE | `/catalog/sections/{id}` | Видалення розділу (матеріали зберігаються) | Admin/Skill Manager |
-| GET | `/catalog/resources` | Матеріали (`?type=prompt\|instruction\|case\|agent\|mcp\|link`, `?section_id=`) | авторизовані |
+| GET | `/catalog/folders` | Колекції розділів (`?section_id=`) з кількістю матеріалів | авторизовані |
+| POST | `/catalog/folders` | Створення колекції (потребує `section_id`) | Admin/Skill Manager |
+| PATCH | `/catalog/folders/{id}` | Редагування колекції; зміна розділу переносить матеріали | Admin/Skill Manager |
+| DELETE | `/catalog/folders/{id}` | Видалення колекції (матеріали лишаються в розділі) | Admin/Skill Manager |
+| GET | `/catalog/terms` | Довідники (`?kind=tag\|complexity\|business_value\|material_type`) | авторизовані |
+| POST | `/catalog/terms` | Нове значення довідника | Admin/Skill Manager |
+| PATCH | `/catalog/terms/{id}` | Перейменування / видимість значення | Admin/Skill Manager |
+| POST | `/catalog/terms/{id}/merge` | Злиття значення в інше (`{"into": id}`) | Admin/Skill Manager |
+| DELETE | `/catalog/terms/{id}` | Видалення значення (посилання в картках знімаються) | Admin/Skill Manager |
+| GET | `/catalog/resources` | Матеріали з фільтрами: `type`, `section_id`, `folder_id`, `status`, `complexity_id`, `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q` | авторизовані |
 | GET | `/catalog/resources/{id}` | Детальна картка ресурсу | авторизовані |
 | POST | `/catalog/resources` | Створення ресурсу | Admin/Skill Manager |
 | PATCH | `/catalog/resources/{id}` | Редагування ресурсу | Admin/Skill Manager |

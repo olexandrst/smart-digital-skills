@@ -14,9 +14,11 @@ from app.models.chat import (
     AuditLog,
 )
 from app.models.resource import (
-    CatalogSection, CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
+    CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
+    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
+    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, DEFAULT_TERMS, DEFAULT_FOLDERS,
 )
 from app.models.file import UserFile
 from app.models.setting import AppSetting
@@ -44,10 +46,17 @@ __all__ = [
     "TokenCounter",
     "AuditLog",
     "CatalogSection",
+    "CatalogFolder",
+    "CatalogTerm",
+    "CatalogResourceTag",
     "CatalogResource",
     "CatalogFavorite",
     "ReviewLog",
     "SearchQueryLog",
+    "TERM_KINDS",
+    "SINGLE_VALUE_TERM_KINDS",
+    "DEFAULT_TERMS",
+    "DEFAULT_FOLDERS",
     "RESOURCE_STATUSES",
     "PUBLIC_STATUSES",
     "REUSE_LEVELS",

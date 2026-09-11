@@ -11,10 +11,12 @@ from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
-    CatalogSection, CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
+    CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
+    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
     Skill, SkillFeedback, AppSetting,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
+    TERM_KINDS, SINGLE_VALUE_TERM_KINDS,
 )
 
 bp = Blueprint("catalog", __name__)
@@ -60,19 +62,73 @@ def _clean_url(value, required, label="посилання"):
     return url
 
 
-def _clean_tags(value):
-    """Приймає список або рядок через кому; повертає нормалізований рядок."""
+MAX_TAGS = 8
+
+
+def _tag_names(value):
+    """Приймає список або рядок через кому; повертає назви тегів без дублів."""
     if value is None:
         return None
     items = value.split(",") if isinstance(value, str) else list(value)
-    tags, seen = [], set()
+    names, seen = [], set()
     for raw in items:
-        tag = str(raw).strip()
-        key = tag.casefold()
-        if tag and key not in seen:
+        # Внутрішні пробіли схлопуємо, щоб «AI  Agent» і «AI Agent» були одним тегом.
+        name = " ".join(str(raw).split())
+        key = CatalogTerm.normalize(name)
+        if name and key not in seen:
             seen.add(key)
-            tags.append(tag)
-    return ", ".join(tags[:8])
+            names.append(name)
+    return names[:MAX_TAGS]
+
+
+def _term_by_name(kind, name):
+    """Знаходить термін довідника за назвою без урахування регістру й пробілів."""
+    return CatalogTerm.query.filter_by(kind=kind,
+                                       name_norm=CatalogTerm.normalize(name)).first()
+
+
+def _set_tags(res, value):
+    """Перезаписує теги матеріалу, створюючи відсутні терміни довідника.
+
+    Користувач може запропонувати новий тег прямо в редакторі — він одразу стає
+    значенням довідника, доступним іншим карткам.
+    """
+    names = _tag_names(value)
+    if names is None:
+        return
+    terms = []
+    for name in names:
+        term = _term_by_name("tag", name)
+        if term is None:
+            term = CatalogTerm(kind="tag", name=name,
+                               name_norm=CatalogTerm.normalize(name))
+            db.session.add(term)
+            db.session.flush()
+        terms.append(term)
+
+    if res.id is None:
+        db.session.flush()  # потрібен id матеріалу для рядків зв'язку
+    CatalogResourceTag.query.filter_by(resource_id=res.id).delete(
+        synchronize_session=False)
+    for term in terms:
+        db.session.add(CatalogResourceTag(resource_id=res.id, term_id=term.id))
+    # Щоб `res.tag_terms` не віддав кеш попереднього набору в тій самій транзакції.
+    db.session.expire(res, ["tag_terms"])
+
+
+def _resolve_term(kind, value, label):
+    """Перевіряє, що значення належить довіднику `kind`. Порожнє → None."""
+    if value in (None, "", 0):
+        return None
+    try:
+        term_id = int(value)
+    except (TypeError, ValueError):
+        raise ApiError(f"Некоректне значення поля «{label}»", 400, "validation_error")
+    term = CatalogTerm.query.get(term_id)
+    if term is None or term.kind != kind:
+        raise ApiError(f"Значення поля «{label}» відсутнє в довіднику",
+                       400, "validation_error")
+    return term.id
 
 
 def _parse_date(value, field):
@@ -99,6 +155,41 @@ def _resolve_section(section_id):
     return section_id
 
 
+def _resolve_folder(folder_id):
+    """Повертає колекцію за id (або None), 404 — якщо такої немає."""
+    if folder_id in (None, "", 0):
+        return None
+    try:
+        folder_id = int(folder_id)
+    except (TypeError, ValueError):
+        raise ApiError("Некоректна колекція", 400, "validation_error")
+    folder = CatalogFolder.query.get(folder_id)
+    if folder is None:
+        raise ApiError("Колекцію не знайдено", 404, "not_found")
+    return folder
+
+
+def _apply_placement(item, data):
+    """Узгоджує розділ і колекцію матеріалу (BR-03).
+
+    Колекція завжди належить розділу, тому вибір колекції задає й розділ. Якщо
+    ж змінили лише розділ, а колекція належала іншому — прив'язка до колекції
+    знімається, щоб у картці не лишалося суперечливого шляху навігації.
+    """
+    if "folder_id" in data:
+        folder = _resolve_folder(data.get("folder_id"))
+        item.folder_id = folder.id if folder else None
+        if folder is not None:
+            item.section_id = folder.section_id
+            return
+    if "section_id" in data:
+        item.section_id = _resolve_section(data.get("section_id"))
+        if item.folder_id is not None:
+            folder = CatalogFolder.query.get(item.folder_id)
+            if folder is None or folder.section_id != item.section_id:
+                item.folder_id = None
+
+
 def _apply_fields(res, data, *, creating=False):
     """Переносить поля запиту в ресурс із валідацією (спільне для POST/PATCH)."""
     if creating or "resource_type" in data:
@@ -123,11 +214,14 @@ def _apply_fields(res, data, *, creating=False):
             value = (data.get(field) or "").strip()
             setattr(res, field, value or None)
 
-    if "section_id" in data:
-        res.section_id = _resolve_section(data.get("section_id"))
+    _apply_placement(res, data)
 
-    if "tags" in data:
-        res.tags = _clean_tags(data.get("tags"))
+    if "complexity_id" in data:
+        res.complexity_id = _resolve_term("complexity", data.get("complexity_id"),
+                                          "складність")
+    if "business_value_id" in data:
+        res.business_value_id = _resolve_term(
+            "business_value", data.get("business_value_id"), "бізнес-цінність")
 
     if "reuse_level" in data:
         level = (data.get("reuse_level") or "").strip()
@@ -175,6 +269,9 @@ def _apply_fields(res, data, *, creating=False):
     # Промпт, інструкція та кейс без тексту — беззмістовні.
     if res.resource_type in BODY_TYPES and creating and not res.body:
         raise ApiError("Додайте текст матеріалу", 400, "validation_error")
+
+    # Теги живуть в окремій таблиці й потребують id матеріалу — їх застосовує
+    # виклик `_set_tags` уже після flush (див. create_resource / update_resource).
 
 
 def _require_publish_ready(res):
@@ -285,6 +382,16 @@ def update_section(section_id):
 def delete_section(section_id):
     """Видаляє розділ. Матеріали зберігаються — у них знімається прив'язка."""
     section = CatalogSection.query.get_or_404(section_id)
+    folder_ids = [f.id for f in CatalogFolder.query.filter_by(section_id=section_id)]
+    if folder_ids:
+        # Колекція не живе без розділу — знімаємо прив'язку й видаляємо її разом
+        # із розділом; самі матеріали лишаються в каталозі.
+        CatalogResource.query.filter(CatalogResource.folder_id.in_(folder_ids)).update(
+            {CatalogResource.folder_id: None}, synchronize_session=False)
+        Skill.query.filter(Skill.folder_id.in_(folder_ids)).update(
+            {Skill.folder_id: None}, synchronize_session=False)
+        CatalogFolder.query.filter(CatalogFolder.id.in_(folder_ids)).delete(
+            synchronize_session=False)
     CatalogResource.query.filter_by(section_id=section_id).update(
         {CatalogResource.section_id: None}, synchronize_session=False)
     Skill.query.filter_by(section_id=section_id).update(
@@ -294,27 +401,369 @@ def delete_section(section_id):
     return jsonify({"message": "Розділ видалено"})
 
 
+# ------------------------------ Колекції ------------------------------
+
+def _folder_counts(manager):
+    """Кількість матеріалів у кожній колекції (з урахуванням видимості статусів)."""
+    statuses = RESOURCE_STATUSES if manager else PUBLIC_STATUSES
+    counts = dict(
+        db.session.query(CatalogResource.folder_id, func.count(CatalogResource.id))
+        .filter(CatalogResource.folder_id.isnot(None))
+        .filter(CatalogResource.status.in_(statuses))
+        .group_by(CatalogResource.folder_id).all())
+    skill_statuses = ("draft", "published") if manager else ("published",)
+    for folder_id, n in (db.session.query(Skill.folder_id, func.count(Skill.id))
+                         .filter(Skill.folder_id.isnot(None))
+                         .filter(Skill.status.in_(skill_statuses))
+                         .group_by(Skill.folder_id).all()):
+        counts[folder_id] = counts.get(folder_id, 0) + n
+    return counts
+
+
+@bp.get("/folders")
+@require_auth
+def list_folders():
+    """Колекції каталогу. `?section_id=` — лише колекції одного розділу."""
+    manager = _is_manager(current_user())
+    query = CatalogFolder.query
+    if not manager:
+        query = query.filter_by(is_active=True)
+    section_id = request.args.get("section_id")
+    if section_id:
+        query = query.filter_by(section_id=_resolve_section(section_id))
+    folders = query.order_by(CatalogFolder.section_id, CatalogFolder.position,
+                             CatalogFolder.id).all()
+    return jsonify([f.to_dict(_folder_counts(manager)) for f in folders])
+
+
+def _folder_name_taken(section_id, name, exclude_id=None):
+    """Назва колекції унікальна в межах розділу (порівняння без регістру)."""
+    rows = CatalogFolder.query.filter_by(section_id=section_id).all()
+    return any(f.name.casefold() == name.casefold() and f.id != exclude_id
+               for f in rows)
+
+
+@bp.post("/folders")
+@require_global_role("admin", "skill_manager")
+def create_folder():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise ApiError("Назва колекції не може бути порожньою",
+                       400, "validation_error")
+    section_id = _resolve_section(data.get("section_id"))
+    if section_id is None:
+        raise ApiError("Колекція має належати розділу — вкажіть розділ",
+                       400, "validation_error")
+    if _folder_name_taken(section_id, name):
+        raise ApiError("Така колекція вже є в цьому розділі", 409, "folder_exists")
+    folder = CatalogFolder(name=name, section_id=section_id)
+    _apply_folder_fields(folder, data)
+    db.session.add(folder)
+    db.session.commit()
+    return jsonify(folder.to_dict()), 201
+
+
+def _apply_folder_fields(folder, data):
+    for field in ("description", "icon_emoji"):
+        if field in data:
+            value = (data.get(field) or "").strip()
+            setattr(folder, field, value or None)
+    if "position" in data:
+        try:
+            folder.position = int(data.get("position") or 0)
+        except (TypeError, ValueError):
+            raise ApiError("Позиція має бути числом", 400, "validation_error")
+    if "is_active" in data:
+        folder.is_active = bool(data.get("is_active"))
+
+
+@bp.patch("/folders/<int:folder_id>")
+@require_global_role("admin", "skill_manager")
+def update_folder(folder_id):
+    folder = CatalogFolder.query.get_or_404(folder_id)
+    data = request.get_json(silent=True) or {}
+    name = folder.name
+    if "name" in data:
+        name = (data.get("name") or "").strip()
+        if not name:
+            raise ApiError("Назва колекції не може бути порожньою",
+                           400, "validation_error")
+    if "section_id" in data:
+        section_id = _resolve_section(data.get("section_id"))
+        if section_id is None:
+            raise ApiError("Колекція має належати розділу — вкажіть розділ",
+                           400, "validation_error")
+        if section_id != folder.section_id:
+            # Колекція переїхала — матеріали в ній переїжджають разом із нею,
+            # інакше в картці лишиться розділ, якому колекція вже не належить.
+            CatalogResource.query.filter_by(folder_id=folder.id).update(
+                {CatalogResource.section_id: section_id}, synchronize_session=False)
+            Skill.query.filter_by(folder_id=folder.id).update(
+                {Skill.section_id: section_id}, synchronize_session=False)
+        folder.section_id = section_id
+    if _folder_name_taken(folder.section_id, name, exclude_id=folder.id):
+        raise ApiError("Така колекція вже є в цьому розділі", 409, "folder_exists")
+    folder.name = name
+    _apply_folder_fields(folder, data)
+    db.session.commit()
+    return jsonify(folder.to_dict())
+
+
+@bp.delete("/folders/<int:folder_id>")
+@require_global_role("admin", "skill_manager")
+def delete_folder(folder_id):
+    """Видаляє колекцію. Матеріали лишаються в розділі, без колекції."""
+    folder = CatalogFolder.query.get_or_404(folder_id)
+    CatalogResource.query.filter_by(folder_id=folder_id).update(
+        {CatalogResource.folder_id: None}, synchronize_session=False)
+    Skill.query.filter_by(folder_id=folder_id).update(
+        {Skill.folder_id: None}, synchronize_session=False)
+    db.session.delete(folder)
+    db.session.commit()
+    return jsonify({"message": "Колекцію видалено"})
+
+
+# ------------------------ Довідники метаданих ------------------------
+
+def _term_counts():
+    """Скільки карток посилається на кожен термін (теги + одиничні довідники)."""
+    counts = dict(
+        db.session.query(CatalogResourceTag.term_id,
+                         func.count(CatalogResourceTag.resource_id))
+        .group_by(CatalogResourceTag.term_id).all())
+    for col in (CatalogResource.complexity_id, CatalogResource.business_value_id):
+        for term_id, n in (db.session.query(col, func.count(CatalogResource.id))
+                           .filter(col.isnot(None)).group_by(col).all()):
+            counts[term_id] = counts.get(term_id, 0) + n
+    for rtype, n in (db.session.query(CatalogResource.resource_type,
+                                      func.count(CatalogResource.id))
+                     .group_by(CatalogResource.resource_type).all()):
+        for term in CatalogTerm.query.filter_by(kind="material_type", code=rtype):
+            counts[term.id] = counts.get(term.id, 0) + n
+    return counts
+
+
+def _require_term_kind(kind):
+    if kind not in TERM_KINDS:
+        raise ApiError("Довідник має бути одним із: " + ", ".join(TERM_KINDS),
+                       400, "validation_error")
+    return kind
+
+
+@bp.get("/terms")
+@require_auth
+def list_terms():
+    """Значення довідників. `?kind=` — один довідник, без нього — усі."""
+    manager = _is_manager(current_user())
+    query = CatalogTerm.query
+    kind = request.args.get("kind")
+    if kind:
+        query = query.filter_by(kind=_require_term_kind(kind))
+    if not manager:
+        query = query.filter_by(is_active=True)
+    terms = query.order_by(CatalogTerm.kind, CatalogTerm.position,
+                           CatalogTerm.name).all()
+    counts = _term_counts()
+    return jsonify([t.to_dict(counts) for t in terms])
+
+
+@bp.post("/terms")
+@require_global_role("admin", "skill_manager")
+def create_term():
+    data = request.get_json(silent=True) or {}
+    kind = _require_term_kind((data.get("kind") or "").strip())
+    if kind == "material_type":
+        # Вид матеріалу задає поведінку (обов'язковість посилання чи тексту),
+        # тому нові коди додаються разом із кодом, а не через довідник.
+        raise ApiError("Види матеріалів додаються разом із підтримкою в коді — "
+                       "тут можна змінити назву, порядок і видимість наявних",
+                       400, "material_type_fixed")
+    name = " ".join((data.get("name") or "").split())
+    if not name:
+        raise ApiError("Назва значення не може бути порожньою",
+                       400, "validation_error")
+    if _term_by_name(kind, name) is not None:
+        raise ApiError("Таке значення вже є в довіднику", 409, "term_exists")
+    term = CatalogTerm(kind=kind, name=name, name_norm=CatalogTerm.normalize(name))
+    _apply_term_fields(term, data)
+    db.session.add(term)
+    db.session.commit()
+    return jsonify(term.to_dict()), 201
+
+
+def _apply_term_fields(term, data):
+    if "description" in data:
+        term.description = (data.get("description") or "").strip() or None
+    if "position" in data:
+        try:
+            term.position = int(data.get("position") or 0)
+        except (TypeError, ValueError):
+            raise ApiError("Позиція має бути числом", 400, "validation_error")
+    if "is_active" in data:
+        term.is_active = bool(data.get("is_active"))
+
+
+@bp.patch("/terms/<int:term_id>")
+@require_global_role("admin", "skill_manager")
+def update_term(term_id):
+    """Перейменування та налаштування терміна.
+
+    Картки посилаються на термін за id, тож нова назва одразу видно в усіх
+    матеріалах — окремого оновлення карток не потрібно.
+    """
+    term = CatalogTerm.query.get_or_404(term_id)
+    data = request.get_json(silent=True) or {}
+    if "name" in data:
+        name = " ".join((data.get("name") or "").split())
+        if not name:
+            raise ApiError("Назва значення не може бути порожньою",
+                           400, "validation_error")
+        other = _term_by_name(term.kind, name)
+        if other is not None and other.id != term.id:
+            raise ApiError("Таке значення вже є в довіднику — об'єднайте їх",
+                           409, "term_exists")
+        term.name = name
+        term.name_norm = CatalogTerm.normalize(name)
+    _apply_term_fields(term, data)
+    db.session.commit()
+    return jsonify(term.to_dict())
+
+
+@bp.post("/terms/<int:term_id>/merge")
+@require_global_role("admin", "skill_manager")
+def merge_term(term_id):
+    """Зливає термін в інший того ж довідника: посилання переносяться, термін зникає."""
+    source = CatalogTerm.query.get_or_404(term_id)
+    data = request.get_json(silent=True) or {}
+    target = CatalogTerm.query.get(data.get("into") or 0)
+    if target is None or target.kind != source.kind:
+        raise ApiError("Вкажіть значення того самого довідника, у яке зливати",
+                       400, "validation_error")
+    if target.id == source.id:
+        raise ApiError("Не можна злити значення саме в себе", 400, "validation_error")
+    if source.kind == "material_type":
+        raise ApiError("Види матеріалів не зливаються", 400, "material_type_fixed")
+
+    if source.kind == "tag":
+        # Картки, що вже мають цільовий тег, інакше отримали б дубль зв'язку.
+        taken = {row.resource_id for row in
+                 CatalogResourceTag.query.filter_by(term_id=target.id)}
+        for row in CatalogResourceTag.query.filter_by(term_id=source.id).all():
+            if row.resource_id in taken:
+                db.session.delete(row)
+            else:
+                row.term_id = target.id
+    else:
+        for col in (CatalogResource.complexity_id, CatalogResource.business_value_id):
+            CatalogResource.query.filter(col == source.id).update(
+                {col: target.id}, synchronize_session=False)
+    db.session.delete(source)
+    db.session.commit()
+    return jsonify({"message": f"Значення злито в «{target.name}»",
+                    "term": target.to_dict()})
+
+
+@bp.delete("/terms/<int:term_id>")
+@require_global_role("admin", "skill_manager")
+def delete_term(term_id):
+    """Видаляє значення довідника. Посилання на нього в картках знімаються."""
+    term = CatalogTerm.query.get_or_404(term_id)
+    if term.kind == "material_type":
+        raise ApiError("Вид матеріалу не видаляється — його можна приховати",
+                       400, "material_type_fixed")
+    if term.kind == "tag":
+        CatalogResourceTag.query.filter_by(term_id=term_id).delete(
+            synchronize_session=False)
+    else:
+        for col in (CatalogResource.complexity_id, CatalogResource.business_value_id):
+            CatalogResource.query.filter(col == term_id).update(
+                {col: None}, synchronize_session=False)
+    db.session.delete(term)
+    db.session.commit()
+    return jsonify({"message": "Значення видалено"})
+
+
 # ------------------------------- Ресурси -------------------------------
 
 @bp.get("/resources")
 @require_auth
 def list_resources():
-    """Перелік ресурсів. `?type=` — фільтр за типом, `?section_id=` — за розділом.
+    """Перелік ресурсів із фільтрами за атрибутами картки (BR-06, FR-06).
+
+    Параметри — усі необов'язкові й комбінуються між собою:
+    `type`, `section_id`, `folder_id`, `status`, `complexity_id`,
+    `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q`.
 
     Admin/Skill Manager бачать усе; решта — опубліковані та ті, що потребують
     оновлення (чернетки й архів приховані).
     """
+    manager = _is_manager(current_user())
     query = CatalogResource.query
+
     rtype = request.args.get("type")
     if rtype:
         if rtype not in RESOURCE_TYPES:
             raise ApiError("Невідомий тип ресурсу", 400, "validation_error")
         query = query.filter_by(resource_type=rtype)
+
     section_id = request.args.get("section_id")
     if section_id:
         query = query.filter_by(section_id=_resolve_section(section_id))
-    if not _is_manager(current_user()):
+
+    folder_id = request.args.get("folder_id")
+    if folder_id:
+        query = query.filter_by(folder_id=_resolve_folder(folder_id).id)
+
+    for param, kind, label in (("complexity_id", "complexity", "складність"),
+                               ("business_value_id", "business_value",
+                                "бізнес-цінність")):
+        value = request.args.get(param)
+        if value:
+            query = query.filter(getattr(CatalogResource, param)
+                                 == _resolve_term(kind, value, label))
+
+    reuse_level = request.args.get("reuse_level")
+    if reuse_level:
+        if reuse_level not in REUSE_LEVELS:
+            raise ApiError("Рівень повторного використання має бути одним із: "
+                           + ", ".join(REUSE_LEVELS), 400, "validation_error")
+        query = query.filter_by(reuse_level=reuse_level)
+
+    tag_id = request.args.get("tag_id")
+    if tag_id:
+        term_id = _resolve_term("tag", tag_id, "тег")
+        query = query.filter(CatalogResource.id.in_(
+            db.session.query(CatalogResourceTag.resource_id)
+            .filter_by(term_id=term_id)))
+
+    # Інструмент і власник — вільний текст у картці, тому збіг за підрядком.
+    for param, column in (("tool", CatalogResource.tools),
+                          ("owner", CatalogResource.owner)):
+        value = (request.args.get(param) or "").strip()
+        if value:
+            query = query.filter(column.ilike(f"%{value}%"))
+
+    text = (request.args.get("q") or "").strip()
+    if text:
+        like = f"%{text}%"
+        query = query.filter(db.or_(CatalogResource.name.ilike(like),
+                                    CatalogResource.description.ilike(like),
+                                    CatalogResource.category.ilike(like),
+                                    CatalogResource.author.ilike(like),
+                                    CatalogResource.owner.ilike(like)))
+
+    status = request.args.get("status")
+    if status:
+        if status not in RESOURCE_STATUSES:
+            raise ApiError("Статус має бути одним із: " + ", ".join(RESOURCE_STATUSES),
+                           400, "validation_error")
+        if not manager and status not in PUBLIC_STATUSES:
+            raise ApiError("Матеріали цього статусу недоступні", 403, "forbidden")
+        query = query.filter_by(status=status)
+    if not manager:
         query = query.filter(CatalogResource.status.in_(PUBLIC_STATUSES))
+
     items = query.order_by(CatalogResource.is_featured.desc(),
                            CatalogResource.id.desc()).all()
     ratings = _rating_map("resource")
@@ -361,6 +810,7 @@ def create_resource():
         res.published_at = datetime.utcnow()
     db.session.add(res)
     db.session.flush()
+    _set_tags(res, data.get("tags"))
     if publish:
         _log_review("resource", res, None, "published")
     db.session.commit()
@@ -371,7 +821,10 @@ def create_resource():
 @require_global_role("admin", "skill_manager")
 def update_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
-    _apply_fields(res, request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
+    _apply_fields(res, data)
+    if "tags" in data:
+        _set_tags(res, data.get("tags"))
     db.session.commit()
     return jsonify(res.to_dict())
 
@@ -427,6 +880,8 @@ def register_open(resource_id):
 @require_global_role("admin", "skill_manager")
 def delete_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
+    CatalogResourceTag.query.filter_by(resource_id=resource_id)\
+        .delete(synchronize_session=False)
     CatalogFavorite.query.filter_by(item_type="resource", item_id=resource_id)\
         .delete(synchronize_session=False)
     SkillFeedback.query.filter_by(resource_id=resource_id).update(
@@ -624,7 +1079,7 @@ def analytics():
         "archived": by_status.get("archived", 0),
         "no_owner": sum(1 for r in published if not r.owner),
         "no_section": sum(1 for r in published if not r.section_id),
-        "no_tags": sum(1 for r in published if not r.tags),
+        "no_tags": sum(1 for r in published if not r.tag_terms),
         "review_overdue": sum(1 for r in published
                               if r.next_review_at and r.next_review_at < now),
     }

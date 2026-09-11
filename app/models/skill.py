@@ -54,6 +54,7 @@ class Skill(db.Model):
     author = db.Column(db.String)        # автор навички (зі skill.md або редагується)
     category = db.Column(db.String)      # категорія навички
     section_id = db.Column(db.Integer, db.ForeignKey("catalog_sections.id"))
+    folder_id = db.Column(db.Integer, db.ForeignKey("catalog_folders.id"))
     owner = db.Column(db.String)         # відповідальний за матеріал (BR-11)
     icon_path = db.Column(db.String)     # шлях до завантаженої PNG-іконки (nullable)
     # 'prompt' — LLM-навичка; 'package' — архів зі skill.md та кодом, що виконується.
@@ -93,6 +94,7 @@ class Skill(db.Model):
             "author": self.author,
             "category": self.category,
             "section_id": self.section_id,
+            "folder_id": self.folder_id,
             "owner": self.owner,
             "skill_kind": self.skill_kind or "prompt",
             "model_id": self.model_id,

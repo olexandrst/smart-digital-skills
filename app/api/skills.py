@@ -15,7 +15,7 @@ from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
     Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill, Group,
-    CatalogFavorite, CatalogSection, ChatSession, ChatMessage, TokenUsageLog,
+    CatalogFavorite, ChatSession, ChatMessage, TokenUsageLog,
     UserFile, ReviewLog,
 )
 from app.services import skill_service, chat_service, package_service
@@ -123,14 +123,11 @@ def update_skill(skill_id):
                 raise ApiError("Назва та версія не можуть бути порожніми",
                                400, "validation_error")
             setattr(skill, field, value)
-    if "section_id" in data:
-        section_id = data["section_id"]
-        if section_id in (None, "", 0):
-            skill.section_id = None
-        elif CatalogSection.query.get(section_id) is None:
-            raise ApiError("Розділ не знайдено", 404, "not_found")
-        else:
-            skill.section_id = section_id
+    if "section_id" in data or "folder_id" in data:
+        # Розділ і колекція узгоджуються тим самим правилом, що й для матеріалів
+        # каталогу: вибір колекції задає розділ (див. app/api/catalog.py).
+        from app.api.catalog import _apply_placement
+        _apply_placement(skill, data)
     if "model_id" in data:
         skill.model_id = data["model_id"]
     if "parameters" in data:
