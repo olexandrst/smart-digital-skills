@@ -1538,3 +1538,37 @@ body.theme-dark .kpi-delta.up { color: #74d18f; }
   .sv-comment { flex-direction: column; }
   .sv-comment .mdc-act { width: 100%; }
 }
+
+/* ===== AI-помічник пошуку (BR-08) ===== */
+.asst-modal { max-width: 620px; }
+.asst-ask { display: flex; gap: 8px; margin: 14px 0 4px; }
+.asst-ask input { flex: 1; }
+.asst-ask .mdc-act { width: auto; flex: 0 0 auto; }
+.asst-out { margin-top: 8px; }
+.asst-reply { margin: 10px 0 12px; font-size: 14px; line-height: 1.55; }
+.asst-card {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left;
+  padding: 12px 14px; margin-bottom: 8px; border-radius: 12px;
+  background: var(--soft); border: 1px solid var(--md-line); color: var(--text);
+  font: inherit; box-shadow: none;
+}
+.asst-card:hover { border-color: var(--md-red); background: var(--md-red-soft); box-shadow: none; }
+.asst-card b { font-size: 14px; }
+.asst-why { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.asst-card:hover .asst-why { color: var(--text); }
+.asst-idea { width: auto; margin-top: 4px; }
+.asst-rate { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+/* Порожній результат пошуку — не глухий кут, а два наступні кроки. */
+.cat-empty { grid-column: 1 / -1; text-align: center; padding: 28px 0; }
+.cat-empty-acts { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.cat-empty-acts .mdc-act, .cat-empty-acts .ghost-act { width: auto; }
+.cat-empty-acts .ghost-act {
+  padding: 10px 20px; border-radius: 999px; font-weight: 600;
+  background: var(--panel); color: var(--muted); border: 1px solid var(--md-line);
+  box-shadow: none;
+}
+.cat-empty-acts .ghost-act:hover {
+  background: var(--md-red-soft); color: var(--md-red); border-color: var(--md-red);
+  box-shadow: none;
+}

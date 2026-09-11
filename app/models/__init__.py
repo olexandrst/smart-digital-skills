@@ -15,10 +15,11 @@ from app.models.chat import (
 )
 from app.models.resource import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
-    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog,
+    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, SearchSynonym,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
     TERM_KINDS, SINGLE_VALUE_TERM_KINDS, DEFAULT_TERMS, DEFAULT_FOLDERS,
+    DEFAULT_SYNONYMS,
 )
 from app.models.idea import Idea, IDEA_STATUSES, IDEA_CLOSED_STATUSES
 from app.models.usage import (
@@ -60,6 +61,8 @@ __all__ = [
     "CatalogFavorite",
     "ReviewLog",
     "SearchQueryLog",
+    "SearchSynonym",
+    "DEFAULT_SYNONYMS",
     "TERM_KINDS",
     "SINGLE_VALUE_TERM_KINDS",
     "DEFAULT_TERMS",

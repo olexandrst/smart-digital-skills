@@ -11,10 +11,13 @@ from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.services import file_service, usage_service
+from app.services import (
+    file_service, usage_service, search_service, assistant_service,
+)
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
-    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, UserFile,
+    CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, SearchSynonym,
+    UserFile,
     Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
@@ -1729,3 +1732,221 @@ def _survey_summary(since=None, until=None):
                         "role": c.user_role,
                         "created_at": c.created_at.isoformat()} for c in comments]
     return out
+
+
+# ------------------- Пошук мовою задачі (BR-07, AKH-11) -------------------
+
+def _searchable_items(user):
+    """Матеріали, доступні користувачу, у вигляді словників для пошуку."""
+    query = CatalogResource.query
+    if not _is_manager(user):
+        query = query.filter(CatalogResource.status.in_(PUBLIC_STATUSES))
+    return [r.to_dict() for r in query.all()]
+
+
+def _synonym_index():
+    rows = SearchSynonym.query.filter_by(is_active=True).all()
+    return search_service.build_synonym_index(rows)
+
+
+@bp.get("/search")
+@require_auth
+def task_search():
+    """Пошук мовою бізнес-задачі: `?q=хочу автоматизувати збір ідей`.
+
+    Шукає за назвою, описом, тегами, інструментами й текстом матеріалу з різною
+    вагою полів, розуміє словник формулювань задач і терпить українські
+    відмінки та одруки. Коли точних збігів немає — повертає найближчі за
+    змістом і позначає запит як незакритий, щоб менеджер бачив, чого бракує.
+    """
+    raw = (request.args.get("q") or "").strip()
+    if not raw:
+        raise ApiError("Порожній запит", 400, "validation_error")
+    if len(raw) > MAX_QUERY:
+        raw = raw[:MAX_QUERY]
+
+    user = current_user()
+    items = _searchable_items(user)
+    synonyms = _synonym_index()
+    ratings = _rating_map("resource")
+
+    def pack(rows):
+        return [dict(item, **ratings.get(item["id"], _EMPTY_RATING),
+                     match_score=score, matched=matched)
+                for item, score, matched in rows]
+
+    hits = search_service.search(raw, items, synonyms, limit=20)
+    suggestions = [] if hits else search_service.nearest(raw, items, synonyms)
+
+    log = SearchQueryLog(
+        query_text=raw, query_norm=raw.casefold(),
+        results_count=len(hits), user_id=user.id,
+        kind=request.args.get("kind") or None,
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    return jsonify({
+        "query": raw,
+        "results": pack(hits),
+        # Коли нічого не знайдено — не порожній екран, а найближче за змістом
+        # плюс пропозиція поділитися ідеєю.
+        "suggestions": pack(suggestions),
+        "unanswered": not hits,
+        "search_log_id": log.id,
+    })
+
+
+@bp.get("/synonyms")
+@require_auth
+def list_synonyms():
+    """Словник формулювань задач. Менеджер бачить і вимкнені."""
+    query = SearchSynonym.query
+    if not _is_manager(current_user()):
+        query = query.filter_by(is_active=True)
+    rows = query.order_by(SearchSynonym.phrase).all()
+    return jsonify([r.to_dict() for r in rows])
+
+
+@bp.post("/synonyms")
+@require_global_role("admin", "skill_manager")
+def create_synonym():
+    data = request.get_json(silent=True) or {}
+    phrase = " ".join((data.get("phrase") or "").split())
+    terms = " ".join((data.get("terms") or "").split())
+    if not phrase or not terms:
+        raise ApiError("Вкажіть формулювання і канонічні слова через кому",
+                       400, "validation_error")
+    if any(s.phrase.casefold() == phrase.casefold() for s in SearchSynonym.query.all()):
+        raise ApiError("Таке формулювання вже є у словнику", 409, "synonym_exists")
+    row = SearchSynonym(phrase=phrase, terms=terms)
+    if "is_active" in data:
+        row.is_active = bool(data["is_active"])
+    db.session.add(row)
+    db.session.commit()
+    return jsonify(row.to_dict()), 201
+
+
+@bp.patch("/synonyms/<int:synonym_id>")
+@require_global_role("admin", "skill_manager")
+def update_synonym(synonym_id):
+    row = SearchSynonym.query.get_or_404(synonym_id)
+    data = request.get_json(silent=True) or {}
+    if "phrase" in data:
+        phrase = " ".join((data.get("phrase") or "").split())
+        if not phrase:
+            raise ApiError("Формулювання не може бути порожнім",
+                           400, "validation_error")
+        if any(s.phrase.casefold() == phrase.casefold() and s.id != synonym_id
+               for s in SearchSynonym.query.all()):
+            raise ApiError("Таке формулювання вже є у словнику", 409, "synonym_exists")
+        row.phrase = phrase
+    if "terms" in data:
+        terms = " ".join((data.get("terms") or "").split())
+        if not terms:
+            raise ApiError("Канонічні слова не можуть бути порожніми",
+                           400, "validation_error")
+        row.terms = terms
+    if "is_active" in data:
+        row.is_active = bool(data["is_active"])
+    db.session.commit()
+    return jsonify(row.to_dict())
+
+
+@bp.delete("/synonyms/<int:synonym_id>")
+@require_global_role("admin", "skill_manager")
+def delete_synonym(synonym_id):
+    row = SearchSynonym.query.get_or_404(synonym_id)
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"message": "Формулювання видалено"})
+
+
+# ---------------- AI-помічник пошуку (BR-08, FR-09, AKH-12) ----------------
+
+@bp.post("/assistant")
+@require_auth
+def assistant():
+    """Відповідь помічника на задачу, сформульовану звичайною мовою.
+
+    Картки добирає детермінований пошук; модель лише пояснює добірку. Тому в
+    відповіді фізично не може бути посилання, якого немає в базі.
+    """
+    data = request.get_json(silent=True) or {}
+    question = (data.get("question") or "").strip()
+    if not question:
+        raise ApiError("Опишіть задачу", 400, "validation_error")
+    if len(question) > MAX_QUERY * 5:
+        raise ApiError("Запит завеликий", 400, "validation_error")
+
+    user = current_user()
+    result = assistant_service.answer(question, _searchable_items(user),
+                                      _synonym_index())
+
+    # Питання помічнику — теж пошуковий запит: він має потрапити в аналітику,
+    # інакше менеджер не побачить, чого бракує саме тут.
+    log = SearchQueryLog(
+        query_text=question[:MAX_QUERY], query_norm=question[:MAX_QUERY].casefold(),
+        results_count=len(result["items"]), user_id=user.id, kind="assistant",
+    )
+    db.session.add(log)
+    db.session.commit()
+
+    result["search_log_id"] = log.id
+    return jsonify(result)
+
+
+@bp.post("/assistant/feedback")
+@require_auth
+def assistant_feedback():
+    """Оцінка відповіді помічника: допомогла чи ні."""
+    data = request.get_json(silent=True) or {}
+    log = SearchQueryLog.query.get_or_404(data.get("search_log_id") or 0)
+    if log.user_id != current_user().id:
+        raise ApiError("Чужий запис пошуку", 403, "forbidden")
+    if "helpful" not in data:
+        raise ApiError("Вкажіть helpful (true або false)", 400, "validation_error")
+    # Переводимо в наявне поле «після запиту щось відкрили»: корисна відповідь
+    # означає, що запит закрито. Окремої таблиці для цього не заводимо.
+    log.opened_item_type = "assistant_helpful" if data["helpful"] else None
+    log.assistant_helpful = bool(data["helpful"])
+    db.session.commit()
+    return jsonify({"recorded": True, "helpful": log.assistant_helpful})
+
+
+@bp.get("/search-analytics")
+@require_global_role("admin", "skill_manager")
+def search_analytics():
+    """Аналітика запитів: теми, глухі кути й користь помічника (BR-08)."""
+    def _grouped(filter_fn=None, limit=10):
+        query = (db.session.query(SearchQueryLog.query_norm,
+                                  func.count(SearchQueryLog.id),
+                                  func.max(SearchQueryLog.query_text))
+                 .group_by(SearchQueryLog.query_norm))
+        if filter_fn is not None:
+            query = filter_fn(query)
+        rows = query.order_by(func.count(SearchQueryLog.id).desc()).limit(limit).all()
+        return [{"query": r[2], "count": int(r[1])} for r in rows]
+
+    total = SearchQueryLog.query.count()
+    assistant_logs = SearchQueryLog.query.filter_by(kind="assistant")
+    helpful = assistant_logs.filter_by(assistant_helpful=True).count()
+    unhelpful = assistant_logs.filter_by(assistant_helpful=False).count()
+    rated = helpful + unhelpful
+
+    return jsonify({
+        "total": total,
+        "top": _grouped(),
+        "no_results": _grouped(lambda q: q.having(
+            func.max(SearchQueryLog.results_count) == 0)),
+        # Знайшли, але нічого не відкрили — теж сигнал: контент не переконує.
+        "no_open": _grouped(lambda q: q.having(db.and_(
+            func.max(SearchQueryLog.results_count) > 0,
+            func.count(SearchQueryLog.opened_item_type) == 0))),
+        "assistant": {
+            "questions": assistant_logs.count(),
+            "rated": rated,
+            "helpful": helpful,
+            "helpful_pct": _pct(helpful, rated),
+        },
+    })

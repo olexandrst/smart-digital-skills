@@ -485,6 +485,12 @@ smart-digital-skills/
 | GET | `/catalog/kpi` | KPI за період (`?period=7d\|30d\|90d`) з порівнянням | Admin/Skill Manager |
 | GET | `/catalog/kpi/export` | Ті самі KPI у CSV | Admin/Skill Manager |
 | GET | `/catalog/survey/due` | Чи час питати користувача і про що | авторизовані |
+| GET | `/catalog/search` | Пошук мовою задачі (`?q=`) з ранжуванням і синонімами | авторизовані |
+| GET/POST | `/catalog/synonyms` | Словник формулювань задач | читання: усі, зміна: Admin/Skill Manager |
+| PATCH/DELETE | `/catalog/synonyms/{id}` | Редагування / видалення формулювання | Admin/Skill Manager |
+| POST | `/catalog/assistant` | Відповідь помічника: добірка карток із бази + пояснення | авторизовані |
+| POST | `/catalog/assistant/feedback` | Оцінка відповіді помічника | авторизовані |
+| GET | `/catalog/search-analytics` | Теми запитів, глухі кути, користь помічника | Admin/Skill Manager |
 | POST | `/catalog/survey` | Відповідь на NPS/CSAT/CES або закриття без відповіді | авторизовані |
 | GET | `/ideas` | Ідеї (`?status=`, `?mine=1`); свої — всім, усі — менеджеру | авторизовані |
 | POST | `/ideas` | Подати ідею | авторизовані |

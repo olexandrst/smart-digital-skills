@@ -75,7 +75,27 @@ def sync_schema():
     relax_not_null("skills", "model_id")
 
     seed_catalog_terms()
+    seed_search_synonyms()
     migrate_legacy_tags()
+
+
+def seed_search_synonyms():
+    """Початковий словник формулювань задач (BR-07), ідемпотентно.
+
+    Наявні записи не чіпаємо: те, що менеджер відредагував чи вимкнув, має
+    переживати перезапуск.
+    """
+    from app.models import SearchSynonym, DEFAULT_SYNONYMS
+
+    existing = {s.phrase.casefold() for s in SearchSynonym.query.all()}
+    added = False
+    for phrase, terms in DEFAULT_SYNONYMS:
+        if phrase.casefold() in existing:
+            continue
+        db.session.add(SearchSynonym(phrase=phrase, terms=terms))
+        added = True
+    if added:
+        db.session.commit()
 
 
 def seed_catalog_terms():

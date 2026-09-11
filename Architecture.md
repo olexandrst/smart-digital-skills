@@ -182,6 +182,7 @@ erDiagram
 | `resource_views` | Перегляди карток, розділів і колекцій — джерело для DAU/WAU/MAU |
 | `survey_responses` | Відповіді NPS / CSAT / CES |
 | `survey_prompts` | Коли користувача востаннє питали — щоб не питати надто часто |
+| `search_synonyms` | Словник формулювань задач: «як питають» → «за чим шукати» |
 | `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
 | `search_query_logs` | Пошукові запити користувачів для аналітики хабу |
 | `group_skills` | Призначення скілів групам (груповий доступ) |
@@ -365,6 +366,17 @@ CREATE TABLE ideas (
     status_note        TEXT,                       -- рішення, яке бачить автор
     created_at         TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Словник формулювань задач (BR-07). Користувач шукає свою задачу
+-- («обробляти документи»), а картка названа інструментом — словник з'єднує одне
+-- з одним і поповнюється з інтерфейсу, без релізу.
+CREATE TABLE search_synonyms (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    phrase     TEXT NOT NULL,                  -- як формулює користувач
+    terms      TEXT NOT NULL,                  -- канонічні слова через кому
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- Сесія роботи в хабі. `ended_at` заповнюється ліниво — наступною дією

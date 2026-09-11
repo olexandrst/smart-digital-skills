@@ -205,6 +205,51 @@ class CatalogTerm(db.Model):
         return data
 
 
+class SearchSynonym(db.Model):
+    """Словник формулювань задачі (BR-07): «як шукають» → «як це названо».
+
+    Потрібен, бо користувач шукає свою задачу («обробляти документи»), а картка
+    названа інструментом («Аналіз тендерної документації»). Керується з
+    інтерфейсу, тому нові формулювання не потребують релізу.
+    """
+    __tablename__ = "search_synonyms"
+
+    id = db.Column(db.Integer, primary_key=True)
+    phrase = db.Column(db.String, nullable=False)   # як формулює користувач
+    terms = db.Column(db.String, nullable=False)    # канонічні слова через кому
+    is_active = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_now)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "phrase": self.phrase,
+            "terms": self.terms,
+            "is_active": self.is_active,
+        }
+
+
+# Початковий словник: типові формулювання задач у промислових підрозділах.
+DEFAULT_SYNONYMS = (
+    ("автоматизувати збір ідей", "ідея, воронка, збір, пропозиція"),
+    ("обробляти документи", "документ, документація, аналіз, текст"),
+    ("швидше читати документи", "документ, аналіз, підсумок, стислий"),
+    ("звіт з excel", "excel, таблиця, звіт, дані, аналітика"),
+    ("підсумок наради", "нарада, протокол, стенограма, підсумок"),
+    ("написати лист", "лист, текст, комунікація, шаблон"),
+    ("перекласти текст", "переклад, текст, мова"),
+    ("знайти інформацію", "пошук, база знань, довідка"),
+    ("навчитися працювати з ші", "навчання, інструкція, основи, промпт"),
+    ("зробити презентацію", "презентація, слайди, текст, шаблон"),
+    ("відповідати на звернення", "звернення, підтримка, агент, заявка"),
+    ("аналіз даних", "аналітика, дані, звіт, показники"),
+    ("перевірити договір", "договір, юридичний, ризик, документація"),
+    ("підготувати тендер", "тендер, закупівлі, документація, вимоги"),
+    ("безпечно працювати з даними", "безпека, політика, конфіденційність, правила"),
+    ("підключити модель", "доступ, модель, інтеграція, endpoint"),
+)
+
+
 class CatalogResourceTag(db.Model):
     """Зв'язок «картка ↔ тег» (FR-02): теги керовані, а не рядок через кому."""
     __tablename__ = "catalog_resource_tags"
@@ -392,6 +437,8 @@ class SearchQueryLog(db.Model):
     # Заповнюється, якщо після запиту користувач відкрив картку (Search Success Rate).
     opened_item_type = db.Column(db.String)
     opened_item_id = db.Column(db.Integer)
+    # Оцінка відповіді AI-помічника: True — допомогла, False — ні, None — не оцінювали.
+    assistant_helpful = db.Column(db.Boolean)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
     def to_dict(self):
@@ -401,5 +448,6 @@ class SearchQueryLog(db.Model):
             "results_count": self.results_count,
             "kind": self.kind,
             "opened_item_type": self.opened_item_type,
+            "assistant_helpful": self.assistant_helpful,
             "created_at": _iso(self.created_at),
         }
