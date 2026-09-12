@@ -13,6 +13,10 @@
 > у [`Architecture.md`](Architecture.md), розгортання на Azure —
 > у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md), план доробки під бізнес-вимоги
 > AI Knowledge Hub (58% → 100%) — у [`ROADMAP.md`](ROADMAP.md).
+>
+> Організаційні документи: регламент управління контентом —
+> [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md), роль операційної підтримки
+> сервісу — [`docs/ROLE-SERVICE-SUPPORT.md`](docs/ROLE-SERVICE-SUPPORT.md).
 
 ---
 
