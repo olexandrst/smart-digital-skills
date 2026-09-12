@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Knowledge Hub</title>
-  <link rel="stylesheet" href="style.css?v=57">
+  <link rel="stylesheet" href="style.css?v=59">
 </head>
 <body>
   <!-- Екран входу -->
@@ -72,10 +72,13 @@
     </div>
   </div>
 
-  <!-- Головний застосунок -->
+  <!-- Головний застосунок.
+       Каркас: суцільна верхня панель (бренд · режим · пошук · профіль),
+       під нею — бічна панель, що належить поточному режиму, і контент.
+       Бічна панель тримає каталог, а не список екранів застосунку. -->
   <div id="app" class="app hidden">
-    <aside class="sidebar">
-      <div class="side-brand">
+    <header class="topbar">
+      <div class="brand">
         <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
           <defs>
             <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
@@ -88,52 +91,91 @@
           <path d="M18 40c6 0 9-4 11-8 2-4 4-8 9-8a7 7 0 0 1 0 14c-3 0-5-1-7-3"
                 fill="none" stroke="url(#bg2)" stroke-width="5" stroke-linecap="round"/>
         </svg>
-        <span>AI Knowledge Hub</span>
-      </div>
-
-      <nav id="nav" class="side-nav"></nav>
-
-      <div class="side-foot">
-        <div class="theme-seg" id="theme-seg"></div>
-        <button class="quota" id="quota" type="button" title="Квота витрат">
-          <svg class="quota-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm.9 15.5v1.2h-1.3v-1.2c-1.4-.2-2.4-1-2.5-2.3h1.5c.1.6.6 1 1.6 1s1.5-.4 1.5-1c0-.5-.4-.8-1.6-1.1-1.7-.4-2.8-1-2.8-2.4 0-1.1.8-1.9 2.3-2.1V8.9h1.3v1.2c1.3.2 2.1 1 2.2 2.1h-1.5c-.1-.5-.5-.9-1.3-.9-.9 0-1.4.4-1.4.9 0 .5.4.8 1.6 1.1 1.8.4 2.8 1 2.8 2.4 0 1.2-.9 2-2.4 2.3Z"/></svg>
-          <div class="quota-body">
-            <div class="quota-top">
-              <span class="quota-label">Квота</span>
-              <span class="quota-nums"><b id="quota-used">—</b> / <span id="quota-limit">—</span></span>
-            </div>
-            <div class="quota-bar"><div class="quota-fill" id="quota-fill"></div></div>
-          </div>
+        <span class="brand-name">AI Knowledge Hub</span>
+        <button id="side-toggle" class="side-toggle" type="button"
+                aria-label="Показати або сховати бічну панель">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 5.5h17v13h-17zM9.5 5.5v13"/></svg>
         </button>
       </div>
-    </aside>
 
-    <div class="main">
-      <header class="topbar">
-        <div class="top-left">
-          <div id="page-title" class="page-title"></div>
-          <button id="new-chat-btn" class="btn-newchat" title="Новий чат">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
-            Новий чат
+      <div class="mode-seg" id="mode-seg"></div>
+
+      <button id="new-chat-btn" class="btn-newchat hidden" title="Новий чат">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+        Новий чат
+      </button>
+
+      <div class="spotlight">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.3"/><path d="m15.6 15.6 4.4 4.4"/></svg>
+        <input id="global-q" type="text" autocomplete="off"
+               placeholder="Пошук або опишіть задачу своїми словами">
+      </div>
+
+      <div class="me-wrap">
+        <button id="me-btn" class="me-btn" type="button" aria-haspopup="true" aria-expanded="false">
+          <span class="avatar" id="user-avatar"></span>
+          <svg class="me-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+
+        <!-- Особисте й службове — тут, а не в постійному списку зліва -->
+        <div id="me-menu" class="me-menu hidden" role="menu">
+          <div class="me-who">
+            <b id="user-name"></b>
+            <span id="user-roles" class="roles"></span>
+          </div>
+          <div class="me-sep"></div>
+          <button class="me-item" data-go="hub:files" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.2c0-1 .8-1.8 1.8-1.8h3.4l1.8 2.2h8.2c1 0 1.8.8 1.8 1.8v8.4c0 1-.8 1.8-1.8 1.8H5.3c-1 0-1.8-.8-1.8-1.8V7.2Z"/></svg>
+            Мої файли
+          </button>
+          <button class="me-item" data-go="hub:fav" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8L12 3.6Z"/></svg>
+            Обране<span class="me-right" id="me-fav-count"></span>
+          </button>
+          <button class="me-item" data-act="my-ideas" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9.6 18.2h4.8M10.6 21h2.8M12 3.2a6.2 6.2 0 0 1 3.6 11.2v1.4H8.4v-1.4A6.2 6.2 0 0 1 12 3.2Z"/></svg>
+            Мої ідеї
+          </button>
+          <button class="me-item" data-act="my-content" role="menuitem" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 12.5h6M9 16h4"/></svg>
+            Мій контент
+          </button>
+          <div class="me-sep"></div>
+          <button class="me-item me-quota" id="quota" type="button" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/></svg>
+            <span class="me-quota-body">
+              <span class="quota-top">
+                <span class="quota-label">Квота за тиждень</span>
+                <span class="quota-nums"><b id="quota-used">—</b> / <span id="quota-limit">—</span></span>
+              </span>
+              <span class="quota-bar"><span class="quota-fill" id="quota-fill"></span></span>
+            </span>
+          </button>
+          <div class="me-sep"></div>
+          <div class="me-theme"><span>Тема</span><div class="theme-seg" id="theme-seg"></div></div>
+          <div class="me-sep"></div>
+          <button class="me-item" id="logout-btn" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5H19v15h-4.5M11 8l-4 4 4 4M7 12h9"/></svg>
+            Вийти
           </button>
         </div>
-        <div class="top-right">
-          <div class="user-card">
-            <div class="user-meta">
-              <span id="user-name"></span>
-              <span id="user-roles" class="roles"></span>
-            </div>
-            <div class="avatar" id="user-avatar"></div>
-          </div>
-          <button id="logout-btn" class="ghost logout">Вийти</button>
-        </div>
-      </header>
-      <main id="view" class="view"></main>
+      </div>
+    </header>
+
+    <div class="shell" id="shell">
+      <aside class="sidebar" id="sidebar"></aside>
+      <div class="main">
+        <main id="view" class="view"></main>
+      </div>
     </div>
+
+    <!-- Телефон: головні напрямки під великим пальцем -->
+    <nav class="tabbar" id="tabbar"></nav>
+    <div class="side-scrim" id="side-scrim"></div>
   </div>
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=57"></script>
+  <script src="app.js?v=59"></script>
 </body>
 </html>

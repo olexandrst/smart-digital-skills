@@ -122,6 +122,12 @@ smart-digital-skills/
 │   │   └── errors.py
 │   └── integrations/
 │       └── azure_foundry.py
+│   └── static/                # SPA: index.html, app.js, style.css
+│       └── fonts/             # Inter var (SIL OFL) — без зовнішніх запитів
+├── docs/
+│   ├── DESIGN.md              # візуальна мова, токени, модель навігації
+│   ├── GOVERNANCE.md          # регламент управління контентом (BR-10)
+│   └── ROLE-SERVICE-SUPPORT.md # роль операційної підтримки (BR-11а)
 ├── migrations/                # Alembic
 ├── scripts/
 │   ├── init_db.py             # створення схеми
