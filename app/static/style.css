@@ -24,15 +24,19 @@
 
 :root {
   /* ---- Поверхні ---- */
-  --bg:            #f5f5f7;
+  /* Три рівні поверхні, і між ними має бути видно різницю:
+     хром (майже білий) → канва (сіра) → картка (біла).
+     Раніше канва була #f5f5f7 — лише на крок від білого, тож картки
+     на ній не читалися як окремі об'єкти. */
+  --bg:            #e9ebef;   /* канва сторінки */
   --bg-grad:       none;
-  --panel:         #ffffff;
-  --panel-2:       #fafafc;
-  --soft:          #fafafc;
-  --border:        rgba(0, 0, 0, 0.08);
-  --border-strong: rgba(0, 0, 0, 0.14);
-  --fill:          rgba(120, 120, 128, 0.08);   /* нейтральна заливка iOS */
-  --fill-2:        rgba(120, 120, 128, 0.13);
+  --panel:         #ffffff;   /* картки й панелі */
+  --panel-2:       #f4f5f8;   /* вкладена поверхня всередині картки */
+  --soft:          #f4f5f8;
+  --border:        rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --fill:          rgba(120, 120, 128, 0.10);   /* нейтральна заливка iOS */
+  --fill-2:        rgba(120, 120, 128, 0.17);
 
   /* ---- Текст: рівно три рівні ---- */
   --text:  #1d1d1f;
@@ -44,17 +48,17 @@
   --primary-strong: #c00510;
   --primary-soft:   rgba(227, 6, 19, 0.10);
   --primary-soft-2: rgba(227, 6, 19, 0.20);
-  --nav-active:     rgba(120, 120, 128, 0.13);
+  --nav-active:     rgba(120, 120, 128, 0.18);
 
   /* ---- Хром: напівпрозорий, з розмиттям ---- */
-  --appbar:         rgba(255, 255, 255, 0.72);
+  --appbar:         rgba(255, 255, 255, 0.82);
   --appbar-solid:   #ffffff;
   --appbar-text:    #1d1d1f;
   --appbar-muted:   #6e6e73;
-  --appbar-line:    rgba(0, 0, 0, 0.08);
-  --appbar-btn:     rgba(120, 120, 128, 0.08);
+  --appbar-line:    rgba(0, 0, 0, 0.10);
+  --appbar-btn:     rgba(120, 120, 128, 0.10);
   --appbar-btn-line: transparent;
-  --sidebar-bg:     rgba(246, 246, 248, 0.72);
+  --sidebar-bg:     rgba(248, 249, 251, 0.82);
 
   /* ---- Стани ---- */
   --danger: #d7263d; --danger-soft: rgba(215, 38, 61, 0.10);
@@ -104,8 +108,8 @@
   --md-red-strong: #c00510;
   --md-red-soft: rgba(227, 6, 19, 0.10);
   --md-ink: #1d1d1f;
-  --md-line: rgba(0, 0, 0, 0.08);
-  --md-canvas: #f5f5f7;
+  --md-line: rgba(0, 0, 0, 0.10);
+  --md-canvas: #e9ebef;
   --md-glow: none;                 /* світіння під червоним прибрано навмисно */
   --md-tag-dot: transparent;
 }
@@ -117,8 +121,8 @@ body.theme-dark {
   --panel:         #1c1c1e;
   --panel-2:       #2c2c2e;
   --soft:          #2c2c2e;
-  --border:        rgba(255, 255, 255, 0.10);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  --border:        rgba(255, 255, 255, 0.13);
+  --border-strong: rgba(255, 255, 255, 0.22);
   --fill:          rgba(120, 120, 128, 0.20);
   --fill-2:        rgba(120, 120, 128, 0.30);
 
@@ -136,7 +140,7 @@ body.theme-dark {
   --appbar-solid:   #1c1c1e;
   --appbar-text:    #f5f5f7;
   --appbar-muted:   #98989d;
-  --appbar-line:    rgba(255, 255, 255, 0.10);
+  --appbar-line:    rgba(255, 255, 255, 0.13);
   --appbar-btn:     rgba(120, 120, 128, 0.24);
   --appbar-btn-line: transparent;
   --sidebar-bg:     rgba(28, 28, 30, 0.72);
@@ -165,7 +169,7 @@ body.theme-dark {
   --md-red-strong: #ff6961;
   --md-red-soft: rgba(255, 69, 58, 0.16);
   --md-ink: #f5f5f7;
-  --md-line: rgba(255, 255, 255, 0.10);
+  --md-line: rgba(255, 255, 255, 0.13);
   --md-canvas: #000000;
   --md-glow: none;
   --md-tag-dot: transparent;
