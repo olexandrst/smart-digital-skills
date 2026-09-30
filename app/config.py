@@ -4,11 +4,20 @@ from datetime import timedelta
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 
+# Azure App Service задає WEBSITE_SITE_NAME сам — за нею й упізнаємо платформу.
+ON_APP_SERVICE = bool(os.getenv("WEBSITE_SITE_NAME"))
+
 # Кореневий каталог стану: база даних, пакети та іконки скілів, файли
-# користувачів, тимчасова тека виконання. Виносити його за межі коду потрібно
-# на хостингах з ефемерною файловою системою — напр. на Azure App Service
-# задають INSTANCE_DIR=/home/data (див. DEPLOY-AZURE.md).
-INSTANCE_DIR = os.getenv("INSTANCE_DIR", os.path.join(BASE_DIR, "instance"))
+# користувачів, тимчасова тека виконання.
+#
+# На App Service код у /home/site/wwwroot перезаписується кожним деплоєм, тому
+# дані мають лежати поза ним — у /home/data. Раніше це доводилось задавати
+# вручну через INSTANCE_DIR, і забута змінна означала втрату всього контенту
+# при наступному деплої. Тепер шлях підставляється сам; явний INSTANCE_DIR
+# і далі має пріоритет.
+_DEFAULT_INSTANCE_DIR = ("/home/data" if ON_APP_SERVICE
+                         else os.path.join(BASE_DIR, "instance"))
+INSTANCE_DIR = os.getenv("INSTANCE_DIR", _DEFAULT_INSTANCE_DIR)
 
 
 class BaseConfig:
@@ -159,5 +168,11 @@ class ProductionConfig(BaseConfig):
 
 
 def get_config():
-    env = os.getenv("FLASK_ENV", "development").lower()
+    """Dev чи Prod. На App Service типово Prod — там development не має сенсу.
+
+    Явний FLASK_ENV завжди сильніший: він потрібен, щоб можна було свідомо
+    увімкнути налагодження на тестовому слоті.
+    """
+    default = "production" if ON_APP_SERVICE else "development"
+    env = os.getenv("FLASK_ENV", default).lower()
     return ProductionConfig if env == "production" else DevelopmentConfig

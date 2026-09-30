@@ -630,5 +630,21 @@ def _seed_learning_paths():
         print(f"  Каталог: додано навчальних маршрутів — {created}")
 
 
+def _base_is_empty():
+    """Чи немає в базі жодного користувача.
+
+    Ознака першого запуску. Потрібна для безперервного розгортання: контейнер
+    перезапускається на кожен push, і беззастережний seed щоразу повертав би
+    демо-користувачів, яких адміністратор перед тим видалив.
+    """
+    app = create_app()
+    with app.app_context():
+        return User.query.count() == 0
+
+
 if __name__ == "__main__":
-    seed()
+    import sys
+    if "--if-empty" in sys.argv and not _base_is_empty():
+        print("· База вже наповнена — початкові дані пропущено")
+    else:
+        seed()
