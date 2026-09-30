@@ -1,10 +1,51 @@
 """Фабрика застосунку AI Knowledge Hub."""
 import os
+import sqlite3
+
 from flask import Flask, jsonify, send_from_directory
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from app.config import get_config, INSTANCE_DIR
 from app.extensions import db, jwt, cors
 from app.core.errors import register_error_handlers
+
+# Каталоги стану, які мають існувати ще до першого запиту. Створюємо їх при
+# старті, а не ліниво: якщо /home/data недоступний для запису, краще впасти
+# одразу з видимою помилкою, ніж через тиждень на завантаженні файлу.
+_STATE_DIRS = ("SKILL_PACKAGES_DIR", "SKILL_ICONS_DIR", "USER_FILES_DIR",
+               "SKILL_RUN_DIR")
+
+
+@event.listens_for(Engine, "connect")
+def _sqlite_pragmas(dbapi_connection, _record):
+    """Налаштування кожного з'єднання SQLite.
+
+    Викликається для будь-якого движка, тому спершу перевіряємо, що це справді
+    SQLite: на PostgreSQL ці PRAGMA не існують.
+    """
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return
+    cfg = _sqlite_pragmas.settings
+    cur = dbapi_connection.cursor()
+    try:
+        # Чекати на зайняту базу, а не падати одразу. На мережевій шарі
+        # блокування знімається не миттєво.
+        cur.execute("PRAGMA busy_timeout = %d" % (cfg["busy_timeout"] * 1000))
+        cur.execute("PRAGMA journal_mode = %s" % cfg["journal_mode"])
+        cur.execute("PRAGMA synchronous = %s" % cfg["synchronous"])
+        # Див. коментар до SQLITE_FOREIGN_KEYS у app/config.py: поки в схемі
+        # є зв'язки без ON DELETE, увімкнення ламає видалення матеріалів і груп.
+        cur.execute("PRAGMA foreign_keys = %s"
+                    % ("ON" if cfg["foreign_keys"] else "OFF"))
+    finally:
+        cur.close()
+
+
+# Значення за замовчуванням для випадку, коли з'єднання створюється поза
+# застосунком (наприклад, у скриптах Alembic).
+_sqlite_pragmas.settings = {"busy_timeout": 30, "journal_mode": "DELETE",
+                            "synchronous": "FULL", "foreign_keys": False}
 
 
 def create_app(config_object=None):
@@ -12,6 +53,22 @@ def create_app(config_object=None):
     app.config.from_object(config_object or get_config())
 
     os.makedirs(INSTANCE_DIR, exist_ok=True)
+    for key in _STATE_DIRS:
+        path = app.config.get(key)
+        if path:
+            os.makedirs(path, exist_ok=True)
+
+    _sqlite_pragmas.settings = {
+        "busy_timeout": app.config.get("SQLITE_BUSY_TIMEOUT", 30),
+        "journal_mode": app.config.get("SQLITE_JOURNAL_MODE", "DELETE"),
+        "synchronous": app.config.get("SQLITE_SYNCHRONOUS", "FULL"),
+        "foreign_keys": app.config.get("SQLITE_FOREIGN_KEYS", False),
+    }
+    _configure_sqlite_pool(app)
+
+    if app.config.get("TRUST_PROXY", False):
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     db.init_app(app)
     jwt.init_app(app)
@@ -36,13 +93,18 @@ def create_app(config_object=None):
     # Довідкові дані — не схема: синхронізуються завжди, бо після міграції
     # таблиці довідників існують, але порожні.
     if app.config.get("SYNC_REFERENCE_DATA", True):
+        from sqlalchemy import inspect as sa_inspect
         from app.core.schema import sync_reference_data
         with app.app_context():
-            try:
-                sync_reference_data()
-            except Exception as exc:   # база ще не мігрована — не валимо старт
-                app.logger.warning("Довідники не синхронізовано: %s. "
-                                   "Виконайте `alembic upgrade head`.", exc)
+            if not sa_inspect(db.engine).has_table("catalog_terms"):
+                # Перший запуск до міграцій: очікуваний стан, не помилка.
+                app.logger.info("База ще не мігрована — довідники "
+                                "синхронізуються після `alembic upgrade head`.")
+            else:
+                try:
+                    sync_reference_data()
+                except Exception as exc:   # не валимо старт через довідники
+                    app.logger.warning("Довідники не синхронізовано: %s", exc)
 
     # Планувальник тижневого скидання квот (понеділок 00:05 UTC).
     if app.config.get("ENABLE_SCHEDULER", True):
@@ -54,7 +116,12 @@ def create_app(config_object=None):
 
     @app.get("/")
     def index():
-        return send_from_directory(app.static_folder, "index.html")
+        # index.html не кешуємо навіть у production: саме він посилається на
+        # style.css?v=NN та app.js?v=NN. Закешований index віддавав би старі
+        # версії ще довго після релізу.
+        resp = send_from_directory(app.static_folder, "index.html")
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
 
     @app.get("/files/<guid>/<path:filename>")
     def public_user_file(guid, filename):
@@ -65,9 +132,36 @@ def create_app(config_object=None):
         від виходу за межі теки.
         """
         base = os.path.join(app.config["USER_FILES_DIR"], guid)
-        return send_from_directory(base, filename)
+        resp = send_from_directory(base, filename)
+        # Файл користувача — приватний: проміжні кеші його зберігати не мають.
+        resp.headers["Cache-Control"] = "private, max-age=3600"
+        return resp
 
     return app
+
+
+def _configure_sqlite_pool(app):
+    """Пул з'єднань для файлової бази SQLite.
+
+    Тільки для файлової: `sqlite:///:memory:` (тести) працює на іншому класі
+    пулу, який pool_size не приймає, а PostgreSQL має власні розумні дефолти.
+    Явно задані SQLALCHEMY_ENGINE_OPTIONS не чіпаємо.
+    """
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
+    if app.config.get("SQLALCHEMY_ENGINE_OPTIONS"):
+        return
+    if not uri.startswith("sqlite:") or ":memory:" in uri:
+        return
+    size = app.config.get("SQLITE_POOL_SIZE", 5)
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "pool_size": size,
+        "max_overflow": size,
+        "pool_recycle": 1800,
+        "pool_pre_ping": True,
+        # timeout у sqlite3 — це те саме очікування зайнятої бази, але вже
+        # на рівні драйвера: діє ще до того, як виконається PRAGMA.
+        "connect_args": {"timeout": app.config.get("SQLITE_BUSY_TIMEOUT", 30)},
+    }
 
 
 _scheduler = None

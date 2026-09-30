@@ -14,6 +14,8 @@ INSTANCE_DIR = os.getenv("INSTANCE_DIR", os.path.join(BASE_DIR, "instance"))
 class BaseConfig:
     # Не кешувати статику (щоб уникати застарілих CSS/JS у браузері).
     SEND_FILE_MAX_AGE_DEFAULT = 0
+    # Довіра до X-Forwarded-* вмикається лише за проксі (див. ProductionConfig).
+    TRUST_PROXY = os.getenv("TRUST_PROXY", "0") == "1"
     # Дефолти ≥32 байти (для dev). У production обов'язково задайте власні у .env.
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-me-in-production-0001")
     JWT_SECRET_KEY = os.getenv(
@@ -26,6 +28,37 @@ class BaseConfig:
         "DATABASE_URL",
         "sqlite:///" + os.path.join(INSTANCE_DIR, "profihub.db"),
     )
+
+    # --- SQLite на мережевій файловій системі (Azure App Service /home) ---
+    # /home в App Service — це SMB-шара Azure Files, а не локальний диск.
+    # Через це:
+    #   * WAL там НЕ працює (потребує спільної пам'яті, якої CIFS не дає) —
+    #     журнал має лишатися rollback-режимом;
+    #   * synchronous=NORMAL безпечний лише разом із WAL, тому тут FULL;
+    #   * блокування іноді «підвисає», тож потрібен великий busy_timeout,
+    #     інакше запит падає з «database is locked» замість того, щоб зачекати.
+    # Значення винесені у змінні, щоб на локальному диску можна було ввімкнути
+    # WAL і отримати вищу пропускну здатність.
+    SQLITE_BUSY_TIMEOUT = int(os.getenv("SQLITE_BUSY_TIMEOUT", "30"))       # секунди
+    SQLITE_JOURNAL_MODE = os.getenv("SQLITE_JOURNAL_MODE", "DELETE").upper()
+    SQLITE_SYNCHRONOUS = os.getenv("SQLITE_SYNCHRONOUS", "FULL").upper()
+    # Перевірка зовнішніх ключів у SQLite вимкнена за замовчуванням — і це
+    # не недогляд. Сім зв'язків у схемі оголошені без правила ON DELETE:
+    #   ideas.source_resource_id, ideas.resource_id,
+    #   learning_path_steps.resource_id, user_files.resource_id,
+    #   chat_sessions.group_id, user_skills.group_id, token_usage_logs.group_id
+    # Поки перевірка вимкнена, SQLite їх просто ігнорує, і видалення
+    # матеріалу чи групи працює. З SQLITE_FOREIGN_KEYS=1 ті самі видалення
+    # падають із «FOREIGN KEY constraint failed».
+    # Це треба полагодити міграцією (SET NULL там, де запис має пережити
+    # батька) ДО переїзду на PostgreSQL: там перевірка увімкнена завжди й
+    # вимкнути її не можна.
+    SQLITE_FOREIGN_KEYS = os.getenv("SQLITE_FOREIGN_KEYS", "0") == "1"
+    # Небагато з'єднань: що менше паралельних писарів у SQLite, то менше
+    # конфліктів блокування. Чотирьом потокам gunicorn цього вистачає.
+    # Сам пул збирає фабрика застосунку: база в пам'яті (тести) використовує
+    # інший клас пулу, який параметра pool_size не приймає.
+    SQLITE_POOL_SIZE = int(os.getenv("SQLITE_POOL_SIZE", "5"))
 
     # --- Вхід через Microsoft Entra ID (NFR-04) ---
     # Порожній TENANT або CLIENT вимикає корпоративний вхід: застосунок
@@ -114,6 +147,15 @@ class DevelopmentConfig(BaseConfig):
 
 class ProductionConfig(BaseConfig):
     DEBUG = False
+    # Статика роздається з тієї самої мережевої шари, що й база. Без кешу
+    # кожен перехід сторінкою читає CSS, JS і шрифт по SMB заново. Версію
+    # у посиланнях (?v=NN) міняє реліз, тож довгий кеш безпечний; сам
+    # index.html позначається no-cache окремо у фабриці застосунку.
+    SEND_FILE_MAX_AGE_DEFAULT = int(os.getenv("STATIC_MAX_AGE", str(30 * 24 * 3600)))
+    # Azure термінує TLS на фронті й передає схему в X-Forwarded-Proto.
+    # Без довіри до заголовка застосунок вважає з'єднання http-овим і
+    # будує зовнішні посилання з неправильною схемою.
+    TRUST_PROXY = os.getenv("TRUST_PROXY", "1") == "1"
 
 
 def get_config():

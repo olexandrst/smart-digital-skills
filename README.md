@@ -149,9 +149,13 @@ python wsgi.py
 
 Відкрийте **http://localhost:5000** у браузері.
 
-> Production-запуск: `gunicorn wsgi:app` (пакет уже в `requirements.txt`).
-> Розгортання на Azure App Service — покрокова інструкція
-> у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md).
+> Production-запуск: `bash startup.sh` — він застосовує міграції й піднімає
+> gunicorn з параметрами, придатними для SQLite. Розгортання на Azure App
+> Service — покрокова інструкція у [`DEPLOY-AZURE.md`](DEPLOY-AZURE.md).
+
+> **Резервна копія бази:** `python -m scripts.backup_db`. Скрипт користується
+> онлайн-бекапом SQLite, тож копію можна знімати на працюючому застосунку —
+> на відміну від `cp`, який під навантаженням дає пошкоджений файл.
 
 ---
 
