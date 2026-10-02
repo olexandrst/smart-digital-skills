@@ -289,6 +289,8 @@ h3, h4 { letter-spacing: -0.018em; }
   padding: 6px; cursor: pointer; display: flex;
 }
 .pw-toggle svg { width: 20px; height: 20px; fill: #8fa0c2; }
+/* Без цього спрацьовує загальне button:hover і за іконкою з'являється червоний квадрат */
+.pw-toggle:hover { background: transparent; }
 .pw-toggle:hover svg { fill: #eef2fb; }
 .btn-primary {
   margin-top: 4px; height: 46px; padding: 0 14px;
@@ -1931,18 +1933,33 @@ body.theme-dark .u-tab.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
   background: var(--panel); border: 1px solid var(--border);
   transition: transform .16s ease, box-shadow .16s ease;
 }
-.path-tile:hover, .path-row-item:hover { transform: translateY(-1px); box-shadow: var(--lift); }
+/* Це <button>, тож без власного фону при наведенні діє загальне button:hover
+   і заливає весь рядок червоним, а текст лишається темним — не читається.
+   Рядок має лише трохи «підніматися» й темнішати рамкою. */
+.path-tile:hover, .path-row-item:hover {
+  background: var(--panel); border-color: var(--border-strong);
+  transform: translateY(-1px); box-shadow: var(--lift);
+}
+.path-tile:focus-visible, .path-row-item:focus-visible {
+  outline: 2px solid var(--primary); outline-offset: 2px;
+}
 .path-ic {
   width: 32px; height: 32px; flex: 0 0 auto; padding: 7px; border-radius: 9px;
   background: var(--purple-t); color: var(--purple);
 }
 .path-ic svg { width: 100%; height: 100%; }
 .path-body { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-.path-body b { font-size: var(--fs-call); font-weight: 570; letter-spacing: -0.015em; }
+.path-body b { display: flex; align-items: center; gap: 8px; min-width: 0;
+  font-size: var(--fs-call); font-weight: 570; letter-spacing: -0.015em; }
 .path-body i { font-size: var(--fs-micro); font-style: normal; color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.path-tag { font-size: var(--fs-cap); font-weight: 620; color: var(--primary);
-  text-transform: uppercase; font-style: normal; letter-spacing: .03em; }
+/* Селектор із .path-body: інакше «.path-body i» (сірий) перебиває колір мітки */
+.path-body .path-tag {
+  flex: 0 0 auto; padding: 2px 7px;
+  border-radius: 999px; background: var(--primary-soft); color: var(--primary);
+  font-size: var(--fs-cap); font-weight: 620; font-style: normal;
+  text-transform: uppercase; letter-spacing: .03em;
+}
 .path-bar { display: block; height: 4px; border-radius: 999px; background: var(--fill-2); overflow: hidden; }
 .path-bar > span { display: block; height: 100%; background: var(--primary); border-radius: 999px; }
 .path-bar.lg { height: 6px; flex: 1; }
@@ -1963,6 +1980,7 @@ body.theme-dark .u-tab.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
   font-size: var(--fs-foot); font-weight: 620;
   background: var(--panel); color: var(--muted); border: 1px solid var(--border);
 }
+.step-check:hover { background: var(--fill-2); color: var(--text); }
 .step-row.done .step-check { background: var(--ok); color: #fff; border-color: transparent; }
 .step-body { flex: 1; min-width: 0; }
 .step-title { font-size: var(--fs-call); font-weight: 570; }
