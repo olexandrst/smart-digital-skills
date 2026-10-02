@@ -35,7 +35,9 @@ def login():
     if not username or not password:
         raise ApiError("Вкажіть логін і пароль", 400, "validation_error")
 
-    user = User.query.filter_by(username=username).first()
+    # Поле на екрані входу підписане «Email або логін» — приймаємо і те, і те,
+    # і не чіпляємося до регістру.
+    user = User.by_login(username)
     if user is None or not verify_password(user.password_hash, password):
         raise ApiError("Невірний логін або пароль", 401, "invalid_credentials")
     if not user.is_active:
@@ -137,7 +139,9 @@ def upsert_entra_user(claims):
     if user is None and profile["email"]:
         # Той самий співробітник міг спершу зайти за паролем — прив'язуємо
         # корпоративний акаунт до наявного запису, а не плодимо другий.
-        user = User.query.filter_by(email=profile["email"]).first()
+        # Каталог може повернути пошту в іншому регістрі, ніж записано в
+        # застосунку, — інакше той самий співробітник отримав би другий запис.
+        user = User.by_email(profile["email"])
     if user is None:
         user = User(username=profile["username"] or profile["external_id"])
         db.session.add(user)

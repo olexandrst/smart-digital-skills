@@ -436,13 +436,15 @@ button svg { width: 15px; height: 15px; flex: 0 0 auto; }
 .mode-seg button.active svg { color: var(--primary); }
 body.theme-dark .mode-seg button.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
 
+/* У режимі чату це єдина головна дія на екрані — вона й має бути акцентною.
+   Нейтральною вона губилася поруч із перемикачем режимів. */
 .btn-newchat {
-  flex: 0 0 auto; height: 30px; padding: 0 13px;
-  background: var(--appbar-btn); color: var(--appbar-text);
-  font-size: var(--fs-foot); font-weight: 540; border-radius: var(--r-sm);
+  flex: 0 0 auto; height: 30px; padding: 0 14px;
+  background: var(--primary); color: #fff;
+  font-size: var(--fs-foot); font-weight: 560; border-radius: var(--r-sm);
 }
-.btn-newchat:hover { background: var(--fill-2); }
-.btn-newchat svg { width: 14px; height: 14px; }
+.btn-newchat:hover { background: var(--primary-strong); }
+.btn-newchat svg { width: 14px; height: 14px; stroke: currentColor; }
 
 /* Пошук — один на весь застосунок, як Spotlight */
 .spotlight { position: relative; margin-left: auto; width: min(420px, 34vw); flex: 0 1 auto; }
@@ -653,7 +655,14 @@ body.theme-dark .theme-seg button.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .
 .row > button { flex: 0 0 auto; }
 
 table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); font-size: var(--fs-foot); }
+/* Таблиці керування багатоколонкові, з довгими адресами пошти. На вузькому
+   екрані вони ширші за картку — і колонка «Дії» просто обрізалася праворуч.
+   display:block робить саму таблицю прокручуваним контейнером; внутрішня
+   розкладка колонок при цьому зберігається, тож заголовки лишаються над
+   своїми стовпцями. */
+.card > table { display: block; overflow-x: auto; }
+th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border);
+         font-size: var(--fs-foot); vertical-align: middle; }
 th { color: var(--faint); font-weight: 600; font-size: var(--fs-cap); text-transform: uppercase; letter-spacing: .04em; }
 tbody tr { transition: background .12s ease; }
 tbody tr:hover { background: var(--soft); }
@@ -675,7 +684,46 @@ tbody tr:hover { background: var(--soft); }
 .field { margin-bottom: 12px; }
 .field label { display: block; margin-bottom: 4px; font-size: var(--fs-foot); color: var(--muted); }
 
-.actions { display: flex; gap: 6px; }
+/* Комірка з діями рядка.
+   display:flex на <td> вимикає його участь у розкладці таблиці: рядок
+   перестає розтягуватися під вміст, і кнопки «випадають» поверх сусідніх
+   рядків. Саме це ламало таблицю користувачів. Тому тут звичайна комірка,
+   а відстань між кнопками — через margin. */
+td.actions { white-space: nowrap; text-align: right; }
+td.actions > button { vertical-align: middle; }
+td.actions > button + button { margin-left: 6px; }
+.actions:not(td) { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Квота в таблиці користувачів: число окремим рядком, позначка й дія —
+   під ним. В один рядок воно не вміщалося й переносилося абияк. */
+td.u-quota { white-space: nowrap; }
+.u-quota-nums { font-variant-numeric: tabular-nums; }
+.u-quota-act { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+
+/* Користувач одним блоком: ім'я зверху, логін (і пошта, якщо інша) знизу */
+.u-who-name { font-weight: 550; }
+.u-who-login { font-size: var(--fs-micro); color: var(--muted); margin-top: 2px; }
+
+/* Розподіл ширини в таблиці користувачів.
+   Типово браузер роздає вільне місце всім колонкам порівну, тож вузькі
+   «Ролі» та «Квота» розповзалися, витісняючи «Дії» за край картки.
+   width:1% разом із nowrap — усталений спосіб сказати «цій колонці рівно
+   стільки, скільки треба вмісту»; увесь надлишок забирає колонка з іменем. */
+.t-users th, .t-users td { width: 1%; white-space: nowrap; }
+.t-users th:nth-child(2), .t-users td:nth-child(2) { width: 100%; white-space: normal; }
+
+/* На вузькому екрані таблиця все одно ширша за картку й прокручується.
+   Щоб кнопки дій не зникали за правим краєм (саме це читалося як «зламана
+   верстка», а не як «тут можна прогорнути»), колонка «Дії» лишається на
+   місці, а решта проїжджає під нею. Фон обов'язковий — крізь прозору
+   комірку було б видно текст, що пропливає. Підсвітка рядка при наведенні
+   тягнеться і сюди, тому для неї окреме правило. */
+.t-users th:last-child, .t-users td:last-child {
+  position: sticky; right: 0; background: var(--panel);
+}
+.t-users.is-scrollable th:last-child,
+.t-users.is-scrollable td:last-child { box-shadow: inset 1px 0 0 var(--border); }
+.t-users tbody tr:hover td:last-child { background: var(--soft); }
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
 .stat {

@@ -67,6 +67,37 @@ class User(db.Model):
             codes.add("admin")
         return sorted(codes)
 
+    # --- Пошук користувача за тим, що він увів у полі входу ---
+    #
+    # Регістр не має значення: людина пише «Oleksandr.Stasiuk@…» або
+    # «oleksandr.stasiuk@…» і в обох випадках має зайти. Точний збіг
+    # перевіряємо першим — якщо в базі історично є два записи, що різняться
+    # лише регістром, вхід не почне мовчки вести в чужий обліковий запис.
+    #
+    # lower() у SQLite згортає лише ASCII; для логінів-пошти цього досить.
+    # На PostgreSQL lower() згортає і кирилицю.
+    @classmethod
+    def by_login(cls, value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        exact = cls.query.filter(
+            db.or_(cls.username == value, cls.email == value)).first()
+        if exact is not None:
+            return exact
+        low = value.lower()
+        return cls.query.filter(db.or_(
+            db.func.lower(cls.username) == low,
+            db.func.lower(cls.email) == low)).first()
+
+    @classmethod
+    def by_email(cls, value):
+        value = (value or "").strip()
+        if not value:
+            return None
+        return (cls.query.filter(cls.email == value).first()
+                or cls.query.filter(db.func.lower(cls.email) == value.lower()).first())
+
     def has_global_role(self, code):
         if code == "admin" and self.is_system_admin:
             return True

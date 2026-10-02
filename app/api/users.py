@@ -84,7 +84,9 @@ def create_user():
     password = data.get("password") or ""
     if not username or not password:
         raise ApiError("Вкажіть логін і пароль", 400, "validation_error")
-    if User.query.filter_by(username=username).first():
+    # Перевіряємо без урахування регістру: вхід теж його ігнорує, тож
+    # «Admin» поруч із «admin» створив би два записи з одним логіном.
+    if User.by_login(username) is not None:
         raise ApiError("Такий логін уже існує", 409, "conflict")
 
     user = User(
