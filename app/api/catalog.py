@@ -397,6 +397,17 @@ def _log_review(item_type, item, from_status, to_status, note=None):
     ))
 
 
+def _submit_for_review(res, user):
+    """Чернетка → «На розгляді»: автор більше не редагує, менеджери отримують
+    сповіщення. Попередній коментар повернення знімається — він стосувався
+    старої версії."""
+    res.status = "review"
+    res.submitted_at = datetime.utcnow()
+    res.review_note = None
+    _log_review("resource", res, "draft", "review")
+    review_service.notify_submitted(res, user)
+
+
 # ------------------------------- Розділи -------------------------------
 
 @bp.get("/sections")
@@ -1057,6 +1068,10 @@ def create_resource():
     _set_maturity(res, data.get("maturity_ids"))
     if publish:
         _log_review("resource", res, None, "published")
+    elif data.get("submit"):
+        # Майстер подає одразу: окремий запит на /submit лишив би вікно, у
+        # якому чернетка створена, а подання не відбулося.
+        _submit_for_review(res, user)
     db.session.commit()
     return jsonify(res.to_dict()), 201
 
@@ -1095,14 +1110,82 @@ def change_resource_status(resource_id):
         _require_publish_ready(res)
 
     old_status = res.status
+    note = (data.get("note") or "").strip() or None
     res.status = new_status
     if new_status == "published":
         if res.published_at is None:
             res.published_at = datetime.utcnow()
         res.reviewed_at = datetime.utcnow()
     if old_status != new_status:
-        _log_review("resource", res, old_status, new_status,
-                    (data.get("note") or "").strip() or None)
+        _log_review("resource", res, old_status, new_status, note)
+    # Рішення за поданим матеріалом — автор має про нього дізнатися.
+    if old_status == "review" and new_status != "review":
+        if new_status == "published":
+            res.review_note = None
+            review_service.notify_published(res, current_user())
+        else:
+            res.review_note = note or "Матеріал повернуто без коментаря."
+            review_service.notify_rejected(res, current_user(), res.review_note)
+    db.session.commit()
+    return jsonify(res.to_dict())
+
+
+@bp.post("/resources/<int:resource_id>/submit")
+@require_auth
+def submit_resource(resource_id):
+    """Автор подає чернетку на розгляд; менеджери отримують сповіщення."""
+    res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    # Спершу «чи твоє», потім «чи в тому стані»: чужому — 403 незалежно від
+    # стану, своєму вже поданому — 409, а не хибне «немає прав».
+    if not (_is_manager(user) or _is_author(res, user)):
+        raise ApiError("Подати на розгляд може автор чернетки або менеджер",
+                       403, "forbidden")
+    if res.status != "draft":
+        raise ApiError("На розгляд подається лише чернетка", 409, "wrong_status")
+    _submit_for_review(res, user)
+    db.session.commit()
+    return jsonify(res.to_dict())
+
+
+@bp.post("/resources/<int:resource_id>/withdraw")
+@require_auth
+def withdraw_resource(resource_id):
+    """Автор забирає матеріал із розгляду, щоб доопрацювати."""
+    res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    if not (_is_manager(user) or _is_author(res, user)):
+        raise ApiError("Відкликати може автор матеріалу або менеджер", 403, "forbidden")
+    if res.status != "review":
+        raise ApiError("Відкликати можна лише матеріал на розгляді", 409, "wrong_status")
+    res.status = "draft"
+    _log_review("resource", res, "review", "draft", "Відкликано з розгляду")
+    db.session.commit()
+    return jsonify(res.to_dict())
+
+
+@bp.post("/resources/<int:resource_id>/reject")
+@require_global_role("admin", "skill_manager")
+def reject_resource(resource_id):
+    """Менеджер повертає поданий матеріал на доопрацювання — з коментарем.
+
+    Коментар обов'язковий: повернення без причини лишає автора здогадуватися,
+    і матеріал так і не доходить до каталогу.
+    """
+    res = CatalogResource.query.get_or_404(resource_id)
+    data = request.get_json(silent=True) or {}
+    note = " ".join((data.get("note") or "").split())
+    if not note:
+        raise ApiError("Напишіть, що саме виправити — автор має зрозуміти причину",
+                       400, "validation_error")
+    if len(note) > 2000:
+        raise ApiError("Коментар завеликий (максимум 2000 символів)", 400, "validation_error")
+    if res.status != "review":
+        raise ApiError("Повернути можна лише матеріал на розгляді", 409, "wrong_status")
+    res.status = "draft"
+    res.review_note = note
+    _log_review("resource", res, "review", "draft", note)
+    review_service.notify_rejected(res, current_user(), note)
     db.session.commit()
     return jsonify(res.to_dict())
 

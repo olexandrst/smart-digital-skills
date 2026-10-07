@@ -18,7 +18,11 @@ def _iso(value):
     return value.isoformat() if value else None
 
 
-NOTIFICATION_KINDS = ("review_due", "review_overdue")
+# review_due / review_overdue — нагадування власникові про перегляд;
+# review_requested — менеджерам: подано матеріал на розгляд;
+# review_published / review_rejected — авторові: рішення за його матеріалом.
+NOTIFICATION_KINDS = ("review_due", "review_overdue",
+                      "review_requested", "review_published", "review_rejected")
 
 
 class Notification(db.Model):

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Knowledge Hub</title>
-  <link rel="stylesheet" href="style.css?v=73">
+  <link rel="stylesheet" href="style.css?v=76">
 </head>
 <body>
   <!-- Екран входу -->
@@ -111,6 +111,23 @@
                placeholder="Пошук або опишіть задачу своїми словами">
       </div>
 
+      <!-- Сповіщення: подано на розгляд, рішення за матеріалом, нагадування -->
+      <div class="notif-wrap">
+        <button id="notif-btn" class="notif-btn" type="button" aria-label="Сповіщення"
+                aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.5 16.6v-5.4a5.5 5.5 0 0 1 11 0v5.4l1.6 1.8H4.9l1.6-1.8Z"/>
+            <path d="M10 20.3a2 2 0 0 0 4 0"/>
+          </svg>
+          <span id="notif-n" class="notif-n hidden"></span>
+        </button>
+        <div id="notif-pop" class="notif-pop hidden" role="menu">
+          <div class="notif-head"><b>Сповіщення</b>
+            <button class="plain" id="notif-read-all" type="button">Прочитати всі</button></div>
+          <div id="notif-list" class="notif-list"></div>
+        </div>
+      </div>
+
       <div class="me-wrap">
         <button id="me-btn" class="me-btn" type="button" aria-haspopup="true" aria-expanded="false">
           <span class="avatar" id="user-avatar"></span>
@@ -176,6 +193,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=73"></script>
+  <script src="app.js?v=76"></script>
 </body>
 </html>

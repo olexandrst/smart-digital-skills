@@ -47,6 +47,7 @@ DEFAULT_MATERIAL_TYPES = (
 
 DEFAULT_STATUS_TERMS = (
     ("draft", "Чернетка", "✏️", "ink"),
+    ("review", "На розгляді", "🕒", "amber"),
     ("published", "Опублікований", "✅", "green"),
     ("needs_update", "Потребує оновлення", "⚠️", "amber"),
     ("archived", "Архів", "📦", "steel"),
@@ -62,9 +63,11 @@ DEFAULT_REUSE_TERMS = (
 LINK_SCOPES = ("external", "internal")
 
 # Статуси життєвого циклу матеріалу (BR-12).
-# draft — чернетка; published — опублікований; needs_update — потребує оновлення
-# (видимий користувачам із застереженням); archived — знятий, видимий лише менеджерам.
-RESOURCE_STATUSES = ("draft", "published", "needs_update", "archived")
+# draft — чернетка; review — подано на розгляд (автор більше не редагує,
+# менеджер публікує або повертає з коментарем); published — опублікований;
+# needs_update — потребує оновлення (видимий користувачам із застереженням);
+# archived — знятий, видимий лише менеджерам.
+RESOURCE_STATUSES = ("draft", "review", "published", "needs_update", "archived")
 
 # Статуси, які бачать звичайні користувачі.
 PUBLIC_STATUSES = ("published", "needs_update")
@@ -380,6 +383,11 @@ class CatalogResource(db.Model):
     accent = db.Column(db.String)        # колір плитки; None = типовий для виду
     is_featured = db.Column(db.Boolean, nullable=False, default=False)
     status = db.Column(db.String, nullable=False, default="draft")  # RESOURCE_STATUSES
+    # Розгляд поданого матеріалу: коли подано і чому повернуто. Коментар
+    # менеджера живе тут (а не лише в журналі), бо автор має бачити його в
+    # картці й у списку — без походу в історію.
+    submitted_at = db.Column(db.DateTime)
+    review_note = db.Column(db.Text)
     version = db.Column(db.String, nullable=False, default="1.0.0")
     opens_count = db.Column(db.Integer, nullable=False, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
@@ -444,6 +452,8 @@ class CatalogResource(db.Model):
             "accent": self.accent,
             "is_featured": self.is_featured,
             "status": self.status,
+            "submitted_at": _iso(self.submitted_at),
+            "review_note": self.review_note,
             "version": self.version,
             "opens_count": self.opens_count,
             "created_by": self.created_by,

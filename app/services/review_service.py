@@ -85,6 +85,65 @@ def create_reminders(now=None):
     return created
 
 
+# --- Сповіщення розгляду: подано → менеджерам, рішення → авторові ---
+#
+# Ключ проти повторів містить час події, а не лише id матеріалу: той самий
+# матеріал можуть подати, повернути й подати знову — кожен раз це нове
+# сповіщення. Запис лише додається в сесію; фіксує її ендпоінт разом зі
+# зміною статусу, щоб сповіщення без зміни (або навпаки) не траплялося.
+
+def _managers(except_user=None):
+    """Усі, хто розглядає подані матеріали, крім того, хто сам і діє."""
+    return [u for u in User.query.filter_by(is_active=True).all()
+            if (u.has_global_role("admin") or u.has_global_role("skill_manager"))
+            and (except_user is None or u.id != except_user.id)]
+
+
+def _author(res):
+    return db.session.get(User, res.created_by) if res.created_by else None
+
+
+def _push(user, kind, title, body, res, key):
+    if Notification.query.filter_by(user_id=user.id, dedupe_key=key).first():
+        return False
+    db.session.add(Notification(user_id=user.id, kind=kind, title=title, body=body,
+                                resource_id=res.id, dedupe_key=key))
+    return True
+
+
+def notify_submitted(res, actor):
+    """Менеджерам: матеріал подано на розгляд. Повертає кількість адресатів."""
+    stamp = (res.submitted_at or datetime.utcnow()).isoformat()
+    who = actor.full_name or actor.username
+    sent = 0
+    for manager in _managers(except_user=actor):
+        sent += _push(manager, "review_requested", "Матеріал на розгляд",
+                      f"«{res.name}» — подав(ла) {who}. Перегляньте й опублікуйте "
+                      f"або поверніть з коментарем.",
+                      res, f"review_requested:{res.id}:{stamp}")
+    return sent
+
+
+def notify_published(res, actor):
+    """Авторові: матеріал опубліковано (якщо публікував не він сам)."""
+    author = _author(res)
+    if author is None or author.id == actor.id:
+        return False
+    return _push(author, "review_published", "Матеріал опубліковано",
+                 f"«{res.name}» тепер у каталозі.",
+                 res, f"review_published:{res.id}:{datetime.utcnow().isoformat()}")
+
+
+def notify_rejected(res, actor, note):
+    """Авторові: матеріал повернуто на доопрацювання з коментарем."""
+    author = _author(res)
+    if author is None or author.id == actor.id:
+        return False
+    return _push(author, "review_rejected", "Матеріал повернуто на доопрацювання",
+                 f"«{res.name}»: {note}",
+                 res, f"review_rejected:{res.id}:{datetime.utcnow().isoformat()}")
+
+
 def email_digest_enabled(user):
     """Чи хоче користувач щотижневий підсумок на пошту (типово — так)."""
     return AppSetting.get(f"{EMAIL_DIGEST_KEY}:{user.id}", "1") == "1"
