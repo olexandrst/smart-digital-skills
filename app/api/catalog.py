@@ -5,7 +5,8 @@
 """
 import os
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify, send_from_directory, Response
+from flask import (Blueprint, request, jsonify, send_from_directory, Response,
+                   current_app)
 from sqlalchemy import func
 from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
@@ -13,6 +14,7 @@ from app.core.security import current_user
 from app.core.errors import ApiError
 from app.services import (
     file_service, usage_service, search_service, assistant_service, review_service,
+    text_extract_service,
 )
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
@@ -89,6 +91,27 @@ def type_behaviour(code):
 
 def _is_manager(user):
     return user.has_global_role("admin") or user.has_global_role("skill_manager")
+
+
+# --- Хто що може з матеріалом ---
+#
+# Додати матеріал може будь-який користувач: він потрапляє в каталог як
+# чернетка, яку бачать лише автор і менеджери, а публікує менеджер (двоступеневе
+# погодження з GOVERNANCE, рішення 3). Автор править і видаляє свою чернетку
+# сам; щойно матеріал опубліковано, зміни — лише через менеджера, бо на
+# опублікований текст уже спираються інші.
+
+def _is_author(res, user):
+    return res.created_by is not None and res.created_by == user.id
+
+
+def _can_see(res, user):
+    return (res.status in PUBLIC_STATUSES or _is_manager(user)
+            or _is_author(res, user))
+
+
+def _may_edit(res, user):
+    return _is_manager(user) or (_is_author(res, user) and res.status == "draft")
 
 
 def strict_publish_enabled():
@@ -820,10 +843,17 @@ def list_resources():
     `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q`.
 
     Admin/Skill Manager бачать усе; решта — опубліковані та ті, що потребують
-    оновлення (чернетки й архів приховані).
+    оновлення (чернетки й архів приховані). `mine=1` — лише матеріали, які
+    створив поточний користувач, у будь-якому статусі: так автор бачить свої
+    чернетки, не отримуючи доступу до чужих.
     """
-    manager = _is_manager(current_user())
+    user = current_user()
+    manager = _is_manager(user)
     query = CatalogResource.query
+
+    mine = request.args.get("mine") in ("1", "true")
+    if mine:
+        query = query.filter_by(created_by=user.id)
 
     rtype = request.args.get("type")
     if rtype:
@@ -889,14 +919,15 @@ def list_resources():
         if status not in RESOURCE_STATUSES:
             raise ApiError("Статус має бути одним із: " + ", ".join(RESOURCE_STATUSES),
                            400, "validation_error")
-        if not manager and status not in PUBLIC_STATUSES:
+        if not manager and not mine and status not in PUBLIC_STATUSES:
             raise ApiError("Матеріали цього статусу недоступні", 403, "forbidden")
         query = query.filter_by(status=status)
-    if not manager:
+    if not manager and not mine:
         query = query.filter(CatalogResource.status.in_(PUBLIC_STATUSES))
 
-    items = query.order_by(CatalogResource.is_featured.desc(),
-                           CatalogResource.id.desc()).all()
+    order = ((CatalogResource.updated_at.desc(), CatalogResource.id.desc()) if mine
+             else (CatalogResource.is_featured.desc(), CatalogResource.id.desc()))
+    items = query.order_by(*order).all()
     ratings = _rating_map("resource")
     return jsonify([dict(r.to_dict(), **ratings.get(r.id, _EMPTY_RATING))
                     for r in items])
@@ -972,25 +1003,50 @@ def _rating_map(item_type):
             for row in rows}
 
 
+@bp.post("/resources/extract-text")
+@require_auth
+def extract_text():
+    """Текст із файлу для поля «зміст» майстра створення матеріалу.
+
+    Файл тут не зберігається: користувач ще нічого не створив, а чи лишати
+    оригінал вкладенням — вирішує він сам уже після створення картки.
+    """
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
+    data = file.read()
+    max_bytes = current_app.config.get("USER_FILE_MAX_BYTES", 25 * 1024 * 1024)
+    if len(data) > max_bytes:
+        raise ApiError("Файл завеликий", 400, "file_too_large")
+    result = text_extract_service.extract(file.filename, data)
+    return jsonify(dict(result, filename=file.filename))
+
+
 @bp.get("/resources/<int:resource_id>")
 @require_auth
 def get_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
-    if res.status not in PUBLIC_STATUSES and not _is_manager(current_user()):
+    if not _can_see(res, current_user()):
         raise ApiError("Ресурс недоступний", 403, "forbidden")
     ratings = _rating_map("resource")
     return jsonify(dict(res.to_dict(), **ratings.get(res.id, _EMPTY_RATING)))
 
 
 @bp.post("/resources")
-@require_global_role("admin", "skill_manager")
+@require_auth
 def create_resource():
     data = request.get_json(silent=True) or {}
     user = current_user()
+    manager = _is_manager(user)
+    if not manager:
+        # Користувач подає матеріал на розгляд: статус і «рекомендований»
+        # вирішує менеджер, тому ці поля з його запиту не беруться взагалі —
+        # мовчки, а не помилкою, щоб один і той самий клієнт працював для обох.
+        data = {k: v for k, v in data.items() if k not in ("status", "is_featured")}
     res = CatalogResource(created_by=user.id)
     res.author = user.full_name or user.username
     _apply_fields(res, data, creating=True)
-    publish = (data.get("status") or "draft") == "published"
+    publish = manager and (data.get("status") or "draft") == "published"
     if publish:
         _require_publish_ready(res)
         res.status = "published"
@@ -1006,10 +1062,16 @@ def create_resource():
 
 
 @bp.patch("/resources/<int:resource_id>")
-@require_global_role("admin", "skill_manager")
+@require_auth
 def update_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    if not _may_edit(res, user):
+        raise ApiError("Редагувати можна лише власну чернетку; опублікований "
+                       "матеріал змінює менеджер каталогу", 403, "forbidden")
     data = request.get_json(silent=True) or {}
+    if not _is_manager(user):
+        data = {k: v for k, v in data.items() if k != "is_featured"}
     _apply_fields(res, data)
     if "tags" in data:
         _set_tags(res, data.get("tags"))
@@ -1065,7 +1127,7 @@ def register_open(resource_id):
     """
     res = CatalogResource.query.get_or_404(resource_id)
     user = current_user()
-    if res.status not in PUBLIC_STATUSES and not _is_manager(user):
+    if not _can_see(res, user):
         raise ApiError("Ресурс недоступний", 403, "forbidden")
     res.opens_count = (res.opens_count or 0) + 1
     usage_service.record_view(user, "resource", res.id, res.name)
@@ -1113,7 +1175,7 @@ def register_view():
 def _visible_resource(resource_id):
     """Картка, яку поточний користувач має право бачити."""
     res = CatalogResource.query.get_or_404(resource_id)
-    if res.status not in PUBLIC_STATUSES and not _is_manager(current_user()):
+    if not _can_see(res, current_user()):
         raise ApiError("Ресурс недоступний", 403, "forbidden")
     return res
 
@@ -1185,9 +1247,12 @@ def delete_resource_file(resource_id, file_id):
 
 
 @bp.delete("/resources/<int:resource_id>")
-@require_global_role("admin", "skill_manager")
+@require_auth
 def delete_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
+    if not _may_edit(res, current_user()):
+        raise ApiError("Видалити можна лише власну чернетку; опублікований "
+                       "матеріал знімає з обігу менеджер каталогу", 403, "forbidden")
     # Вкладення живуть лише разом із карткою — інакше у сховищі лишаються
     # файли, до яких більше немає жодного шляху з інтерфейсу.
     for uf in UserFile.query.filter_by(resource_id=resource_id).all():

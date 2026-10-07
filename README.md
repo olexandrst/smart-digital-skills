@@ -59,6 +59,11 @@
   оновлення → Архів`, власник, дати останнього й наступного перегляду, рівень
   повторного використання та журнал переходів. Опційна **сувора публікація**
   не випускає матеріал без обов'язкових полів
+- ➕ **Додати матеріал може будь-хто**: майстер у базі знань (вид → зміст →
+  опис) приймає вставлений текст або файл — з `.txt/.md/.docx/.pdf` текст
+  витягується у поле, оригінал і додаткові файли прикріплюються до картки.
+  Матеріал стає чернеткою на сторінці «Мої матеріали», публікує менеджер
+  (або сам, якщо створює менеджер)
 - ⭐ **Оцінки та зворотний зв'язок** на кожній картці (1–5 + коментар);
   середній рейтинг показується в каталозі, відгуки — у спільному інбоксі
 - 🔎 **Лог пошукових запитів** — що шукають і які запити нічого не знаходять
@@ -471,20 +476,21 @@ smart-digital-skills/
 | PATCH | `/catalog/terms/{id}` | Перейменування / видимість значення | Admin/Skill Manager |
 | POST | `/catalog/terms/{id}/merge` | Злиття значення в інше (`{"into": id}`) | Admin/Skill Manager |
 | DELETE | `/catalog/terms/{id}` | Видалення значення (посилання в картках знімаються) | Admin/Skill Manager |
-| GET | `/catalog/resources` | Матеріали з фільтрами: `type`, `section_id`, `folder_id`, `status`, `complexity_id`, `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q` | авторизовані |
+| GET | `/catalog/resources` | Матеріали з фільтрами: `type`, `section_id`, `folder_id`, `status`, `complexity_id`, `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q`; `mine=1` — власні матеріали в будь-якому статусі | авторизовані |
 | GET | `/catalog/showcase` | Блоки головної: рекомендовані, нові, популярні, потребують оновлення | авторизовані |
-| GET | `/catalog/resources/{id}` | Детальна картка ресурсу | авторизовані |
+| POST | `/catalog/resources/extract-text` | Текст із файлу `.txt/.md/.docx/.pdf` для поля «зміст» (multipart `file`) | авторизовані |
+| GET | `/catalog/resources/{id}` | Детальна картка ресурсу | усі, хто бачить картку (автор бачить свою чернетку) |
 | GET | `/catalog/resources/{id}/files` | Вкладення картки | усі, хто бачить картку |
 | POST | `/catalog/resources/{id}/files` | Додати вкладення (multipart `file`) | автор картки / менеджер |
 | GET | `/catalog/resources/{id}/files/{fid}/download` | Звантажити вкладення | усі, хто бачить картку |
 | DELETE | `/catalog/resources/{id}/files/{fid}` | Видалити вкладення | той, хто додав / автор / менеджер |
-| POST | `/catalog/resources` | Створення ресурсу | Admin/Skill Manager |
-| PATCH | `/catalog/resources/{id}` | Редагування ресурсу | Admin/Skill Manager |
+| POST | `/catalog/resources` | Створення ресурсу (не-менеджер — завжди чернетка) | авторизовані |
+| PATCH | `/catalog/resources/{id}` | Редагування ресурсу | менеджер / автор власної чернетки |
 | POST | `/catalog/resources/{id}/status` | Життєвий цикл: `draft\|published\|needs_update\|archived` | Admin/Skill Manager |
 | GET | `/catalog/resources/{id}/review-log` | Журнал змін статусу матеріалу | Admin/Skill Manager |
 | POST | `/catalog/resources/{id}/feedback` | Оцінка (1–5) та/або коментар | авторизовані |
 | POST | `/catalog/resources/{id}/open` | Лічильник відкриттів/копіювань | авторизовані |
-| DELETE | `/catalog/resources/{id}` | Видалення ресурсу | Admin/Skill Manager |
+| DELETE | `/catalog/resources/{id}` | Видалення ресурсу | менеджер / автор власної чернетки |
 | GET | `/catalog/favorites` | Обране користувача (навички + ресурси) | авторизовані |
 | POST | `/catalog/favorites` | Перемикання «зірочки» (`item_type`, `item_id`) | авторизовані |
 | POST | `/catalog/search-log` | Реєстрація пошукового запиту | авторизовані |
