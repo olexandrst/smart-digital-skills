@@ -266,8 +266,11 @@ def test_analytics_report(client):
     h = _admin(client)
     sid = _section(client, h).get_json()["id"]
     rid = _resource(client, h, section_id=sid, owner="Власник").get_json()["id"]
-    _resource(client, h, name="Кейс", resource_type="case", body="Опис кейсу",
-              section_id=sid)
+    case = _resource(client, h, name="Кейс", resource_type="case", body="Опис кейсу",
+                     section_id=sid).get_json()
+    # Власником стає той, хто опублікував; «без власника» — коли його прибрали.
+    assert case["owner"] == "admin"
+    client.patch(f"/api/catalog/resources/{case['id']}", json={"owner": ""}, headers=h)
     u1 = _login(client, "u1")
 
     client.post(f"/api/catalog/resources/{rid}/feedback",

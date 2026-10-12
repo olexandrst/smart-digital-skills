@@ -110,3 +110,33 @@ def test_post_moderation_migration_converts_data(tmp_path):
         assert conn.execute(text("SELECT is_public FROM skill_feedback")).scalar() == 0
         assert conn.execute(text(
             "SELECT name FROM roles WHERE code = 'skill_manager'")).scalar() == "Менеджер каталогу"
+
+
+def test_owner_backfill_takes_whoever_published(tmp_path):
+    """Опубліковане без власника отримує його: хто опублікував за журналом,
+    інакше хто створив, інакше автор. Чернетки й заповнених не чіпаємо."""
+    from sqlalchemy import text
+    path = tmp_path / "owners.db"
+    _alembic(path, "upgrade", "e5a7c9d1f3b6", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        _insert(conn, "users", id=7, username="olena", full_name="Олена Коваль")
+        _insert(conn, "catalog_resources", id=1, name="За журналом", status="published", owner=None)
+        _insert(conn, "review_logs", item_type="resource", item_id=1, item_name="За журналом",
+                to_status="published", actor_name="Менеджер Петро")
+        _insert(conn, "catalog_resources", id=2, name="За творцем", status="needs_update",
+                owner="", created_by=7)
+        _insert(conn, "catalog_resources", id=3, name="За автором", status="published",
+                owner=None, author="Іван")
+        _insert(conn, "catalog_resources", id=4, name="Чернетка", status="draft", owner=None,
+                created_by=7)
+        _insert(conn, "catalog_resources", id=5, name="Свій власник", status="published",
+                owner="Марія", created_by=7)
+        _insert(conn, "skills", id=1, name="Навичка", status="published", owner=None,
+                created_by=7)
+    _alembic(path, "upgrade", "head", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        owners = dict(conn.execute(text("SELECT id, owner FROM catalog_resources")).all())
+        assert owners == {1: "Менеджер Петро", 2: "Олена Коваль", 3: "Іван",
+                          4: None, 5: "Марія"}
+        assert conn.execute(text("SELECT owner FROM skills WHERE id = 1")).scalar() == "Олена Коваль"

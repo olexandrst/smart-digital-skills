@@ -129,3 +129,92 @@ def test_attachment_of_hidden_card_not_listed(client):
     _attach(client, admin, rid)
     assert client.get(f"/api/catalog/resources/{rid}/files",
                       headers=auth(login(client, "u1", "pass"))).status_code == 403
+
+
+# ------------------ Перегляд зображень і відео з вкладень ------------------
+
+PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06"
+       b"\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x01"
+       b"\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
+
+
+def _media_card(client):
+    admin = login(client, "admin", "Admin123!")
+    rid = _resource(client, admin).get_json()["id"]
+    _attach(client, admin, rid, "schema.png", PNG)
+    _attach(client, admin, rid, "demo.mp4", b"\x00\x00\x00\x18ftypmp42" + b"0" * 2000)
+    _attach(client, admin, rid, "notes.docx", b"PK docx")
+    _attach(client, admin, rid, "logo.svg", b"<svg onload='alert(1)'/>")
+    return admin, rid
+
+
+def test_images_and_videos_get_preview_links(client):
+    admin, rid = _media_card(client)
+    files = {f["filename"]: f for f in client.get(
+        f"/api/catalog/resources/{rid}/files", headers=auth(login(client, "u1", "pass"))).get_json()}
+    assert files["schema.png"]["media"] == "image" and files["schema.png"]["preview_url"]
+    assert files["demo.mp4"]["media"] == "video" and files["demo.mp4"]["preview_url"]
+    # Документи й SVG (може містити скрипти) переглядом не відкриваються.
+    for name in ("notes.docx", "logo.svg"):
+        assert files[name]["media"] is None and files[name]["preview_url"] is None
+
+
+def test_preview_serves_media_without_jwt_and_safely(client):
+    admin, rid = _media_card(client)
+    files = {f["filename"]: f for f in client.get(
+        f"/api/catalog/resources/{rid}/files", headers=auth(admin)).get_json()}
+    img = client.get(files["schema.png"]["preview_url"])     # без заголовка Authorization
+    assert img.status_code == 200
+    assert img.mimetype == "image/png" and img.data == PNG
+    assert img.headers["X-Content-Type-Options"] == "nosniff"
+    assert "sandbox" in img.headers["Content-Security-Policy"]
+    assert "attachment" not in img.headers.get("Content-Disposition", "")
+    # Відео можна перемотувати: сервер відповідає на Range частиною файлу.
+    part = client.get(files["demo.mp4"]["preview_url"], headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206 and len(part.data) == 100
+    assert part.mimetype == "video/mp4"
+
+
+def test_preview_link_cannot_be_forged_or_reused_for_other_file(client):
+    admin, rid = _media_card(client)
+    files = client.get(f"/api/catalog/resources/{rid}/files", headers=auth(admin)).get_json()
+    url = next(f["preview_url"] for f in files if f["filename"] == "schema.png")
+    other = next(f["id"] for f in files if f["filename"] == "demo.mp4")
+    sig = url.split("sig=", 1)[1]
+    assert client.get(f"/api/catalog/files/{other}/preview?sig={sig}").status_code == 403
+    assert client.get(url[:-3] + "xyz").status_code == 403
+    assert client.get(url.split("?")[0]).status_code == 403
+
+
+def test_preview_link_expires(client, monkeypatch):
+    from app.services import file_service
+    admin, rid = _media_card(client)
+    url = next(f["preview_url"] for f in client.get(
+        f"/api/catalog/resources/{rid}/files", headers=auth(admin)).get_json()
+        if f["filename"] == "schema.png")
+    monkeypatch.setattr(file_service, "PREVIEW_MAX_AGE", -1)
+    assert client.get(url).status_code == 403
+
+
+def test_preview_respects_card_visibility(client):
+    """Користувач отримав посилання, а картку потім зняли з публікації —
+    за старим посиланням він файл уже не відкриє."""
+    admin, rid = _media_card(client)
+    u1 = login(client, "u1", "pass")
+    url = next(f["preview_url"] for f in client.get(
+        f"/api/catalog/resources/{rid}/files", headers=auth(u1)).get_json()
+        if f["filename"] == "schema.png")
+    assert client.get(url).status_code == 200
+    client.post(f"/api/catalog/resources/{rid}/status", headers=auth(admin),
+                json={"status": "draft"})
+    assert client.get(url).status_code == 403
+
+
+def test_preview_refuses_files_without_preview(client, app):
+    from app.models import UserFile, User
+    from app.services import file_service
+    admin, rid = _media_card(client)
+    with app.app_context():
+        doc = UserFile.query.filter_by(resource_id=rid, filename="logo.svg").one()
+        url = file_service.preview_url(doc, User.query.filter_by(username="admin").one())
+    assert client.get(url).status_code == 415

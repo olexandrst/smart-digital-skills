@@ -91,3 +91,55 @@ def remove_stored_file(uf):
             os.remove(path)
         except OSError:
             pass
+
+
+# ----------------------------- Перегляд медіа -----------------------------
+#
+# Зображення й відео з вкладень показуються в картці прямо: мініатюри,
+# перегляд на весь екран, відеоплеєр. Теги <img> і <video> не вміють
+# передати JWT, тому доступ до перегляду дає підписане посилання з обмеженим
+# строком дії (як presigned URL в об'єктних сховищах). Підпис прив'язаний до
+# файлу й користувача, а права на картку перевіряються при кожному запиті.
+#
+# Лише растрові зображення та відео, які браузер показує сам. SVG свідомо не
+# входить: це документ, що може містити скрипти, і відкритий напряму з нашого
+# домену він виконав би їх від імені користувача. Тип визначаємо за
+# розширенням, а не за заголовком, який надіслав браузер при завантаженні.
+
+MEDIA_TYPES = {
+    ".png": ("image", "image/png"), ".jpg": ("image", "image/jpeg"),
+    ".jpeg": ("image", "image/jpeg"), ".gif": ("image", "image/gif"),
+    ".webp": ("image", "image/webp"), ".avif": ("image", "image/avif"),
+    ".bmp": ("image", "image/bmp"),
+    ".mp4": ("video", "video/mp4"), ".m4v": ("video", "video/mp4"),
+    ".webm": ("video", "video/webm"), ".ogv": ("video", "video/ogg"),
+    ".mov": ("video", "video/quicktime"),
+}
+# Скільки живе посилання на перегляд: картку не тримають відкритою довше.
+PREVIEW_MAX_AGE = 6 * 3600
+
+
+def media_of(uf):
+    """(«image» | «video», MIME) для вкладення з переглядом, інакше None."""
+    ext = os.path.splitext(uf.filename or uf.stored_name or "")[1].lower()
+    return MEDIA_TYPES.get(ext)
+
+
+def _preview_signer():
+    from itsdangerous import URLSafeTimedSerializer
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"],
+                                  salt="attachment-preview")
+
+
+def preview_url(uf, user):
+    token = _preview_signer().dumps({"f": uf.id, "u": user.id})
+    return f"/api/catalog/files/{uf.id}/preview?sig={token}"
+
+
+def read_preview_token(token):
+    """Розшифровує підпис посилання; None — якщо підробка чи строк минув."""
+    from itsdangerous import BadSignature
+    try:
+        return _preview_signer().loads(token or "", max_age=PREVIEW_MAX_AGE)
+    except BadSignature:   # SignatureExpired — теж BadSignature
+        return None

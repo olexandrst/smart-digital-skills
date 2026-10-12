@@ -348,6 +348,7 @@ const GLYPH = {
   person: '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20.2c0-3.4 3.2-5.8 7.2-5.8s7.2 2.4 7.2 5.8"/>',
   ext: '<path d="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   plus: '<path d="M12 5.5v13M5.5 12h13"/>',
+  list: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.9" cy="6.5" r="1"/><circle cx="4.9" cy="12" r="1"/><circle cx="4.9" cy="17.5" r="1"/>',
   pen: '<path d="M4.5 19.5h3.6L18.4 9.2a2.2 2.2 0 0 0-3.1-3.1L5 16.4v3.1Z"/><path d="M13.4 8l3.1 3.1"/>',
   upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15.5v2.6c0 .8.7 1.4 1.4 1.4h12.2c.8 0 1.4-.6 1.4-1.4v-2.6"/>',
 };
@@ -365,23 +366,21 @@ function sectionTone(sec) {
 
 const MODES = [
   { id: "hub", label: "База знань", glyph: "hub", home: "hub:home" },
-  { id: "admin", label: "Керування", glyph: "gear", home: "admin:resources",
+  { id: "admin", label: "Керування", glyph: "gear", home: "admin:content",
     roles: ["admin", "skill_manager"] },
 ];
 
 // Секції консолі керування. `panel` малює вміст у #view.
 const ADMIN_SECTIONS = [
   { group: "Контент", items: [
-    { id: "resources", label: "Матеріали", glyph: "doc", panel: renderResourcesManage },
+    { id: "content", label: "Наповнення каталогу", glyph: "pen", panel: renderContentManage },
+    { id: "structure", label: "Структура каталогу", glyph: "doc", panel: renderResourcesManage },
     { id: "ideas", label: "Ідеї", glyph: "bulb", panel: renderIdeasManage },
     { id: "paths", label: "Маршрути", glyph: "path", panel: renderPathsManage },
   ]},
   { group: "Аналітика", items: [
     { id: "kpi", label: "KPI хабу", glyph: "chart", panel: renderKpiDashboard },
     { id: "analytics", label: "Використання", glyph: "pulse", panel: renderHubAnalytics },
-  ]},
-  { group: "Навички", items: [
-    { id: "skills", label: "Каталог навичок", glyph: "box", panel: renderSkillsConfig },
   ]},
   { group: "Система", items: [
     { id: "users", label: "Користувачі", glyph: "person", panel: viewUsers, roles: ["admin"] },
@@ -412,7 +411,7 @@ function roleLabel(u) {
 // Сумісність зі старими викликами openTab("catalog") тощо.
 const LEGACY_TAB = {
   catalog: "hub:home", mine: "hub:contrib", contrib: "hub:contrib",
-  "manage-skills": "admin:skills", users: "admin:users",
+  "manage-skills": "admin:content", users: "admin:users",
 };
 function openTab(id) { return go(LEGACY_TAB[id] || "hub:home"); }
 
@@ -428,8 +427,12 @@ function buildNav() {
 function buildModeSeg() {
   const seg = $("#mode-seg");
   if (!seg) return;
+  // На «Керуванні» — скільки публікацій користувачів чекає перегляду:
+  // менеджер бачить це з будь-якої сторінки бази знань.
+  const queue = isManager() ? reviewQueue().length : 0;
   seg.innerHTML = visibleModes().map(m =>
-    `<button data-mode="${m.id}" title="${esc(m.label)}">${gsvg(m.glyph)}<span>${esc(m.label)}</span></button>`
+    `<button data-mode="${m.id}" title="${esc(m.label)}"${m.id === nav.mode ? ' class="active"' : ""}>${gsvg(m.glyph)}<span>${esc(m.label)}</span>${
+      m.id === "admin" && queue ? `<b class="seg-badge" title="Потребують перегляду">${queue}</b>` : ""}</button>`
   ).join("");
   // Перемикач із однієї кнопки нічого не перемикає — ховаємо його.
   seg.classList.toggle("hidden", visibleModes().length < 2);
@@ -446,6 +449,7 @@ function buildTabbar() {
   const bar = $("#tabbar");
   if (!bar) return;
   const items = visibleModes().map(m => ({ dest: m.home, mode: m.id, ...m }));
+  items.splice(1, 0, { id: "all", label: "Матеріали", glyph: "list", dest: "hub:all" });
   items.push({ id: "fav", label: "Обране", glyph: "star", dest: "hub:fav" });
   bar.innerHTML = items.map(it =>
     `<button data-dest="${it.dest}" data-tab="${it.id}">${gsvg(it.glyph)}<span>${esc(it.label)}</span></button>`
@@ -505,7 +509,11 @@ function syncReviewCount() {
   const n = reviewQueue().length;
   if (n === notifState.queue) return;
   notifState.queue = n;
-  if (nav.mode === "hub" && $("#sidebar") && catalogState.sections) buildSidebar();
+  buildModeSeg();
+  if ($("#sidebar") && (nav.mode === "admin" || catalogState.sections)) {
+    buildSidebar();
+    paintNavActive();
+  }
 }
 
 function paintNotifBadge() {
@@ -614,7 +622,7 @@ function bindGlobalSearch() {
   inp.addEventListener("input", async () => {
     const v = inp.value;
     if (!document.getElementById("cat-grid")) {
-      await go("hub:home");
+      await go("hub:all");
       const back = $("#global-q");
       if (back) { back.value = v; back.focus(); }
     }
@@ -672,9 +680,14 @@ async function go(dest) {
 function paintNavActive() {
   document.querySelectorAll("#sidebar [data-dest]").forEach(b =>
     b.classList.toggle("active", b.dataset.dest === nav.dest));
-  document.querySelectorAll("#tabbar [data-dest]").forEach(b =>
-    b.classList.toggle("active", destMode(b.dataset.dest) === nav.mode
-      && (b.dataset.tab !== "fav" ? nav.dest !== "hub:fav" : nav.dest === "hub:fav")));
+  // Окремі вкладки «Матеріали» й «Обране» підсвічуються самі; вкладка режиму —
+  // для решти його сторінок.
+  const own = { all: "hub:all", fav: "hub:fav" };
+  document.querySelectorAll("#tabbar [data-dest]").forEach(b => {
+    const t = b.dataset.tab;
+    b.classList.toggle("active", own[t] ? nav.dest === own[t]
+      : destMode(b.dataset.dest) === nav.mode && !Object.values(own).includes(nav.dest));
+  });
 }
 
 // ---- Бічна панель ----
@@ -701,8 +714,11 @@ function adminSidebarHtml() {
   return ADMIN_SECTIONS.map(grp => {
     const items = grp.items.filter(i => !i.roles || i.roles.some(r => hasRole(r)));
     if (!items.length) return "";
+    const queue = reviewQueue().length;
     return `<div class="sb-group">${esc(grp.group)}</div>`
-      + items.map(i => sbItem(`admin:${i.id}`, i.label, i.glyph)).join("");
+      + items.map(i => i.id === "content"
+        ? sbItem(`admin:${i.id}`, i.label, i.glyph, queue || "", queue ? "sb-attn" : "")
+        : sbItem(`admin:${i.id}`, i.label, i.glyph)).join("");
   }).join("");
 }
 
@@ -712,6 +728,9 @@ function hubSidebarHtml() {
   let html = sbItem("hub:home", "Для вас", "spark")
     + sbItem("hub:fav", "Обране", "star", favCount || "")
     + (recent ? sbItem("hub:recent", "Нещодавні", "clock", recent) : "");
+  // «Матеріали» — увесь каталог із фільтрами. Головний вхід у базу знань,
+  // тому виділений і стоїть над розділами, а не губиться серед них.
+  html += sbItem("hub:all", "Матеріали", "list", catalogState.items.length || "", "sb-feature");
 
   const sections = catalogState.sections.filter(s => s.items_count > 0 || s.url);
   if (sections.length) {
@@ -746,14 +765,11 @@ function hubSidebarHtml() {
 
   html += `<div class="sb-group">Навчання</div>`
     + sbItem("hub:paths", "Мої маршрути", "path", catalogState.paths.length || "");
-  // Наповнення каталогу — окремий пункт для всіх. Лічильник автора — його
-  // матеріали й навички; менеджера — публікації користувачів, які він ще
-  // не переглянув.
-  const pending = isManager() ? reviewQueue().length
-    : (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
+  // Наповнення каталогу — особисте для кожного: лічильник — власні матеріали
+  // й навички. Черга модерації менеджера — у «Керуванні».
+  const mine = (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
   html += `<div class="sb-group">Контент</div>`
-    + sbItem("hub:contrib", "Наповнення каталогу", "pen", pending || "",
-             isManager() && pending ? "sb-attn" : "");
+    + sbItem("hub:contrib", "Наповнення каталогу", "pen", mine || "");
   return html;
 }
 
@@ -998,7 +1014,7 @@ async function ensureHubData(force = false) {
 
 // Куди саме дивиться користувач у базі знань.
 function applyHubScope(dest) {
-  const parts = String(dest).split(":");   // hub : (home|fav|recent|sec|fol) : id
+  const parts = String(dest).split(":");   // hub : (home|all|fav|recent|sec|fol) : id
   const what = parts[1] || "home";
   // Скидання — першим: resetCatFilters() знімає й «лише обране», тож
   // виклик після встановлення favOnly зносив би сам зріз «Обране».
@@ -1054,6 +1070,10 @@ function hubHead() {
   if (catalogState.scope === "recent") {
     return { crumb: "", title: "Нещодавні",
              sub: "Матеріали, які ви відкривали останніми." };
+  }
+  if (catalogState.scope === "all") {
+    return { crumb: "База знань", title: "Матеріали",
+             sub: `${nMaterials(catalogState.items.length)} — увесь каталог. Звужуйте видом, фільтрами чи пошуком.` };
   }
   if (fol) {
     return { crumb: `База знань › ${esc(sec ? sec.name : "Розділ")}`,
@@ -1477,20 +1497,16 @@ function renderShowcase() {
   });
 
   box.querySelectorAll("[data-show-all]").forEach(btn =>
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const block = blocks[Number(btn.dataset.showAll)];
-      // Сітка каталогу вже впорядкована «рекомендовані → популярні → нові»,
-      // тож для трьох блоків достатньо зняти звуження й перейти до неї.
-      // Блоку «Потребують оновлення» відповідає фільтр за статусом.
-      resetCatFilters();
-      catalogState.sectionId = null;
-      catalogState.folderId = null;
-      catalogState.kind = "all";
+      // Сітка «Матеріалів» уже впорядкована «рекомендовані → популярні →
+      // нові», тож для трьох блоків достатньо перейти до неї. Блоку
+      // «Потребують оновлення» відповідає фільтр за статусом.
+      await go("hub:all");
       if (block.key === "needs_update") {
         catalogState.filters.status = STATUS_LABELS.needs_update;
+        paintCatalog();
       }
-      paintCatalog();
-      $("#cat-kinds").scrollIntoView({ behavior: "smooth", block: "start" });
     }));
 }
 
@@ -2617,11 +2633,10 @@ async function openContentWizard(opts = {}) {
 
 // ---------- «Наповнення каталогу»: усе, що додають у базу знань ----------
 //
-// Одна сторінка для всіх, але різна за роллю. Користувач публікує сам і
-// бачить тут усе своє — матеріали й навички — з діями: редагувати, зняти з
-// публікації, опублікувати знову, видалити. Менеджер каталогу бачить угорі
-// публікації користувачів, які ще не переглянув (про кожну він отримав
-// сповіщення), а нижче — увесь каталог матеріалів із фільтрами стану.
+// Дві сторінки. У базі знань — особисте для кожного: усе, що людина
+// опублікувала, з діями над ним. У «Керуванні» — консоль менеджера: черга
+// перегляду публікацій користувачів, усі матеріали разом із навичками,
+// коментарі й оцінки, категорії навичок і сувора публікація.
 
 let contribKind = "all";
 let contribFilter = "all";   // all | needs_update | no_owner | overdue | draft
@@ -2763,51 +2778,31 @@ function itemStatusMeta(ref) {
     : RES_STATUS_META[ref.status] || RES_STATUS_META.draft;
 }
 
-async function viewContributions() {
-  const manager = isManager();
-  let resources = [], skills = [], settings = { strict_publish: false };
-  try {
-    [resources, skills, settings] = await Promise.all([
-      api(manager ? "/catalog/resources" : "/catalog/resources?mine=1"),
-      api(manager ? "/skills" : "/skills?mine=1"),
-      manager ? api("/catalog/settings").catch(() => ({ strict_publish: false }))
-              : Promise.resolve({ strict_publish: false }),
-      refreshNotifications(),
-    ]);
-  } catch (e) { resources = resources || []; skills = skills || []; }
-  if (!manager) { catalogState.mine = resources; catalogState.mineSkills = skills; }
-  buildSidebar();   // лічильник у панелі міг змінитися
-
-  const view = $("#view");
-  const reload = async () => { await ensureHubData(true); go("hub:contrib"); };
-  const refs = resources.map(r => itemRef("resource", r))
-    .concat(skills.map(s => itemRef("skill", s)));
-  const refOf = (type, id) => refs.find(x => x.type === type && x.id === Number(id));
-  const queue = manager
-    ? reviewQueue().map(q => ({ q, ref: refOf(q.type, q.id) })).filter(x => x.ref) : [];
-
-  const row = (ref, { q = null, statusSelect = false } = {}) => {
-    const raw = ref.raw;
-    const it = ref.type === "skill" ? normSkill(raw) : normResource(raw);
-    const kindName = ref.type === "skill" ? "Навичка" : (kindMeta(raw.resource_type).one || raw.resource_type);
-    const st = itemStatusMeta(ref);
-    const warn = [];
-    if (manager && ref.type === "resource" && raw.status === "published" && !raw.owner) warn.push("без власника");
-    if (manager && raw.review_overdue) warn.push(`перегляд прострочено (${dateUa(raw.next_review_at)})`);
-    const when = q ? `${q.kind === "content_updated" ? "змінено" : "опубліковано"} ${timeAgo(q.at)}`
-                   : `змінено ${dateUa(raw.updated_at)}`;
-    const author = manager && raw.author ? ` · ${esc(raw.author)}` : "";
-    const note = ref.type === "resource" && raw.review_note && !itemPublic(ref)
-      ? `<div class="res-note">${raw.status === "archived" ? "В архіві" : "Знято з публікації"}: ${esc(raw.review_note)}</div>` : "";
-    const statusCtl = statusSelect
-      ? `<select class="small res-status" data-st="${ref.id}" title="Стан матеріалу">
-          ${statusChoices(raw.status).map(([v, m]) =>
-            `<option value="${v}"${v === raw.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
-        </select>`
-      : itemPublic(ref)
-        ? `<button class="small ghost" data-act="unpub">Зняти з публікації</button>`
-        : `<button class="small accent" data-act="pub">Опублікувати</button>`;
-    return `<div class="res-row" data-type="${ref.type}" data-id="${ref.id}">
+// Рядок матеріалу чи навички у списках наповнення: плитка, назва, вид, стан і
+// дії. `q` — запис черги перегляду (що й коли сталося); `manage` — консоль
+// менеджера: стан обирається списком, видно автора й проблеми з метаданими.
+function contribRow(ref, { q = null, manage = false } = {}) {
+  const raw = ref.raw;
+  const it = ref.type === "skill" ? normSkill(raw) : normResource(raw);
+  const kindName = ref.type === "skill" ? "Навичка" : (kindMeta(raw.resource_type).one || raw.resource_type);
+  const st = itemStatusMeta(ref);
+  const warn = [];
+  if (manage && itemPublic(ref) && !raw.owner) warn.push("без власника");
+  if (manage && raw.review_overdue) warn.push(`перегляд прострочено (${dateUa(raw.next_review_at)})`);
+  const when = q ? `${q.kind === "content_updated" ? "змінено" : "опубліковано"} ${timeAgo(q.at)}`
+                 : `змінено ${dateUa(raw.updated_at)}`;
+  const author = manage && raw.author ? ` · ${esc(raw.author)}` : "";
+  const note = ref.type === "resource" && raw.review_note && !itemPublic(ref)
+    ? `<div class="res-note">${raw.status === "archived" ? "В архіві" : "Знято з публікації"}: ${esc(raw.review_note)}</div>` : "";
+  const choices = ref.type === "skill" ? Object.entries(SKILL_STATUS_META) : statusChoices(raw.status);
+  const statusCtl = manage
+    ? `<select class="small res-status" data-act="status" title="Стан">
+        ${choices.map(([v, m]) => `<option value="${v}"${v === raw.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
+      </select>`
+    : itemPublic(ref)
+      ? `<button class="small ghost" data-act="unpub">Зняти з публікації</button>`
+      : `<button class="small accent" data-act="pub">Опублікувати</button>`;
+  return `<div class="res-row" data-type="${ref.type}" data-id="${ref.id}">
       ${catTile(it, "mdc-tile")}
       <div class="res-main">
         <div class="res-name">${esc(raw.name)}${raw.is_featured ? ` <span class="res-star" title="Рекомендований">★</span>` : ""}</div>
@@ -2825,72 +2820,79 @@ async function viewContributions() {
         ${q ? `<button class="small ghost" data-act="seen" title="Прибрати з черги без змін">Переглянуто</button>` : ""}
       </div>
     </div>`;
-  };
+}
 
-  let bodyHtml;
-  if (manager) {
-    const all = resources;
-    const counts = { all: all.length };
-    const kinds = CAT_ORDER.filter(k => k !== "skill");
-    kinds.forEach(k => counts[k] = all.filter(i => i.resource_type === k).length);
-    const chips = [["all", "Усі"]].concat(kinds.map(k => [k, CAT_KINDS[k].label]));
-    const health = {
-      needs_update: all.filter(i => i.status === "needs_update").length,
-      no_owner: all.filter(i => i.status === "published" && !i.owner).length,
-      overdue: all.filter(i => i.review_overdue).length,
-      draft: all.filter(i => i.status === "draft").length,
+// Дії в рядках — однакові для сторінки автора й консолі менеджера.
+function bindContribRows(root, refOf, reload, rerender) {
+  root.querySelectorAll(".res-row [data-act]").forEach(ctl => {
+    const run = () => {
+      const rowEl = ctl.closest(".res-row");
+      const ref = refOf(rowEl.dataset.type, rowEl.dataset.id);
+      if (!ref) return;
+      const act = ctl.dataset.act;
+      if (act === "open") (ref.type === "skill" ? openSkillModal : openResourceModal)(ref.id);
+      else if (act === "edit") editItem(ref, reload);
+      else if (act === "pub") setItemStatus(ref, "published", reload);
+      else if (act === "unpub") setItemStatus(ref, "draft", reload);
+      else if (act === "del") deleteItem(ref, reload);
+      else if (act === "seen") { markItemSeen(ref.type, ref.id); rerender(); }
+      else if (act === "status") {
+        ctl.disabled = true;
+        setItemStatus(ref, ctl.value, reload).then(ok => {
+          if (!ok) { ctl.value = ref.status; ctl.disabled = false; }
+        });
+      }
     };
-    const healthChip = (key, label, cnt) =>
-      `<button class="cat-chipf${contribFilter === key ? " active" : ""}${cnt ? " warn" : ""}" data-f="${key}">${esc(label)} <b>${cnt}</b></button>`;
-    const shown = all.filter(i => {
-      if (contribKind !== "all" && i.resource_type !== contribKind) return false;
-      if (contribFilter === "needs_update") return i.status === "needs_update";
-      if (contribFilter === "no_owner") return i.status === "published" && !i.owner;
-      if (contribFilter === "overdue") return i.review_overdue;
-      if (contribFilter === "draft") return i.status === "draft";
-      return true;
-    });
-    bodyHtml = `
-      <section class="contrib-sec">
-        <h2 class="contrib-h2">Потребують перегляду <b>${queue.length}</b></h2>
-        ${queue.length ? `
-          <p class="contrib-sub">Користувачі опублікували або змінили ці матеріали — вони вже
-            в каталозі. Перегляньте; за потреби відредагуйте, зніміть з публікації чи видаліть —
-            автор отримає сповіщення. Відкрита картка вважається переглянутою.</p>
-          <div class="mine-list">${queue.map(({ q, ref }) => row(ref, { q })).join("")}</div>`
-        : `<p class="contrib-empty">Усе переглянуто. Коли користувач опублікує матеріал, ви
-            отримаєте сповіщення, а матеріал з'явиться тут.</p>`}
-      </section>
-      <section class="contrib-sec">
-        <h2 class="contrib-h2">Усі матеріали <b>${all.length}</b></h2>
-        <div class="fb-tabs res-tabs">${chips.map(([k, label]) =>
-          `<button class="fb-tab${contribKind === k ? " active" : ""}" data-k="${k}">${esc(label)} <b>${counts[k] || 0}</b></button>`).join("")}</div>
-        <div class="res-health">
-          ${healthChip("all", "Усі", all.length)}
-          ${healthChip("needs_update", "Потребують оновлення", health.needs_update)}
-          ${healthChip("no_owner", "Без власника", health.no_owner)}
-          ${healthChip("overdue", "Перегляд прострочено", health.overdue)}
-          ${healthChip("draft", "Чернетки", health.draft)}
-        </div>
-        <div class="mine-list">${shown.map(r => row(itemRef("resource", r), { statusSelect: true })).join("")
-          || `<p class="muted">За цим фільтром матеріалів немає.</p>`}</div>
-        <p class="mine-foot">Навички — у «Керування → Каталог навичок».</p>
-        <label class="ind-toggle contrib-strict">
-          <input type="checkbox" id="strict-publish" ${settings.strict_publish ? "checked" : ""}>
-          <span><b>Сувора публікація</b> — не публікувати матеріал без розділу, категорії,
-          опису, власника та дати наступного перегляду. Коли публікує користувач, власником
-          стає він сам, а перегляд призначається через пів року.</span>
-        </label>
-      </section>`;
-  } else {
-    const mine = refs.slice().sort((a, b) =>
-      String(b.raw.updated_at || "").localeCompare(String(a.raw.updated_at || "")));
-    bodyHtml = mine.length ? `
-      <div class="mine-list">${mine.map(ref => row(ref)).join("")}</div>
-      <p class="mine-foot">Опублікований матеріал одразу бачать усі. Менеджер каталогу
-        отримує сповіщення про кожну публікацію й може відредагувати матеріал або зняти
-        його з публікації — тоді ви отримаєте сповіщення з причиною. Чернетку бачите лише
-        ви й менеджери.</p>`
+    ctl.addEventListener(ctl.tagName === "SELECT" ? "change" : "click", run);
+  });
+}
+
+const byUpdated = (a, b) => String(b.raw.updated_at || "").localeCompare(String(a.raw.updated_at || ""));
+
+// «Наповнення каталогу» в базі знань — особисте для кожного: усе, що людина
+// опублікувала сама, з діями над ним. Модерацію чужого менеджер веде в
+// «Керуванні», а тут бачить лише підказку, скільки публікацій чекає.
+async function viewContributions() {
+  let resources = [], skills = [];
+  try {
+    [resources, skills] = await Promise.all([
+      api("/catalog/resources?mine=1"), api("/skills?mine=1"), refreshNotifications(),
+    ]);
+  } catch (e) { resources = resources || []; skills = skills || []; }
+  catalogState.mine = resources;
+  catalogState.mineSkills = skills;
+  buildSidebar();   // лічильник у панелі міг змінитися
+
+  const view = $("#view");
+  const reload = async () => { await ensureHubData(true); go("hub:contrib"); };
+  const refs = resources.map(r => itemRef("resource", r))
+    .concat(skills.map(s => itemRef("skill", s))).sort(byUpdated);
+  const refOf = (type, id) => refs.find(x => x.type === type && x.id === Number(id));
+  const waiting = isManager() ? reviewQueue().length : 0;
+  const published = refs.filter(itemPublic).length;
+
+  view.innerHTML = `
+    <div class="page-head">
+      <div class="page-head-txt">
+        <h1 class="page-h1">Наповнення каталогу</h1>
+        <p class="page-sub">${esc(refs.length
+          ? `опубліковано: ${published} · чернеток: ${refs.length - published}`
+          : "Усе, що ви публікуєте в базі знань.")}</p>
+      </div>
+      <div class="page-acts"><button id="contrib-add">${gsvg("plus")}Додати матеріал</button></div>
+    </div>
+    ${waiting ? `<div class="nudge contrib-nudge">
+        ${gsvg("pen", "nudge-ic")}
+        <div class="nudge-txt"><b>${waiting} ${plural(waiting, "публікація чекає", "публікації чекають", "публікацій чекають")} перегляду</b>
+          <i>Черга модерації — у «Керування → Наповнення каталогу».</i></div>
+        <button class="ghost" id="contrib-to-admin">Переглянути</button>
+      </div>` : ""}
+    ${refs.length ? `
+      <div class="mine-list">${refs.map(ref => contribRow(ref)).join("")}</div>
+      <p class="mine-foot">Опублікований матеріал одразу бачать усі, а власником стає той,
+        хто його опублікував. Менеджер каталогу отримує сповіщення про кожну публікацію й
+        може відредагувати матеріал або зняти його з публікації — тоді ви отримаєте
+        сповіщення з причиною. Чернетку бачите лише ви й менеджери.</p>`
     : `
       <div class="mine-empty">${gsvg("pen")}
         <h2>Поділіться тим, що працює</h2>
@@ -2902,54 +2904,131 @@ async function viewContributions() {
           <span><b>3</b>Назвіть і опублікуйте</span>
         </div>
         <button id="contrib-add-first">Додати перший матеріал</button>
-      </div>`;
-  }
-
-  const published = refs.filter(itemPublic).length;
-  const sub = manager
-    ? `Потребують перегляду: ${queue.length} · матеріалів: ${resources.length} · навичок: ${skills.length}`
-    : refs.length
-      ? `опубліковано: ${published} · чернеток: ${refs.length - published}`
-      : "Усе, що ви публікуєте в базі знань.";
-
-  view.innerHTML = `
-    <div class="page-head">
-      <div class="page-head-txt">
-        <h1 class="page-h1">Наповнення каталогу</h1>
-        <p class="page-sub">${esc(sub)}</p>
-      </div>
-      <div class="page-acts"><button id="contrib-add">${gsvg("plus")}Додати матеріал</button></div>
-    </div>
-    ${bodyHtml}`;
+      </div>`}`;
 
   view.querySelectorAll("#contrib-add, #contrib-add-first").forEach(b =>
     b.addEventListener("click", () => openContentWizard()));
-  view.querySelectorAll(".res-row [data-act]").forEach(b =>
-    b.addEventListener("click", () => {
-      const rowEl = b.closest(".res-row");
-      const ref = refOf(rowEl.dataset.type, rowEl.dataset.id);
-      if (!ref) return;
-      const act = b.dataset.act;
-      if (act === "open") (ref.type === "skill" ? openSkillModal : openResourceModal)(ref.id);
-      else if (act === "edit") editItem(ref, reload);
-      else if (act === "pub") setItemStatus(ref, "published", reload);
-      else if (act === "unpub") setItemStatus(ref, "draft", reload);
-      else if (act === "del") deleteItem(ref, reload);
-      else if (act === "seen") { markItemSeen(ref.type, ref.id); viewContributions(); }
-    }));
-  view.querySelectorAll(".fb-tab[data-k]").forEach(b =>
-    b.addEventListener("click", () => { contribKind = b.dataset.k; viewContributions(); }));
-  view.querySelectorAll("[data-f]").forEach(b =>
-    b.addEventListener("click", () => { contribFilter = b.dataset.f; viewContributions(); }));
-  view.querySelectorAll(".res-status").forEach(sel =>
-    sel.addEventListener("change", async () => {
-      const ref = refOf("resource", sel.dataset.st);
-      sel.disabled = true;
-      const ok = await setItemStatus(ref, sel.value, reload);
-      if (!ok) { sel.value = ref.status; sel.disabled = false; }
-    }));
-  const strict = view.querySelector("#strict-publish");
-  if (strict) strict.addEventListener("change", async () => {
+  const toAdmin = view.querySelector("#contrib-to-admin");
+  if (toAdmin) toAdmin.addEventListener("click", () => go("admin:content"));
+  bindContribRows(view, refOf, reload, viewContributions);
+}
+
+// «Керування → Наповнення каталогу»: усе наповнення в одному місці — черга
+// перегляду публікацій користувачів, усі матеріали разом із навичками,
+// коментарі й оцінки, категорії навичок і сувора публікація.
+async function renderContentManage() {
+  const panel = panelEl();
+  panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
+  let resources, skills, settings;
+  try {
+    [resources, skills, settings] = await Promise.all([
+      api("/catalog/resources"), api("/skills"),
+      api("/catalog/settings").catch(() => ({ strict_publish: false })),
+      refreshNotifications(),
+    ]);
+  } catch (err) {
+    panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
+    return;
+  }
+  const reload = async () => { await ensureHubData(true); go("admin:content"); };
+  const refs = resources.map(r => itemRef("resource", r))
+    .concat(skills.map(s => itemRef("skill", s))).sort(byUpdated);
+  const refOf = (type, id) => refs.find(x => x.type === type && x.id === Number(id));
+  const queue = reviewQueue().map(q => ({ q, ref: refOf(q.type, q.id) })).filter(x => x.ref);
+
+  const kindOf = (ref) => ref.type === "skill" ? "skill" : ref.raw.resource_type;
+  const kinds = CAT_ORDER;
+  const counts = { all: refs.length };
+  kinds.forEach(k => counts[k] = refs.filter(r => kindOf(r) === k).length);
+  const chips = [["all", "Усі"]].concat(kinds.map(k => [k, CAT_KINDS[k].label]));
+  const health = {
+    needs_update: refs.filter(r => r.status === "needs_update").length,
+    no_owner: refs.filter(r => itemPublic(r) && !r.raw.owner).length,
+    overdue: refs.filter(r => r.raw.review_overdue).length,
+    draft: refs.filter(r => r.status === "draft").length,
+  };
+  const healthChip = (key, label, cnt) =>
+    `<button class="cat-chipf${contribFilter === key ? " active" : ""}${cnt ? " warn" : ""}" data-f="${key}">${esc(label)} <b>${cnt}</b></button>`;
+  const shown = refs.filter(r => {
+    if (contribKind !== "all" && kindOf(r) !== contribKind) return false;
+    if (contribFilter === "needs_update") return r.status === "needs_update";
+    if (contribFilter === "no_owner") return itemPublic(r) && !r.raw.owner;
+    if (contribFilter === "overdue") return !!r.raw.review_overdue;
+    if (contribFilter === "draft") return r.status === "draft";
+    return true;
+  });
+
+  panel.innerHTML = `
+    <div class="content-top">
+      <p class="page-sub">Потребують перегляду: ${queue.length} · матеріалів: ${resources.length}
+        · навичок: ${skills.length}</p>
+      <button id="content-add">${gsvg("plus")}Додати матеріал</button>
+    </div>
+
+    <div class="card content-queue">
+      <h2>Потребують перегляду <span class="content-n${queue.length ? " attn" : ""}">${queue.length}</span></h2>
+      ${queue.length ? `
+        <p class="muted">Користувачі опублікували або змінили ці матеріали — вони вже в
+          каталозі. Перегляньте; за потреби відредагуйте, зніміть з публікації чи видаліть —
+          автор отримає сповіщення. Відкрита картка вважається переглянутою.</p>
+        <div class="mine-list">${queue.map(({ q, ref }) => contribRow(ref, { q, manage: true })).join("")}</div>`
+      : `<p class="muted">Усе переглянуто. Коли користувач опублікує матеріал, ви отримаєте
+          сповіщення, а матеріал з'явиться тут.</p>`}
+    </div>
+
+    <div class="card">
+      <h2>Усі матеріали <span class="content-n">${refs.length}</span></h2>
+      <div class="fb-tabs res-tabs">${chips.map(([k, label]) =>
+        `<button class="fb-tab${contribKind === k ? " active" : ""}" data-k="${k}">${esc(label)} <b>${counts[k] || 0}</b></button>`).join("")}</div>
+      <div class="res-health">
+        ${healthChip("all", "Усі", refs.length)}
+        ${healthChip("needs_update", "Потребують оновлення", health.needs_update)}
+        ${healthChip("no_owner", "Без власника", health.no_owner)}
+        ${healthChip("overdue", "Перегляд прострочено", health.overdue)}
+        ${healthChip("draft", "Чернетки", health.draft)}
+      </div>
+      <div class="mine-list">${shown.map(ref => contribRow(ref, { manage: true })).join("")
+        || `<p class="muted">За цим фільтром матеріалів немає.</p>`}</div>
+      <label class="ind-toggle contrib-strict">
+        <input type="checkbox" id="strict-publish" ${settings.strict_publish ? "checked" : ""}>
+        <span><b>Сувора публікація</b> — не публікувати матеріал без розділу, категорії,
+        опису, власника та дати наступного перегляду. Власником стає той, хто публікує, а
+        перегляд, якщо дату не вказано, призначається через пів року.</span>
+      </label>
+    </div>
+
+    <div class="card" id="fb-card">
+      <div class="fb-head">
+        <h2>Коментарі й оцінки <span id="fb-unread" class="fb-badge hidden"></span></h2>
+        <div class="fb-controls">
+          <div class="fb-tabs">
+            <button class="fb-tab" data-fb="new">Нові</button>
+            <button class="fb-tab" data-fb="all">Усі</button>
+          </div>
+          <button class="small ghost" id="fb-read-all">Позначити всі прочитаними</button>
+        </div>
+      </div>
+      <div id="fb-list" class="fb-list"></div>
+    </div>
+
+    <div class="card">
+      <h2>Категорії навичок</h2>
+      <p class="muted">Список, з якого обирають категорію в редакторі навички.</p>
+      <div class="row" style="margin-bottom:12px">
+        <input id="cat-new" placeholder="Назва нової категорії">
+        <button id="cat-add">Додати</button>
+      </div>
+      <div id="cat-chips" class="cat-chips"></div>
+    </div>`;
+
+  panel.querySelector("#content-add").addEventListener("click", () => openContentWizard());
+  bindContribRows(panel, refOf, reload, renderContentManage);
+  panel.querySelectorAll(".fb-tab[data-k]").forEach(b =>
+    b.addEventListener("click", () => { contribKind = b.dataset.k; renderContentManage(); }));
+  panel.querySelectorAll("[data-f]").forEach(b =>
+    b.addEventListener("click", () => { contribFilter = b.dataset.f; renderContentManage(); }));
+  const strict = panel.querySelector("#strict-publish");
+  strict.addEventListener("change", async () => {
     strict.disabled = true;
     try {
       const res = await api("/catalog/settings", { method: "POST", body: { strict_publish: strict.checked } });
@@ -2957,6 +3036,17 @@ async function viewContributions() {
     } catch (err) { strict.checked = !strict.checked; toast(err.message, "err"); }
     finally { strict.disabled = false; }
   });
+
+  panel.querySelectorAll(".fb-tab[data-fb]").forEach(b =>
+    b.addEventListener("click", () => { manageFbFilter = b.dataset.fb; renderFeedback(); }));
+  panel.querySelector("#fb-read-all").addEventListener("click", async () => {
+    try { await api("/skills/feedback/read-all", { method: "POST" }); renderFeedback(); }
+    catch (err) { toast(err.message, "err"); }
+  });
+  renderFeedback();
+  renderCategoryChips();
+  panel.querySelector("#cat-add").addEventListener("click", addCategory);
+  panel.querySelector("#cat-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCategory(); });
 }
 
 // ------------------ Навчальні маршрути (BR-9) ------------------
@@ -3340,6 +3430,69 @@ function reuseBlockHtml(r) {
 
 // Вкладення картки (FR-03): перегляд — усім, хто бачить картку;
 // завантаження й видалення — автору картки та менеджерам.
+// Зображення й відео з вкладень — прямо в картці, одразу під описом:
+// мініатюри (клік — на весь екран) і вбудований плеєр. Посилання на перегляд
+// підписані сервером, бо <img> і <video> не передають JWT.
+function paintMedia(overlay, files) {
+  const box = overlay.querySelector("#res-media");
+  if (!box) return;
+  const images = files.filter(f => f.media === "image" && f.preview_url);
+  const videos = files.filter(f => f.media === "video" && f.preview_url);
+  if (!images.length && !videos.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="res-media">
+      ${images.length ? `<div class="res-shots${images.length === 1 ? " single" : ""}">${
+        images.map((f, i) => `<button type="button" class="res-shot" data-shot="${i}"
+            title="${esc(f.filename)}" aria-label="Переглянути ${esc(f.filename)}">
+            <img src="${esc(f.preview_url)}" alt="${esc(f.filename)}" loading="lazy"></button>`).join("")
+      }</div>` : ""}
+      ${videos.map(f => `<figure class="res-video">
+          <video controls playsinline preload="metadata" src="${esc(f.preview_url)}"></video>
+          <figcaption>${esc(f.filename)}</figcaption>
+        </figure>`).join("")}
+    </div>`;
+  box.querySelectorAll("[data-shot]").forEach(b =>
+    b.addEventListener("click", () => openLightbox(images, Number(b.dataset.shot))));
+}
+
+// Перегляд зображень на весь екран: стрілки — сусідні, Esc — закрити.
+// Слухаємо клавіші на фазі захоплення: Esc закриває перегляд, а не картку під ним.
+function openLightbox(images, start) {
+  let i = start;
+  const many = images.length > 1;
+  const box = el(`<div class="lightbox" role="dialog" aria-label="Перегляд зображення">
+      <button type="button" class="lb-btn lb-x" aria-label="Закрити">×</button>
+      ${many ? `<button type="button" class="lb-btn lb-prev" aria-label="Попереднє">‹</button>
+        <button type="button" class="lb-btn lb-next" aria-label="Наступне">›</button>` : ""}
+      <figure class="lb-fig"><img alt=""><figcaption></figcaption></figure>
+    </div>`);
+  const img = box.querySelector("img");
+  const cap = box.querySelector("figcaption");
+  const show = () => {
+    const f = images[i];
+    img.src = f.preview_url;
+    img.alt = f.filename;
+    cap.textContent = many ? `${f.filename} · ${i + 1} з ${images.length}` : f.filename;
+  };
+  const step = (d) => { i = (i + d + images.length) % images.length; show(); };
+  const close = () => { box.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.stopImmediatePropagation(); close(); }
+    else if (many && e.key === "ArrowLeft") step(-1);
+    else if (many && e.key === "ArrowRight") step(1);
+  };
+  box.addEventListener("click", (e) => {
+    if (e.target === box || e.target.classList.contains("lb-fig")) close();
+  });
+  box.querySelector(".lb-x").addEventListener("click", close);
+  if (many) {
+    box.querySelector(".lb-prev").addEventListener("click", () => step(-1));
+    box.querySelector(".lb-next").addEventListener("click", () => step(1));
+  }
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(box);
+  show();
+}
+
 async function renderResourceFiles(overlay, r) {
   const box = overlay.querySelector("#res-files");
   if (!box) return;
@@ -3349,10 +3502,14 @@ async function renderResourceFiles(overlay, r) {
   let files = [];
   try { files = await api(`/catalog/resources/${r.id}/files`); }
   catch (e) { box.innerHTML = ""; return; }
+  paintMedia(overlay, files);
   if (!files.length && !mayEdit) { box.innerHTML = ""; return; }
 
+  const icon = f => f.media === "image" && f.preview_url
+    ? `<img class="res-file-thumb" src="${esc(f.preview_url)}" alt="" loading="lazy">`
+    : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l4 4v16H6V2Zm7 1.5V7h3.5L13 3.5Z"/></svg>`;
   const row = f => `<div class="res-file" data-file="${f.id}">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l4 4v16H6V2Zm7 1.5V7h3.5L13 3.5Z"/></svg>
+      ${icon(f)}
       <div class="res-file-main">
         <a href="#" class="res-file-name" data-dl-file="${f.id}">${esc(f.filename)}</a>
         <span class="res-file-meta">${fmtSize(f.size)}${
@@ -3495,6 +3652,7 @@ async function openResourceModal(resourceId) {
         ${manageBarHtml(ref)}
         ${staleNote}
         ${it.description ? `<p class="sm-desc">${esc(it.description)}</p>` : ""}
+        <div id="res-media"></div>
         ${it.kind === "mcp" ? linkBlock + bodyBlock : bodyBlock + linkBlock}
         ${reuseBlock}
         ${meta}
@@ -3724,12 +3882,6 @@ async function downloadSkillPackage(s) {
   return true;
 }
 
-function statusBadge(s) {
-  return s.status === "published"
-    ? `<span class="badge published">Опублікована</span>`
-    : `<span class="badge draft">Не опублікована</span>`;
-}
-
 // Керування категоріями (довідник для вибору при редагуванні навички).
 async function renderCategoryChips() {
   const box = $("#cat-chips");
@@ -3781,8 +3933,8 @@ async function renderFeedback() {
   const badge = $("#fb-unread");
   badge.textContent = data.unread || "";
   badge.classList.toggle("hidden", !data.unread);
-  document.querySelectorAll(".fb-tab").forEach(b =>
-    b.classList.toggle("active", b.dataset.f === manageFbFilter));
+  document.querySelectorAll(".fb-tab[data-fb]").forEach(b =>
+    b.classList.toggle("active", b.dataset.fb === manageFbFilter));
 
   if (!data.items.length) {
     listEl.innerHTML = `<p class="muted">${manageFbFilter === "new"
@@ -4190,18 +4342,6 @@ async function renderResourcesManage() {
   panel.innerHTML = `
     <div class="card">
       <div class="fb-head">
-        <h2>Наповнення каталогу</h2>
-        <button class="mdc-act" id="res-goto">Відкрити</button>
-      </div>
-      <p class="muted">Матеріали, публікації користувачів, що чекають перегляду, повний
-      редактор і сувора публікація живуть у базі знань — пункт «Наповнення каталогу» в
-      бічній панелі. Користувачі публікують самі, а менеджер каталогу отримує сповіщення
-      й модерує вже опубліковане. Тут — структура каталогу: розділи, колекції, довідники
-      та словник формулювань.</p>
-    </div>
-
-    <div class="card">
-      <div class="fb-head">
         <h2>Розділи каталогу</h2>
         <button class="mdc-act" id="sec-add">+ Додати розділ</button>
       </div>
@@ -4249,7 +4389,6 @@ async function renderResourcesManage() {
   renderFolderRows(folders, sections);
   renderTermRows(terms);
   renderSynonymRows(synonyms);
-  $("#res-goto").addEventListener("click", () => go("hub:contrib"));
   $("#syn-add").addEventListener("click", () => openSynonymEditor(null));
 
   const folAdd = $("#fol-add");
@@ -5299,102 +5438,6 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
   });
 }
 
-async function renderSkillsConfig() {
-  const skills = await api("/skills");
-  const view = panelEl();
-  view.innerHTML = `
-    <div class="card" id="fb-card">
-      <div class="fb-head">
-        <h2>Коментарі й оцінки <span id="fb-unread" class="fb-badge hidden"></span></h2>
-        <div class="fb-controls">
-          <div class="fb-tabs">
-            <button class="fb-tab" data-f="new">Нові</button>
-            <button class="fb-tab" data-f="all">Усі</button>
-          </div>
-          <button class="small ghost" id="fb-read-all">Позначити всі прочитаними</button>
-        </div>
-      </div>
-      <div id="fb-list" class="fb-list"></div>
-    </div>
-    <div class="card">
-      <h2>Завантажити нову навичку</h2>
-      <p class="muted">Архів <code>.zip</code> або <code>.skill</code> зі <code>skill.md</code> (назва, версія, автор, опис, категорія) та файлами. Нова навичка отримує статус <b>«Не опублікована»</b>; після публікації її бачать у каталозі й можуть завантажити всі користувачі.</p>
-      <div class="row">
-        <input type="file" id="sk-file" accept=".zip,.skill">
-        <button id="sk-upload">Завантажити</button>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Категорії</h2>
-      <p class="muted">Керуйте списком категорій. Обрати категорію можна при редагуванні навички.</p>
-      <div class="row" style="margin-bottom:12px">
-        <input id="cat-new" placeholder="Назва нової категорії">
-        <button id="cat-add">Додати</button>
-      </div>
-      <div id="cat-chips" class="cat-chips"></div>
-    </div>
-    <div id="sk-edit"></div>
-    <div class="card"><h2>Усі навички</h2><table><thead><tr><th>Назва</th><th>Версія</th><th>Автор</th><th>Категорія</th><th>Статус</th><th>Завантажень</th><th>Дії</th></tr></thead><tbody id="sk-body"></tbody></table></div>`;
-
-  renderCategoryChips();
-  $("#cat-add").addEventListener("click", addCategory);
-  $("#cat-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCategory(); });
-
-  // Зворотний зв'язок від користувачів.
-  document.querySelectorAll(".fb-tab").forEach(b =>
-    b.addEventListener("click", () => { manageFbFilter = b.dataset.f; renderFeedback(); }));
-  $("#fb-read-all").addEventListener("click", async () => {
-    try { await api("/skills/feedback/read-all", { method: "POST" }); renderFeedback(); }
-    catch (err) { toast(err.message, "err"); }
-  });
-  renderFeedback();
-
-  $("#sk-upload").addEventListener("click", async () => {
-    const file = $("#sk-file").files[0];
-    if (!file) { toast("Оберіть файл архіву", "err"); return; }
-    $("#sk-upload").disabled = true;
-    try {
-      const data = await uploadSkillPackage(file, null);
-      toast(`Навичку «${data.name}» завантажено (не опублікована)`);
-      openTab("manage-skills");
-    } catch (err) { toast(err.message, "err"); }
-    finally { $("#sk-upload").disabled = false; }
-  });
-
-  const body = $("#sk-body");
-  skills.forEach(s => {
-    const pubBtn = s.status === "published"
-      ? `<button class="small ghost" data-act="unpub">Зняти з публікації</button>`
-      : `<button class="small" data-act="pub">Опублікувати</button>`;
-    const tr = el(`<tr>
-      <td title="${esc(s.package_filename || "")}">${esc(s.name)}</td>
-      <td>${esc(s.version)}</td>
-      <td>${esc(s.author || "—")}</td>
-      <td>${esc(s.category || "—")}</td>
-      <td>${statusBadge(s)}</td>
-      <td>${s.has_package ? s.downloads_count : "—"}</td>
-      <td class="actions">
-        ${pubBtn}
-        <button class="small ghost" data-act="edit">Редагувати</button>
-        ${s.has_package ? `<button class="small ghost" data-act="dl">Скачати</button>` : ""}
-        <button class="small danger" data-act="del">Видалити</button>
-      </td>
-    </tr>`);
-    const sref = itemRef("skill", s);
-    const setStatus = (status) => setItemStatus(sref, status, () => openTab("manage-skills"));
-    const pb = tr.querySelector("[data-act='pub']");
-    if (pb) pb.addEventListener("click", () => setStatus("published"));
-    const upb = tr.querySelector("[data-act='unpub']");
-    if (upb) upb.addEventListener("click", () => setStatus("draft"));
-    tr.querySelector("[data-act='edit']").addEventListener("click", () => openSkillEditor(s.id));
-    const dlb = tr.querySelector("[data-act='dl']");
-    if (dlb) dlb.addEventListener("click", () => downloadSkillPackage(s));
-    tr.querySelector("[data-act='del']").addEventListener("click", () =>
-      deleteItem(sref, () => openTab("manage-skills")));
-    body.appendChild(tr);
-  });
-}
-
 // Завантаження PNG-іконки навички.
 async function uploadSkillIcon(file, skillId) {
   const form = new FormData();
@@ -5410,8 +5453,8 @@ async function uploadSkillIcon(file, skillId) {
 }
 
 // Редактор навички: атрибути, інструкція, іконка, нова версія пакета.
-// У «Керуванні» відкривається на сторінці під таблицею; з картки навички
-// (автор чи менеджер у базі знань) — у модальному вікні.
+// Відкривається у вікні поверх сторінки — з картки навички чи з рядка в
+// «Наповненні каталогу».
 async function openSkillEditor(skillId, { onSaved } = {}) {
   const [s, cats] = await Promise.all([
     api(`/skills/${skillId}`), api("/categories").catch(() => []),
@@ -5425,21 +5468,13 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
       `<option value="${esc(n)}" ${n === s.category ? "selected" : ""}>${esc(n)}</option>`))
     .join("");
 
-  const panelBox = document.getElementById("sk-edit");
-  let box, closeBox;
-  if (panelBox) {
-    box = panelBox;
-    closeBox = () => { box.innerHTML = ""; };
-  } else {
-    const m = catalogModal(`<div class="modal res-editor sk-editor-modal"><div id="sk-edit-m"></div></div>`);
-    box = m.overlay.querySelector("#sk-edit-m");
-    closeBox = () => m.close(true);
-  }
-  // Після збереження: у «Керуванні» перемальовуємо таблицю, з картки —
-  // те, що передав виклик.
-  const saved = () => { closeBox(); if (onSaved) onSaved(); else openTab("manage-skills"); };
+  const m = catalogModal(`<div class="modal res-editor sk-editor-modal"><div id="sk-edit-m"></div></div>`);
+  const box = m.overlay.querySelector("#sk-edit-m");
+  const closeBox = () => m.close(true);
+  // Після збереження сторінку під вікном оновлює той, хто відкрив редактор.
+  const saved = () => { closeBox(); if (onSaved) onSaved(); else go(nav.dest); };
   box.innerHTML = `
-    <div class="${panelBox ? "card" : "sk-edit-in"}">
+    <div class="sk-edit-in">
       <h2>Навичка: ${esc(s.name)} <span class="muted">v${esc(s.version)}</span></h2>
       <div class="editor-top">
         <div class="editor-icon">
@@ -5480,7 +5515,6 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
       </div>
       <div id="se-files" class="muted" style="margin-top:10px"></div>
     </div>`;
-  if (panelBox) box.scrollIntoView({ behavior: "smooth", block: "start" });
 
   // Прев'ю іконки: власна (якщо є) або стандартна.
   function paintIcon(skill) {

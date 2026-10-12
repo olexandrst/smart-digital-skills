@@ -120,11 +120,12 @@ DEFAULT_REVIEW_MONTHS = 6
 
 
 def _default_ownership(item, user):
-    """Користувач публікує сам — відповідальним стає він.
+    """Власником опублікованого матеріалу стає той, хто його опублікував.
 
-    Без власника й дати перегляду опублікований матеріал ніхто не
-    актуалізує, а сувора публікація взагалі не випустила б його: таких полів
-    у майстрі немає. Автор знає матеріал найкраще, тож він і власник.
+    Правило однакове для всіх ролей. Без власника й дати перегляду
+    опублікований матеріал ніхто не актуалізує, а сувора публікація взагалі
+    не випустила б його: таких полів у майстрі немає. Власника, вказаного
+    явно (повний редактор менеджера), не чіпаємо.
     """
     if not (item.owner or "").strip():
         item.owner = user.full_name or user.username
@@ -1069,8 +1070,7 @@ def create_resource():
     _apply_fields(res, data, creating=True)
     publish = status == "published"
     if publish:
-        if not manager:
-            _default_ownership(res, user)
+        _default_ownership(res, user)
         _require_publish_ready(res)
         res.status = "published"
         res.published_at = datetime.utcnow()
@@ -1135,8 +1135,7 @@ def change_resource_status(resource_id):
     if note and len(note) > 2000:
         raise ApiError("Причина завелика (максимум 2000 символів)", 400, "validation_error")
     if new_status == "published":
-        if not manager:
-            _default_ownership(res, user)
+        _default_ownership(res, user)
         _require_publish_ready(res)
 
     old_status = res.status
@@ -1247,11 +1246,22 @@ def _may_attach(res, user):
 @bp.get("/resources/<int:resource_id>/files")
 @require_auth
 def list_resource_files(resource_id):
-    """Вкладення картки — видно всім, хто бачить саму картку."""
+    """Вкладення картки — видно всім, хто бачить саму картку.
+
+    Зображення й відео отримують `media` і `preview_url` — підписане
+    посилання для <img>/<video>, які не вміють передати JWT.
+    """
     _visible_resource(resource_id)
+    user = current_user()
     rows = (UserFile.query.filter_by(resource_id=resource_id)
             .order_by(UserFile.created_at.desc()).all())
-    return jsonify([f.to_dict() for f in rows])
+    out = []
+    for f in rows:
+        item, media = f.to_dict(), file_service.media_of(f)
+        item["media"] = media[0] if media else None
+        item["preview_url"] = file_service.preview_url(f, user) if media else None
+        out.append(item)
+    return jsonify(out)
 
 
 @bp.post("/resources/<int:resource_id>/files")
@@ -1280,6 +1290,39 @@ def download_resource_file(resource_id, file_id):
     return send_from_directory(
         file_service.user_dir(uf.user), uf.stored_name, as_attachment=True,
         download_name=os.path.basename(uf.filename) or uf.stored_name)
+
+
+@bp.get("/files/<int:file_id>/preview")
+def preview_resource_file(file_id):
+    """Перегляд зображення чи відео з вкладень — для тегів <img> і <video>.
+
+    Без JWT: доступ дає підписане посилання зі списку вкладень (див.
+    file_service). Права на картку перевіряються щоразу, тож знята з
+    публікації картка за старим посиланням уже не відкриється. Відео
+    віддається з підтримкою Range — його можна перемотувати, не
+    завантажуючи цілком.
+    """
+    data = file_service.read_preview_token(request.args.get("sig"))
+    if not data or data.get("f") != file_id:
+        raise ApiError("Посилання на перегляд недійсне або застаріло", 403, "forbidden")
+    uf = db.session.get(UserFile, file_id)
+    viewer = db.session.get(User, data.get("u"))
+    if uf is None or uf.resource_id is None:
+        raise ApiError("Файл не знайдено", 404, "not_found")
+    res = db.session.get(CatalogResource, uf.resource_id)
+    if viewer is None or not viewer.is_active or res is None or not _can_see(res, viewer):
+        raise ApiError("Файл недоступний", 403, "forbidden")
+    media = file_service.media_of(uf)
+    if media is None:
+        raise ApiError("Для цього файлу немає перегляду", 415, "unsupported_media")
+    resp = send_from_directory(file_service.user_dir(uf.user), uf.stored_name,
+                               mimetype=media[1], conditional=True, max_age=3600)
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    # Файл від користувача: браузер не вгадує тип, а відкритий напряму
+    # документ нічого не виконує.
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return resp
 
 
 @bp.delete("/resources/<int:resource_id>/files/<int:file_id>")

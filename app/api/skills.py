@@ -77,11 +77,12 @@ def _clean_note(data):
 
 
 def _publish(skill, user):
-    """Позначає навичку опублікованою; користувач-автор стає відповідальним."""
+    """Позначає навичку опублікованою; власником стає той, хто публікує
+    (якщо власника ще не вказано)."""
     skill.status = "published"
     if skill.published_at is None:
         skill.published_at = datetime.utcnow()
-    if not _is_manager(user) and not (skill.owner or "").strip():
+    if not (skill.owner or "").strip():
         skill.owner = user.full_name or user.username
 
 

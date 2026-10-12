@@ -67,6 +67,23 @@ def test_user_publication_notifies_every_manager(client):
     assert _notes(client, _login(client, "u2"))["items"] == []
 
 
+def test_whoever_publishes_becomes_owner(client):
+    """Власник опублікованого — той, хто опублікував, для будь-якої ролі."""
+    assert _material(client, _login(client, "u1"))["owner"] == "u1"
+    assert _material(client, _login(client, "sm"))["owner"] == "sm"
+    # Чернетка власника не отримує; отримає той, хто її опублікує.
+    u1, sm = _login(client, "u1"), _login(client, "sm")
+    rid = _material(client, u1, status="draft")["id"]
+    assert client.get(f"/api/catalog/resources/{rid}", headers=u1).get_json()["owner"] is None
+    pub = client.post(f"/api/catalog/resources/{rid}/status",
+                      json={"status": "published"}, headers=sm).get_json()
+    assert pub["owner"] == "sm"
+    # Власника, вказаного явно, правило не перезаписує.
+    assert _material(client, sm, owner="Марія Коваль")["owner"] == "Марія Коваль"
+    # Те саме для навичок.
+    assert _skill(client, _login(client, "u2"))["owner"] == "u2"
+
+
 def test_draft_is_silent_until_author_publishes_it(client):
     u1, admin = _login(client, "u1"), _admin(client)
     rid = _material(client, u1, status="draft")["id"]

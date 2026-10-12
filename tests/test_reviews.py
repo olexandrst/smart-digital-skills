@@ -66,7 +66,10 @@ def test_no_reminder_long_before_due(client, app):
 
 def test_no_reminder_without_owner(client, app):
     h = _admin(client)
-    rid = _resource(client, h, owner="")["id"]
+    rid = _resource(client, h)["id"]
+    # Опубліковане отримує власника автоматично; менеджер може його прибрати.
+    cleared = client.patch(f"/api/catalog/resources/{rid}", json={"owner": ""}, headers=h)
+    assert cleared.get_json()["owner"] is None
     _set_review_date(app, rid, 2)
     with app.app_context():
         assert review_service.create_reminders() == 0
