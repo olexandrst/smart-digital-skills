@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Knowledge Hub</title>
-  <link rel="stylesheet" href="style.css?v=80">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css?v=82">
 </head>
 <body>
   <!-- Екран входу -->
@@ -106,6 +109,16 @@
                placeholder="Пошук або опишіть задачу своїми словами">
       </div>
 
+      <!-- Інструкція для користувачів — у новій вкладці, щоб не губити місце в хабі -->
+      <a id="help-btn" class="help-btn" href="guide/" target="_blank" rel="noopener"
+         title="Інструкція" aria-label="Інструкція (відкриється в новій вкладці)">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="8.6"/>
+          <path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/>
+          <circle cx="12" cy="16.9" r=".4"/>
+        </svg>
+      </a>
+
       <!-- Сповіщення: подано на розгляд, рішення за матеріалом, нагадування -->
       <div class="notif-wrap">
         <button id="notif-btn" class="notif-btn" type="button" aria-label="Сповіщення"
@@ -148,6 +161,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 12.5h6M9 16h4"/></svg>
             Мій контент
           </button>
+          <button class="me-item" data-act="tour" role="menuitem">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.4l1.9 5.2 5.2 1.9-5.2 1.9-1.9 5.2-1.9-5.2-5.2-1.9 5.2-1.9L12 3.4Z"/></svg>
+            Знайомство з інтерфейсом
+          </button>
           <div class="me-sep"></div>
           <div class="me-theme"><span>Тема</span><div class="theme-seg" id="theme-seg"></div></div>
           <div class="me-sep"></div>
@@ -173,6 +190,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=80"></script>
+  <script src="app.js?v=82"></script>
 </body>
 </html>

@@ -551,6 +551,10 @@ body.theme-dark .theme-seg button.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .
 .sb-item.sb-feature.active { background: var(--primary); color: #fff; }
 .sb-item.sb-feature.active > svg { stroke: #fff; }
 .sb-item.sb-feature.active .sb-count { color: #fff; opacity: .9; }
+/* «Інструкція» — останній пункт панелі, притиснутий донизу */
+a.sb-item { text-decoration: none; }
+.sb-spacer { flex: 1 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.sb-guide .sb-ext { margin-left: auto; }
 
 /* Плитка-відтінок розділу: тип видно, перш ніж прочитано назву */
 .sb-dot {
@@ -1861,6 +1865,16 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.5); }
 
 /* Дзвіночок у верхній панелі */
 .notif-wrap { position: relative; flex: 0 0 auto; }
+/* «?» — інструкція в новій вкладці; виглядає як сусідній дзвіночок */
+.help-btn {
+  display: grid; place-items: center; flex: 0 0 auto;
+  width: 30px; height: 30px; border-radius: 50%; color: var(--muted);
+}
+.help-btn:hover { background: var(--fill); color: var(--text); }
+.help-btn > svg {
+  width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 .notif-btn {
   position: relative; width: 30px; height: 30px; padding: 0; border-radius: 50%;
   background: none; color: var(--muted);
@@ -1963,3 +1977,48 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.5); }
 .card .res-health { margin-bottom: 4px; }
 /* Підказка менеджерові на особистій сторінці: де черга модерації */
 .contrib-nudge { margin-bottom: 14px; }
+
+/* ---- Знайомство з інтерфейсом ----
+   Затемнення з «віконцем» навколо поточного елемента (box-shadow на
+   прозорому блоці), пульсуюча рамка й підказка поруч. Шар перехоплює кліки:
+   поки йде знайомство, сторінка під ним не реагує. */
+.tour { position: fixed; inset: 0; z-index: 2000; }
+.tour-hole {
+  position: fixed; border-radius: 12px; cursor: pointer;
+  box-shadow: 0 0 0 9999px rgba(8, 8, 12, .58);
+  transition: top .28s ease, left .28s ease, width .28s ease, height .28s ease;
+}
+.tour-hole::after {
+  content: ""; position: absolute; inset: -2px; border-radius: 14px;
+  border: 2px solid var(--primary);
+  animation: tour-pulse 1.8s ease-out infinite;
+}
+@keyframes tour-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(227, 6, 19, .5); }
+  70%, 100% { box-shadow: 0 0 0 12px rgba(227, 6, 19, 0); }
+}
+.tour-pop {
+  position: fixed; top: 0; left: 0; width: min(340px, calc(100vw - 24px));
+  padding: 16px 16px 14px 18px; border-radius: var(--r-lg); overflow: hidden;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); box-shadow: var(--shadow-lg);
+  transition: top .28s ease, left .28s ease;
+}
+.tour-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* Прогрес — тонка смужка по верхньому краю підказки */
+.tour-bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--fill); }
+.tour-bar i { display: block; height: 100%; background: var(--primary); transition: width .28s ease; }
+.tour-count { font-size: var(--fs-foot); font-weight: 600; color: var(--primary); }
+.tour-skip {
+  height: auto; padding: 4px 6px; margin-right: -6px; background: none;
+  color: var(--muted); font-size: var(--fs-foot); font-weight: 500;
+}
+.tour-skip:hover { background: var(--fill); color: var(--text); }
+.tour-pop h3 { margin: 4px 0 6px; font-size: var(--fs-head); font-weight: 650; }
+.tour-pop p { margin: 0 0 14px; font-size: var(--fs-call); line-height: 1.5; color: var(--muted); }
+.tour-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.tour-foot #tour-back { margin-right: auto; }
+@media (prefers-reduced-motion: reduce) {
+  .tour-hole, .tour-pop, .tour-bar i { transition: none; }
+  .tour-hole::after { animation: none; }
+}

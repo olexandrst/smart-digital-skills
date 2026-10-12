@@ -122,6 +122,15 @@ def create_app(config_object=None):
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
         return resp
 
+    @app.get("/guide/")
+    def guide():
+        # Інструкція для користувачів — статична сторінка поруч із
+        # застосунком (значок «?» і останній пункт бічної панелі). Як і
+        # index.html, не кешується, щоб оновлена інструкція доходила одразу.
+        resp = send_from_directory(os.path.join(app.static_folder, "guide"), "index.html")
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
+
     return app
 
 

@@ -322,6 +322,7 @@ async function showApp() {
   $("#user-roles").textContent = roleLabel(state.user);
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
+  maybeStartTour();   // новому користувачу — знайомство з інтерфейсом
 }
 
 // ---------- Навігація: режим → бічна панель → екран ----------
@@ -351,6 +352,7 @@ const GLYPH = {
   list: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.9" cy="6.5" r="1"/><circle cx="4.9" cy="12" r="1"/><circle cx="4.9" cy="17.5" r="1"/>',
   pen: '<path d="M4.5 19.5h3.6L18.4 9.2a2.2 2.2 0 0 0-3.1-3.1L5 16.4v3.1Z"/><path d="M13.4 8l3.1 3.1"/>',
   upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15.5v2.6c0 .8.7 1.4 1.4 1.4h12.2c.8 0 1.4-.6 1.4-1.4v-2.6"/>',
+  help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="16.9" r=".4"/>',
 };
 const gsvg = (name, cls = "") =>
   `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none"
@@ -480,6 +482,7 @@ function bindProfileMenu() {
       close();
       if (b.dataset.act === "my-ideas") openMyIdeas();
       if (b.dataset.act === "my-content") openMyContent();
+      if (b.dataset.act === "tour") replayTour();
     }));
 }
 
@@ -699,10 +702,21 @@ function sbItem(dest, label, glyph, count, extra = "") {
     </button>`;
 }
 
+// Інструкція — останній пункт панелі в обох режимах. Це посилання, а не
+// кнопка: вона відкривається в новій вкладці, як і значок «?» угорі.
+const GUIDE_URL = "guide/";
+function sbGuideHtml() {
+  return `<div class="sb-spacer"></div>
+    <a class="sb-item sb-guide" href="${GUIDE_URL}" target="_blank" rel="noopener"
+       title="Інструкція відкриється в новій вкладці">
+      ${gsvg("help")}<span class="sb-label">Інструкція</span>${gsvg("ext", "sb-ext")}
+    </a>`;
+}
+
 function buildSidebar() {
   const box = $("#sidebar");
   if (!box) return;
-  box.innerHTML = nav.mode === "admin" ? adminSidebarHtml() : hubSidebarHtml();
+  box.innerHTML = (nav.mode === "admin" ? adminSidebarHtml() : hubSidebarHtml()) + sbGuideHtml();
   box.querySelectorAll("[data-dest]").forEach(b =>
     b.addEventListener("click", () => go(b.dataset.dest)));
   box.querySelectorAll("[data-ext]").forEach(b =>
@@ -5700,6 +5714,282 @@ async function openUserEditor(userId) {
       toast("Користувача оновлено"); openTab("users");
     } catch (err) { toast(err.message, "err"); }
   });
+}
+
+// ---------- Знайомство з інтерфейсом ----------
+//
+// Під час першого входу хаб по черзі підсвічує головні елементи екрана й
+// пояснює кожен одним-двома реченнями. Людина проклацує кроки («Далі» або
+// клік по підсвіченому), може повернутися чи пропустити все. Останній крок —
+// інструкція. Позначка «пройдено» живе на сервері (users.tour_completed_at),
+// тож на іншому пристрої знайомство не повториться; повторити можна з меню
+// профілю.
+
+const TOUR_LOCAL_KEY = "hub-tour-done";
+let tourState = null;
+let tourPending = false;
+
+function tourVisible(node) {
+  if (!node || !node.isConnected) return false;
+  const r = node.getBoundingClientRect();
+  // На телефоні бічна панель схована за лівим краєм — її пункти «невидимі».
+  return r.width > 0 && r.height > 0 && r.right > 0 && r.left < window.innerWidth
+    && getComputedStyle(node).visibility !== "hidden";
+}
+
+// Перший видимий з переліку: той самий крок на телефоні показує інший
+// елемент (вкладку внизу замість пункту панелі).
+function tourPick(...sels) {
+  for (const sel of sels) {
+    const node = document.querySelector(sel);
+    if (tourVisible(node)) return node;
+  }
+  return null;
+}
+
+// «Розділи» — заголовок групи разом із пунктами під ним.
+function tourSections() {
+  const items = [...document.querySelectorAll("#sidebar > *")];
+  const i = items.findIndex(x => x.classList.contains("sb-group") && /Розділи/.test(x.textContent));
+  if (i < 0 || !tourVisible(items[i])) return null;
+  const out = [items[i]];
+  for (let j = i + 1; j < items.length && items[j].classList.contains("sb-item"); j++) out.push(items[j]);
+  return out;
+}
+
+function tourSteps() {
+  const phone = window.matchMedia("(max-width: 760px)").matches;
+  return [
+    { at: () => tourPick(".spotlight"), title: "Пошук",
+      text: "Пишіть звичайними словами: «протокол наради», «тендер». Каталог звузиться одразу, "
+        + "а Enter запустить помічника, який підбере матеріали під задачу."
+        + (phone ? "" : " Швидкий виклик: Ctrl+K.") },
+    { at: () => tourPick('#sidebar [data-dest="hub:all"]', '#tabbar [data-tab="all"]'),
+      side: "right", title: "Матеріали",
+      text: "Увесь каталог в одному місці. Обирайте вид угорі й звужуйте вибір фільтрами." },
+    { at: () => tourSections() || tourPick("#side-toggle"), side: "right",
+      title: phone ? "Бічна панель" : "Розділи",
+      text: phone ? "Тут розділи каталогу, ваші публікації й інструкція."
+                  : "Каталог за темами. Розділ зі стрілкою відкриває зовнішній портал." },
+    { at: () => tourPick("#view article.mdc"), title: "Картка матеріалу",
+      text: "Клацніть картку, щоб відкрити опис. Кнопка внизу копіює промпт чи завантажує "
+        + "навичку, а зірочка зберігає матеріал в «Обране»." },
+    { at: () => tourPick("#cat-add"), title: "Додати матеріал",
+      text: "Поділіться своїм промптом, інструкцією чи навичкою: три кроки, і матеріал одразу "
+        + "в каталозі. Власником стаєте ви." },
+    { at: () => tourPick('#sidebar [data-dest="hub:contrib"]'), side: "right",
+      title: "Наповнення каталогу",
+      text: "Усе, що ви опублікували: редагуйте, знімайте з публікації або видаляйте." },
+    { when: () => isManager(),
+      at: () => tourPick('#mode-seg [data-mode="admin"]', '#tabbar [data-tab="admin"]'),
+      title: "Керування",
+      text: "Консоль менеджера: черга перегляду нових публікацій, структура каталогу й "
+        + "аналітика. Число показує, скільки публікацій чекає перегляду." },
+    { at: () => tourPick("#notif-btn"), title: "Сповіщення",
+      text: "Коментарі до ваших матеріалів, рішення менеджера й нагадування про перевірку. "
+        + "Клік відкриває потрібну картку." },
+    { at: () => tourPick("#me-btn"), title: "Профіль",
+      text: "Обране, ваші ідеї й контент, світла чи темна тема. Тут же можна ще раз пройти "
+        + "це знайомство." },
+    { at: () => tourPick("#help-btn"), title: "Інструкція", guide: true,
+      text: "Детальна інструкція з кроками й знімками екрана. Відкривається в новій вкладці; "
+        + "посилання на неї є й останнім пунктом бічної панелі." },
+  ].filter(s => (!s.when || s.when()) && s.at());
+}
+
+function tourDone() {
+  if (!state.user || state.user.tour_completed_at) return true;
+  try { return localStorage.getItem(`${TOUR_LOCAL_KEY}:${state.user.id}`) === "1"; }
+  catch (e) { return false; }
+}
+
+function markTourDone() {
+  if (!state.user) return;
+  state.user.tour_completed_at = new Date().toISOString();
+  saveSession();
+  api("/catalog/profile", { method: "PATCH", body: { tour_completed: true } }).catch(() => {
+    // Сервер недоступний — хоча б у цьому браузері не показуємо знову.
+    try { localStorage.setItem(`${TOUR_LOCAL_KEY}:${state.user.id}`, "1"); } catch (e) { /* ні */ }
+  });
+}
+
+function waitFor(cond, timeout) {
+  return new Promise(resolve => {
+    const t0 = Date.now();
+    const tick = () => {
+      if (cond()) resolve(true);
+      else if (Date.now() - t0 > timeout) resolve(false);
+      else setTimeout(tick, 120);
+    };
+    tick();
+  });
+}
+
+// Чекаємо, доки головна домалюється: панель із розділами й картки.
+async function tourWhenReady() {
+  const ok = await waitFor(() => $("#view .page-h1") && $("#sidebar .sb-item"), 10000);
+  if (ok) await waitFor(() => $("#view article.mdc"), 2500);
+  return ok;
+}
+
+async function maybeStartTour() {
+  if (tourPending || tourState || tourDone()) return;
+  tourPending = true;
+  surveyShown = true;   // опитування не накладається на знайомство
+  const ok = await tourWhenReady();
+  tourPending = false;
+  if (ok && !tourDone()) startTour();
+}
+
+async function replayTour() {
+  if (tourState) return;
+  if (nav.dest !== "hub:home") go("hub:home");
+  if (await tourWhenReady()) startTour();
+}
+
+function startTour() {
+  if (tourState) return;
+  const steps = tourSteps();
+  if (!steps.length) return;
+  document.querySelectorAll(".survey-bar").forEach(b => b.remove());
+  const root = el(`<div class="tour" role="dialog" aria-modal="true"
+        aria-labelledby="tour-title" aria-describedby="tour-text">
+      <div class="tour-hole" title="Далі"></div>
+      <div class="tour-pop">
+        <div class="tour-bar" aria-hidden="true"><i id="tour-bar"></i></div>
+        <div class="tour-top">
+          <span class="tour-count" id="tour-count"></span>
+          <button type="button" class="tour-skip" id="tour-skip">Пропустити</button>
+        </div>
+        <h3 id="tour-title"></h3>
+        <p id="tour-text"></p>
+        <div class="tour-foot">
+          <button type="button" class="ghost" id="tour-back">Назад</button>
+          <button type="button" class="ghost hidden" id="tour-guide">Відкрити інструкцію</button>
+          <button type="button" id="tour-next">Далі</button>
+        </div>
+      </div>
+    </div>`);
+  document.body.appendChild(root);
+  const s = tourState = {
+    steps, i: 0, root,
+    hole: root.querySelector(".tour-hole"), pop: root.querySelector(".tour-pop"),
+  };
+
+  const openGuide = () => window.open(GUIDE_URL, "_blank", "noopener");
+  const next = () => {
+    if (s.i >= s.steps.length - 1) { endTour(); return; }
+    tourShow(s.i + 1, 1);
+  };
+  const back = () => { if (s.i > 0) tourShow(s.i - 1, -1); };
+  root.querySelector("#tour-next").addEventListener("click", next);
+  root.querySelector("#tour-back").addEventListener("click", back);
+  root.querySelector("#tour-skip").addEventListener("click", () => endTour());
+  root.querySelector("#tour-guide").addEventListener("click", () => { openGuide(); endTour(); });
+  // Клік по підсвіченому елементу — теж «далі»; на останньому кроці він
+  // робить те саме, що й сам значок: відкриває інструкцію.
+  s.hole.addEventListener("click", () => {
+    if (s.steps[s.i].guide) { openGuide(); endTour(); } else next();
+  });
+
+  s.onKey = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endTour(); return; }
+    if (e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); next(); return; }
+    if (e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); back(); return; }
+    if (e.key === "Tab") {
+      // Фокус не виходить за межі підказки.
+      const btns = [...s.pop.querySelectorAll("button:not(.hidden):not([disabled])")];
+      const i = btns.indexOf(document.activeElement);
+      e.preventDefault(); e.stopPropagation();
+      btns[(i + (e.shiftKey ? -1 : 1) + btns.length) % btns.length].focus();
+    }
+  };
+  document.addEventListener("keydown", s.onKey, true);
+  let raf = 0;
+  s.onMove = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(tourPlace); };
+  window.addEventListener("resize", s.onMove);
+  window.addEventListener("scroll", s.onMove, true);
+  tourShow(0, 1);
+}
+
+function tourShow(i, dir) {
+  const s = tourState;
+  // Елемент міг зникнути (панель перебудувалася) — беремо сусідній крок.
+  while (i >= 0 && i < s.steps.length && !s.steps[i].at()) i += dir;
+  if (i < 0 || i >= s.steps.length) { if (dir > 0) endTour(); return; }
+  s.i = i;
+  const step = s.steps[i];
+  const target = step.at();
+  const anchor = Array.isArray(target) ? target[0] : target;
+  const r = anchor.getBoundingClientRect();
+  if (r.top < 64 || r.bottom > window.innerHeight - 90) {
+    anchor.scrollIntoView({ block: "center", inline: "nearest" });
+  }
+  const last = i === s.steps.length - 1;
+  s.root.querySelector("#tour-count").textContent = `Крок ${i + 1} з ${s.steps.length}`;
+  s.root.querySelector("#tour-title").textContent = step.title;
+  s.root.querySelector("#tour-text").textContent = step.text;
+  s.root.querySelector("#tour-bar").style.width = `${((i + 1) / s.steps.length) * 100}%`;
+  // На останньому кроці дві дії — «Назад» лишається за клавішею ←.
+  s.root.querySelector("#tour-back").classList.toggle("hidden", i === 0 || last);
+  s.root.querySelector("#tour-guide").classList.toggle("hidden", !step.guide);
+  const nextBtn = s.root.querySelector("#tour-next");
+  nextBtn.textContent = last ? "Готово" : "Далі";
+  s.hole.title = step.guide ? "Відкрити інструкцію" : last ? "Готово" : "Далі";
+  tourPlace();
+  requestAnimationFrame(tourPlace);   // після прокрутки
+  nextBtn.focus({ preventScroll: true });
+}
+
+function tourRect(target) {
+  const list = Array.isArray(target) ? target : [target];
+  const rs = list.map(x => x.getBoundingClientRect());
+  const top = Math.min(...rs.map(r => r.top)), left = Math.min(...rs.map(r => r.left));
+  const bottom = Math.max(...rs.map(r => r.bottom)), right = Math.max(...rs.map(r => r.right));
+  return { top, left, bottom, right, width: right - left, height: bottom - top };
+}
+
+// Підсвітка — «дірка» в затемненні навколо елемента; підказка стає збоку
+// від неї там, де вистачає місця.
+function tourPlace() {
+  const s = tourState;
+  if (!s) return;
+  const target = s.steps[s.i].at();
+  if (!target) return;
+  const pad = 6, gap = 14, m = 12;
+  const r = tourRect(target);
+  const H = window.innerHeight, W = window.innerWidth;
+  const hole = { top: r.top - pad, left: r.left - pad, width: r.width + pad * 2, height: r.height + pad * 2 };
+  Object.assign(s.hole.style, { top: `${hole.top}px`, left: `${hole.left}px`,
+                                width: `${hole.width}px`, height: `${hole.height}px` });
+  const pw = s.pop.offsetWidth, ph = s.pop.offsetHeight;
+  const clampX = x => Math.max(m, Math.min(x, W - pw - m));
+  const clampY = y => Math.max(m, Math.min(y, H - ph - m));
+  const midX = clampX(hole.left + hole.width / 2 - pw / 2);
+  const midY = clampY(hole.top + hole.height / 2 - ph / 2);
+  const spots = {
+    bottom: { ok: hole.top + hole.height + gap + ph <= H - m, top: hole.top + hole.height + gap, left: midX },
+    top: { ok: hole.top - gap - ph >= m, top: hole.top - gap - ph, left: midX },
+    right: { ok: hole.left + hole.width + gap + pw <= W - m, top: midY, left: hole.left + hole.width + gap },
+    left: { ok: hole.left - gap - pw >= m, top: midY, left: hole.left - gap - pw },
+  };
+  const order = s.steps[s.i].side === "right"
+    ? ["right", "bottom", "top", "left"] : ["bottom", "top", "right", "left"];
+  const pick = order.map(k => spots[k]).find(x => x.ok)
+    || { top: H - ph - m, left: clampX((W - pw) / 2) };
+  s.pop.style.top = `${pick.top}px`;
+  s.pop.style.left = `${pick.left}px`;
+}
+
+function endTour() {
+  const s = tourState;
+  if (!s) return;
+  tourState = null;
+  document.removeEventListener("keydown", s.onKey, true);
+  window.removeEventListener("resize", s.onMove);
+  window.removeEventListener("scroll", s.onMove, true);
+  s.root.remove();
+  markTourDone();
 }
 
 // ---------- Старт ----------

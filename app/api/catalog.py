@@ -2248,7 +2248,11 @@ def search_analytics():
 @bp.patch("/profile")
 @require_auth
 def update_profile():
-    """Користувач сам вказує свій рівень AI-зрілості та підрозділ."""
+    """Користувач сам вказує свій рівень AI-зрілості та підрозділ.
+
+    `tour_completed: true` — знайомство з інтерфейсом пройдено (або
+    пропущено), більше не показувати; `false` — показати знову.
+    """
     data = request.get_json(silent=True) or {}
     user = current_user()
     if "maturity_level_id" in data:
@@ -2257,9 +2261,13 @@ def update_profile():
     if "department" in data:
         value = (data.get("department") or "").strip()
         user.department = value[:200] or None
+    if "tour_completed" in data:
+        user.tour_completed_at = datetime.utcnow() if data.get("tour_completed") else None
     db.session.commit()
     return jsonify({"maturity_level_id": user.maturity_level_id,
-                    "department": user.department})
+                    "department": user.department,
+                    "tour_completed_at": (user.tour_completed_at.isoformat()
+                                          if user.tour_completed_at else None)})
 
 
 def _maturity_ladder():

@@ -51,6 +51,9 @@ class User(db.Model):
     # Рівень AI-зрілості з довідника (BR-9): користувач вказує його сам.
     maturity_level_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
     department = db.Column(db.String)     # підрозділ — розріз для рекомендацій
+    # Коли людина пройшла (або пропустила) знайомство з інтерфейсом. Порожньо —
+    # гайд покажеться під час наступного входу, на будь-якому пристрої.
+    tour_completed_at = db.Column(db.DateTime)
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
@@ -115,6 +118,8 @@ class User(db.Model):
             "roles": self.role_codes,
             "maturity_level_id": self.maturity_level_id,
             "department": self.department,
+            "tour_completed_at": (self.tour_completed_at.isoformat()
+                                  if self.tour_completed_at else None),
             "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }

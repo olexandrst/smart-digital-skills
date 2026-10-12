@@ -345,6 +345,7 @@ CREATE TABLE users (
     storage_uid VARCHAR,
     maturity_level_id INTEGER,
     department VARCHAR,
+    tour_completed_at DATETIME,
     last_login_at DATETIME,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,

@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Перші кроки в AI Knowledge Hub</title>
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<script>
+  // Тема та сама, що в хабі: вибір користувача лежить у localStorage("theme").
+  try {
+    document.documentElement.setAttribute("data-theme",
+      localStorage.getItem("theme") === "dark" ? "dark" : "light");
+  } catch (e) { /* без сховища — світла тема */ }
+</script>
+<style>
+/* Шрифт хабу з його ж сервера: у контурі компанії зовнішні CDN можуть бути закриті. */
+@font-face {
+  font-family: "Inter var";
+  src: url("../fonts/inter-var.woff2?v=1") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+/* Макет: вузька колонка читання з липким змістом ліворуч; знімки екрана —
+   у рамці, як вікно застосунку. Кольори й шрифт — з дизайн-системи хабу. */
+:root {
+  --bg: #e9ebef;
+  --panel: #ffffff;
+  --panel-2: #f4f5f8;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --faint: #a1a1a6;
+  --border: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --fill: rgba(120, 120, 128, 0.10);
+  --accent: #e30613;
+  --accent-ink: #c00510;
+  --accent-soft: rgba(227, 6, 19, 0.08);
+  --blue: #0071e3; --purple: #7b4fd1; --green: #2a9d57;
+  --orange: #c86a00; --teal: #0f8fa8; --pink: #c2317c;
+  --shot-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
+  /* Маркери лежать на світлих знімках у будь-якій темі */
+  --mk-bg: #e30613; --mk-ink: #ffffff; --mk-ring: #ffffff;
+  --font: "Inter var", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+  --fs-cap: 11px; --fs-foot: 13px; --fs-call: 14px; --fs-body: 16px;
+  --fs-head: 19px; --fs-title: 26px; --fs-hero: 40px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #000000; --panel: #1c1c1e; --panel-2: #2c2c2e;
+    --text: #f5f5f7; --muted: #98989d; --faint: #6e6e73;
+    --border: rgba(255,255,255,.13); --border-strong: rgba(255,255,255,.22);
+    --fill: rgba(120,120,128,.24);
+    --accent: #ff453a; --accent-ink: #ff6961; --accent-soft: rgba(255,69,58,.14);
+    --blue: #0a84ff; --purple: #bf5af2; --green: #30d158;
+    --orange: #ff9f0a; --teal: #40c8e0; --pink: #ff6482;
+    --shot-shadow: 0 0 0 1px rgba(255,255,255,.08);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #000000; --panel: #1c1c1e; --panel-2: #2c2c2e;
+  --text: #f5f5f7; --muted: #98989d; --faint: #6e6e73;
+  --border: rgba(255,255,255,.13); --border-strong: rgba(255,255,255,.22);
+  --fill: rgba(120,120,128,.24);
+  --accent: #ff453a; --accent-ink: #ff6961; --accent-soft: rgba(255,69,58,.14);
+  --blue: #0a84ff; --purple: #bf5af2; --green: #30d158;
+  --orange: #ff9f0a; --teal: #40c8e0; --pink: #ff6482;
+  --shot-shadow: 0 0 0 1px rgba(255,255,255,.08);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; scroll-padding-top: 24px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: var(--fs-body); line-height: 1.6;
+  font-optical-sizing: auto; -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent-ink); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 28px 64px; }
+
+/* ---- Шапка ---- */
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: var(--fs-call); }
+.brand svg { width: 28px; height: 28px; }
+.brand span { color: var(--muted); font-weight: 500; }
+.to-hub {
+  margin-left: auto; font-weight: 600; text-decoration: none; color: var(--text);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px;
+}
+.to-hub:hover { border-color: var(--border-strong); }
+.hero { padding-block: 36px 8px; max-width: 760px; }
+.hero h1 {
+  font-size: var(--fs-hero); line-height: 1.1; letter-spacing: -0.025em;
+  font-weight: 700; margin: 0 0 14px; text-wrap: balance;
+}
+.hero .lead { font-size: 19px; color: var(--muted); margin: 0; max-width: 62ch; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.pill {
+  font-size: var(--fs-foot); color: var(--muted); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px;
+}
+
+/* ---- Сітка: зміст + текст ---- */
+.layout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; margin-top: 36px; }
+.toc { position: sticky; top: 24px; align-self: start; font-size: var(--fs-foot); }
+.toc b {
+  display: block; font-size: var(--fs-cap); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--faint); font-weight: 600; margin: 18px 0 6px;
+}
+.toc b:first-child { margin-top: 0; }
+.toc a {
+  display: block; color: var(--muted); text-decoration: none;
+  padding: 4px 10px; margin-left: -10px; border-radius: 8px;
+}
+.toc a:hover { background: var(--fill); color: var(--text); }
+main { min-width: 0; max-width: 780px; }
+
+/* ---- Розділи ---- */
+.chapter {
+  font-size: var(--fs-cap); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent-ink); font-weight: 700; margin: 64px 0 0;
+}
+section { padding-top: 8px; }
+h2 {
+  font-size: var(--fs-title); line-height: 1.2; letter-spacing: -0.015em;
+  font-weight: 700; margin: 40px 0 12px; text-wrap: balance;
+}
+.chapter + section h2 { margin-top: 10px; }
+main > section:first-child h2 { margin-top: 0; }
+h3 { font-size: var(--fs-head); font-weight: 600; margin: 28px 0 8px; letter-spacing: -0.01em; }
+p { margin: 0 0 14px; max-width: 66ch; }
+.muted { color: var(--muted); }
+
+/* Кнопки інтерфейсу в тексті — так, як вони виглядають у хабі */
+.ui {
+  display: inline-block; font-size: .9em; font-weight: 600; line-height: 1.45;
+  background: var(--panel); border: 1px solid var(--border-strong);
+  border-radius: 7px; padding: 0 7px; white-space: nowrap;
+}
+.ui.red { background: var(--accent); border-color: var(--accent); color: #fff; }
+kbd {
+  font-family: var(--mono); font-size: .82em; background: var(--panel);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px;
+  border-radius: 6px; padding: 1px 6px;
+}
+code { font-family: var(--mono); font-size: .88em; background: var(--fill); border-radius: 5px; padding: 1px 5px; }
+
+/* Кроки */
+ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 4px 0 18px; display: grid; gap: 10px; max-width: 66ch; }
+ol.steps > li { counter-increment: s; position: relative; padding-left: 38px; }
+ol.steps > li::before {
+  content: counter(s); position: absolute; left: 0; top: 1px;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; font-size: var(--fs-foot); font-weight: 700;
+  background: var(--accent-soft); color: var(--accent-ink); font-variant-numeric: tabular-nums;
+}
+ul.dots { padding-left: 20px; margin: 0 0 16px; max-width: 66ch; }
+ul.dots li { margin: 4px 0; }
+ul.dots li::marker { color: var(--accent); }
+
+/* Три факти */
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 22px 0 8px; }
+.fact { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; }
+.fact b { display: block; font-size: var(--fs-call); margin-bottom: 4px; }
+.fact span { font-size: var(--fs-call); color: var(--muted); line-height: 1.5; display: block; }
+
+/* Таблиці */
+.tbl { overflow-x: auto; margin: 10px 0 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font-size: var(--fs-call); }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+tr:last-child td { border-bottom: none; }
+th { font-size: var(--fs-cap); letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 600; background: var(--panel-2); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+.kind { display: inline-flex; align-items: center; gap: 8px; }
+.kind i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
+
+/* Примітка */
+.note {
+  background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 4px 12px 12px 4px; padding: 12px 16px; margin: 14px 0 18px; max-width: 66ch;
+  font-size: 15px;
+}
+.note p:last-child { margin-bottom: 0; }
+
+/* Знімки екрана */
+figure.shot { margin: 16px 0 26px; }
+figure.shot.narrow { max-width: 600px; }
+figure.shot.phone { max-width: 290px; margin: 0; }
+.zoom {
+  display: block; width: 100%; padding: 0; border: 1px solid var(--border); background: var(--panel);
+  border-radius: 12px; overflow: hidden; cursor: zoom-in; box-shadow: var(--shot-shadow); position: relative;
+}
+.zoom img { display: block; width: 100%; height: auto; max-width: 100%; }
+figcaption { font-size: var(--fs-foot); color: var(--muted); margin-top: 8px; }
+
+/* Маркери на головному екрані */
+.mk {
+  position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%);
+  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--mk-bg); color: var(--mk-ink); font-size: 12px; font-weight: 700;
+  box-shadow: 0 0 0 3px var(--mk-ring), 0 2px 8px rgba(0,0,0,.35); pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+ol.legend { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; }
+ol.legend li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; font-size: 15px; line-height: 1.45; }
+ol.legend li > i {
+  font-style: normal; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--mk-bg); color: var(--mk-ink); font-size: 12px; font-weight: 700; margin-top: 1px;
+}
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 28px; align-items: start; }
+
+/* Блок для менеджера */
+.staff { background: var(--panel); border: 1px solid var(--border); border-radius: 20px; padding: 6px 24px 18px; margin-top: 18px; }
+.staff h2 { margin-top: 20px; }
+
+/* Запитання */
+dl.faq { margin: 8px 0 0; display: grid; gap: 4px; }
+dl.faq dt { font-weight: 600; margin-top: 14px; }
+dl.faq dd { margin: 2px 0 0; color: var(--muted); max-width: 66ch; }
+
+footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
+
+/* Перегляд знімка на весь екран */
+.lb {
+  position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.82);
+  display: grid; place-items: center; padding: 24px; cursor: zoom-out;
+}
+.lb img { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.lb button {
+  position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); right: 12px;
+  width: 40px; height: 40px; border-radius: 50%; border: none;
+  background: rgba(255,255,255,.16); color: #fff; font-size: 22px; cursor: pointer;
+}
+
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .toc { position: static; display: flex; flex-wrap: wrap; gap: 6px; }
+  .toc b { display: none; }
+  .toc a { margin: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px; }
+}
+@media (max-width: 720px) {
+  .hero h1 { font-size: 32px; }
+  .facts { grid-template-columns: minmax(0, 1fr); }
+  ol.legend { grid-template-columns: minmax(0, 1fr); }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  figure.shot.phone { max-width: 240px; }
+  h2 { font-size: 23px; }
+  .staff { padding: 4px 16px 14px; }
+}
+@media (max-width: 560px) {
+  .mk { width: 18px; height: 18px; font-size: 10px; box-shadow: 0 0 0 2px var(--mk-ring), 0 1px 4px rgba(0,0,0,.35); }
+  td:first-child { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff5a63"/><stop offset="1" stop-color="#e30613"/></linearGradient></defs>
+      <path d="M30 8c-6 0-9 4-11 8-2 4-4 8-9 8a7 7 0 0 1 0-14c3 0 5 1 7 3" fill="none" stroke="url(#g)" stroke-width="5" stroke-linecap="round"/>
+      <path d="M18 40c6 0 9-4 11-8 2-4 4-8 9-8a7 7 0 0 1 0 14c-3 0-5-1-7-3" fill="none" stroke="url(#g)" stroke-width="5" stroke-linecap="round"/>
+    </svg>
+    AI Knowledge Hub <span>· інструкція</span>
+    <a class="to-hub" href="../">Відкрити хаб</a>
+  </div>
+
+  <header class="hero">
+    <h1>Перші кроки в AI Knowledge Hub</h1>
+    <p class="lead">Що це за сервіс і як за кілька хвилин знайти потрібне, скористатися ним і поділитися своїм.</p>
+    <div class="meta-row">
+      <span class="pill">Для нових користувачів</span>
+      <span class="pill">Читати 10 хвилин</span>
+      <span class="pill">Комп’ютер і телефон</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Зміст">
+      <b>Знайомство</b>
+      <a href="#about">Що таке хаб</a>
+      <a href="#screen">Екран за хвилину</a>
+      <a href="#login">Увійти</a>
+      <a href="#tour">Знайомство з інтерфейсом</a>
+      <b>Знайти й використати</b>
+      <a href="#find">Знайти потрібне</a>
+      <a href="#use">Скористатися матеріалом</a>
+      <a href="#fav">Зберегти на потім</a>
+      <a href="#rate">Оцінити й прокоментувати</a>
+      <b>Поділитися своїм</b>
+      <a href="#publish">Опублікувати матеріал</a>
+      <a href="#skill">Опублікувати навичку</a>
+      <a href="#mine">Керувати своїм</a>
+      <a href="#idea">Запропонувати ідею</a>
+      <b>Бути в курсі</b>
+      <a href="#notify">Сповіщення</a>
+      <a href="#learn">Навчання</a>
+      <a href="#profile">Профіль і тема</a>
+      <a href="#phone">На телефоні</a>
+      <b>Інше</b>
+      <a href="#manager">Для менеджера каталогу</a>
+      <a href="#faq">Часті запитання</a>
+    </nav>
+
+    <main>
+      <!-- ============ Знайомство ============ -->
+      <section id="about">
+        <h2>Що таке хаб</h2>
+        <p><b>AI Knowledge Hub</b> — каталог AI-знань компанії. Тут зібрано навички, промпти, інструкції, кейси, агенти, MCP-сервери й корисні посилання, які колеги вже перевірили в роботі.</p>
+        <div class="facts">
+          <div class="fact"><b>Знаходьте готове</b><span>Не починайте з нуля: імовірно, хтось уже розв’язав схожу задачу.</span></div>
+          <div class="fact"><b>Хаб нічого не запускає</b><span>Ви берете матеріал і використовуєте у своєму інструменті: Claude, ChatGPT, Copilot, корпоративному агенті.</span></div>
+          <div class="fact"><b>Публікує кожен</b><span>Ваш матеріал одразу в каталозі, а менеджер каталогу стежить за якістю.</span></div>
+        </div>
+
+        <h3>Що з чим робити</h3>
+        <div class="tbl"><table>
+          <thead><tr><th>Вид</th><th>Головна кнопка</th><th>Що далі</th></tr></thead>
+          <tbody>
+            <tr><td><span class="kind" style="--c:var(--accent)"><i></i>Навичка</span></td><td><span class="ui">Завантажити</span></td><td>Додайте пакет у свій AI-інструмент або агента</td></tr>
+            <tr><td><span class="kind" style="--c:var(--blue)"><i></i>Промпт</span></td><td><span class="ui">Копіювати</span></td><td>Вставте в чат із моделлю й замініть місця в <code>{дужках}</code></td></tr>
+            <tr><td><span class="kind" style="--c:var(--purple)"><i></i>Інструкція, кейс</span></td><td><span class="ui">Читати</span></td><td>Текст відкривається просто в картці</td></tr>
+            <tr><td><span class="kind" style="--c:var(--orange)"><i></i>Агент</span></td><td><span class="ui">Відкрити агента</span></td><td>Агент відкривається в новій вкладці</td></tr>
+            <tr><td><span class="kind" style="--c:var(--teal)"><i></i>MCP-сервер</span></td><td><span class="ui">Копіювати endpoint</span></td><td>Вставте адресу в налаштування свого клієнта</td></tr>
+            <tr><td><span class="kind" style="--c:var(--pink)"><i></i>Посилання</span></td><td><span class="ui">Перейти</span></td><td>Сайт відкривається в новій вкладці</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Ролі</h3>
+        <div class="tbl"><table>
+          <tbody>
+            <tr><td>Користувач</td><td>Шукає й використовує матеріали, оцінює, коментує, подає ідеї. Публікує власні матеріали й навички.</td></tr>
+            <tr><td>Менеджер каталогу</td><td>Усе те саме, а також редагує, знімає з публікації й видаляє будь-який матеріал, веде структуру каталогу.</td></tr>
+            <tr><td>Адміністратор</td><td>Усе, що й менеджер, а також керує користувачами й ролями.</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="screen">
+        <h2>Екран за хвилину</h2>
+        <figure class="shot">
+          <button class="zoom" type="button" data-full="img/01-home.jpg" aria-label="Збільшити знімок головного екрана">
+            <img src="img/01-home.jpg" width="1920" height="1200" alt="Головний екран хабу: верхня панель, бічна панель і сторінка «Для вас»">
+            <span class="mk" style="--x:53.8%;--y:3.3%">1</span>
+            <span class="mk" style="--x:89.8%;--y:8.9%">2</span>
+            <span class="mk" style="--x:93.3%;--y:8.9%">3</span>
+            <span class="mk" style="--x:97.1%;--y:8.9%">4</span>
+            <span class="mk" style="--x:19.7%;--y:19.3%">5</span>
+            <span class="mk" style="--x:19.7%;--y:24.6%">6</span>
+            <span class="mk" style="--x:19.7%;--y:77.8%">7</span>
+            <span class="mk" style="--x:19.7%;--y:96.3%">8</span>
+            <span class="mk" style="--x:79.9%;--y:10.6%">9</span>
+            <span class="mk" style="--x:92.6%;--y:19.2%">10</span>
+          </button>
+        </figure>
+        <ol class="legend">
+          <li><i>1</i><span><b>Пошук</b> по всьому каталогу. Швидко: <kbd>Ctrl</kbd>+<kbd>K</kbd>, на Mac <kbd>⌘</kbd>+<kbd>K</kbd>.</span></li>
+          <li><i>2</i><span><b>Інструкція</b>: ця сторінка, у новій вкладці.</span></li>
+          <li><i>3</i><span><b>Сповіщення</b>: коментарі, рішення менеджера, нагадування.</span></li>
+          <li><i>4</i><span><b>Профіль</b>: обране, ідеї, ваш контент, знайомство з інтерфейсом, тема, вихід.</span></li>
+          <li><i>5</i><span><b>Матеріали</b>: увесь каталог з фільтрами. Головний вхід.</span></li>
+          <li><i>6</i><span><b>Розділи</b>: каталог за темами. Розділ зі стрілкою веде на зовнішній портал.</span></li>
+          <li><i>7</i><span><b>Наповнення каталогу</b>: усе, що ви опублікували.</span></li>
+          <li><i>8</i><span><b>Інструкція</b>: останній пункт бічної панелі.</span></li>
+          <li><i>9</i><span><b>Додати матеріал</b>: поділитися своїм.</span></li>
+          <li><i>10</i><span><b>Опишіть задачу</b>: помічник підбере матеріали.</span></li>
+        </ol>
+      </section>
+
+      <section id="login">
+        <h2>Увійти</h2>
+        <ol class="steps">
+          <li>Відкрийте адресу хабу в браузері.</li>
+          <li>Натисніть <span class="ui">Увійти через корпоративний акаунт</span>. Якщо такої кнопки немає, введіть логін і пароль, які видав адміністратор.</li>
+          <li>Відкриється сторінка <b>«Для вас»</b> з рекомендаціями.</li>
+        </ol>
+      </section>
+
+      <section id="tour">
+        <h2>Знайомство з інтерфейсом</h2>
+        <p>Під час першого входу хаб по черзі підсвітить головні елементи екрана й коротко пояснить кожен.</p>
+        <ol class="steps">
+          <li>Прочитайте підказку біля підсвіченого елемента.</li>
+          <li>Натисніть <span class="ui red">Далі</span> або клацніть сам підсвічений елемент.</li>
+          <li>Останній крок покаже, де відкрити цю інструкцію.</li>
+        </ol>
+        <p class="muted">Пропустити знайомство можна будь-коли кнопкою «Пропустити» або клавішею <kbd>Esc</kbd>. Повторити: меню профілю, пункт «Знайомство з інтерфейсом».</p>
+        <div class="note">
+          <p><b>Інструкція завжди під рукою:</b> значок <span class="ui">?</span> у правому верхньому куті або останній пункт бічної панелі «Інструкція». Вона відкривається в новій вкладці.</p>
+        </div>
+      </section>
+
+      <!-- ============ Знайти й використати ============ -->
+      <p class="chapter">Знайти й використати</p>
+      <section id="find">
+        <h2>Знайти потрібне</h2>
+        <h3>Якщо знаєте, що шукаєте</h3>
+        <ol class="steps">
+          <li>Клацніть у поле пошуку вгорі або натисніть <kbd>Ctrl</kbd>+<kbd>K</kbd>.</li>
+          <li>Введіть кілька слів: «протокол наради», «тендер», «договір».</li>
+          <li>Каталог одразу звузиться до відповідних карток.</li>
+        </ol>
+
+        <h3>Якщо хочете переглянути все</h3>
+        <ol class="steps">
+          <li>У бічній панелі натисніть <span class="ui red">Матеріали</span>.</li>
+          <li>Оберіть вид угорі: «Навички», «Промпти», «Інструкції» тощо.</li>
+          <li>Натисніть <span class="ui">Фільтри</span>, щоб звузити за категорією, складністю, інструментом, власником чи тегом.</li>
+          <li>Вибрані фільтри видно під рядком. Хрестик знімає один фільтр, <span class="ui">Скинути всі</span> знімає всі.</li>
+        </ol>
+        <figure class="shot">
+          <button class="zoom" type="button" data-full="img/02-filters.jpg" aria-label="Збільшити знімок фільтрів">
+            <img src="img/02-filters.jpg" width="1524" height="716" loading="lazy" alt="Види матеріалів угорі й відкрита панель фільтрів">
+          </button>
+          <figcaption>Види матеріалів з лічильниками і панель «Фільтри».</figcaption>
+        </figure>
+
+        <h3>Якщо не знаєте, як це називається</h3>
+        <ol class="steps">
+          <li>Натисніть <span class="ui red">Опишіть задачу</span>.</li>
+          <li>Напишіть своїми словами, що потрібно зробити: «потрібен протокол наради».</li>
+          <li>Помічник покаже матеріали й пояснить, чому кожен підходить. Він шукає лише серед матеріалів хабу й нічого не вигадує.</li>
+        </ol>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/03-assistant.jpg" aria-label="Збільшити знімок помічника">
+            <img src="img/03-assistant.jpg" width="930" height="636" loading="lazy" alt="Помічник пошуку знайшов промпт «Протокол наради за стенограмою»">
+          </button>
+        </figure>
+      </section>
+
+      <section id="use">
+        <h2>Скористатися матеріалом</h2>
+        <ol class="steps">
+          <li>Натисніть на картку. Відкриється повний опис.</li>
+          <li>Натисніть головну кнопку: <span class="ui red">Копіювати</span> для промпту, <span class="ui">Завантажити пакет</span> для навички, <span class="ui">Відкрити агента</span> для агента.</li>
+          <li>Інструкції й кейси читайте просто в картці.</li>
+          <li>Зображення й відео з картки показуються одразу. Клацніть мініатюру, щоб відкрити її на весь екран.</li>
+        </ol>
+        <p class="muted">Головну кнопку можна натиснути й просто на плитці в каталозі, не відкриваючи картку.</p>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/04-card.jpg" aria-label="Збільшити знімок картки промпту">
+            <img src="img/04-card.jpg" width="1050" height="1056" loading="lazy" alt="Картка промпту з кнопкою «Копіювати», власником і характеристиками">
+          </button>
+          <figcaption>Картка промпту: текст, кнопка «Копіювати», власник і характеристики.</figcaption>
+        </figure>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/05-media.jpg" aria-label="Збільшити знімок картки із зображеннями й відео">
+            <img src="img/05-media.jpg" width="1050" height="1056" loading="lazy" alt="Картка інструкції з мініатюрами зображень і відеоплеєром">
+          </button>
+          <figcaption>Зображення й відео з файлів картки видно одразу.</figcaption>
+        </figure>
+      </section>
+
+      <section id="fav">
+        <h2>Зберегти на потім</h2>
+        <ol class="steps">
+          <li>Натисніть <b>зірочку</b> на плитці або в картці.</li>
+          <li>Збережене з’явиться в бічній панелі в <b>«Обраному»</b>.</li>
+          <li>Нещодавно відкриті матеріали чекають у пункті <b>«Нещодавні»</b>.</li>
+        </ol>
+      </section>
+
+      <section id="rate">
+        <h2>Оцінити й прокоментувати</h2>
+        <p>Унизу кожної картки є блок <b>«Обговорення»</b>.</p>
+        <ol class="steps">
+          <li>Поставте оцінку від 1 до 5 зірок. Її можна змінити будь-коли.</li>
+          <li>Напишіть коментар: досвід використання, питання авторові, що покращити.</li>
+          <li>Натисніть <span class="ui red">Надіслати</span>. Коментар побачать усі, а автор отримає сповіщення.</li>
+        </ol>
+        <figure class="shot">
+          <button class="zoom" type="button" data-full="img/04b-discussion.jpg" aria-label="Збільшити знімок обговорення">
+            <img src="img/04b-discussion.jpg" width="975" height="237" loading="lazy" alt="Блок «Обговорення» із зірками оцінки, коментарем колеги й полем для нового коментаря">
+          </button>
+        </figure>
+      </section>
+
+      <!-- ============ Поділитися своїм ============ -->
+      <p class="chapter">Поділитися своїм</p>
+      <section id="publish">
+        <h2>Опублікувати свій матеріал</h2>
+        <p>Промпт, інструкцію, кейс, агента, MCP-сервер чи посилання додають за три кроки.</p>
+        <ol class="steps">
+          <li>Натисніть <span class="ui">+ Додати матеріал</span>: на сторінці «Для вас», у «Матеріалах» або в «Наповненні каталогу».</li>
+          <li><b>Вид.</b> Оберіть, що додаєте.</li>
+          <li><b>Зміст.</b> Вставте текст або перетягніть файл <code>.docx</code>, <code>.pdf</code>, <code>.md</code>, <code>.txt</code>: текст з нього з’явиться в полі, його можна правити. Нижче додайте файли до картки: презентацію, таблицю, скриншоти, відео.</li>
+          <li><b>Опис.</b> Дайте назву, яка описує задачу («Аналіз тендерної документації»), і короткий опис. Розділ, категорія й теги допоможуть колегам знайти матеріал.</li>
+          <li>Натисніть <span class="ui red">Опублікувати</span>. Якщо матеріал ще не готовий, оберіть <span class="ui">Зберегти чернеткою</span>: чернетку бачите лише ви й менеджери.</li>
+        </ol>
+        <div class="note">
+          <p><b>Опублікований матеріал одразу бачать усі, а власником стаєте ви.</b> Менеджер каталогу отримує сповіщення й за потреби поправить матеріал.</p>
+        </div>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/06-wizard-kind.jpg" aria-label="Збільшити знімок кроку «Вид»">
+            <img src="img/06-wizard-kind.jpg" width="1140" height="765" loading="lazy" alt="Майстер «Додати матеріал», крок 1: вибір виду">
+          </button>
+          <figcaption>Крок 1. Вид матеріалу.</figcaption>
+        </figure>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/07-wizard-content.jpg" aria-label="Збільшити знімок кроку «Зміст»">
+            <img src="img/07-wizard-content.jpg" width="1140" height="1020" loading="lazy" alt="Майстер, крок 2: текст промпту, зона для файлу й кнопка «Додати файл»">
+          </button>
+          <figcaption>Крок 2. Текст або файл, вкладення до картки.</figcaption>
+        </figure>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/08-wizard-describe.jpg" aria-label="Збільшити знімок кроку «Опис»">
+            <img src="img/08-wizard-describe.jpg" width="1140" height="996" loading="lazy" alt="Майстер, крок 3: назва, опис, розділ, теги й кнопка «Опублікувати»">
+          </button>
+          <figcaption>Крок 3. Назва, опис і публікація.</figcaption>
+        </figure>
+      </section>
+
+      <section id="skill">
+        <h2>Опублікувати навичку</h2>
+        <p>Навичка — це пакет <code>.zip</code> або <code>.skill</code> з файлом <code>SKILL.md</code> усередині.</p>
+        <ol class="steps">
+          <li>Натисніть <span class="ui">+ Додати матеріал</span> і оберіть <b>«Навичка»</b>.</li>
+          <li>Перетягніть пакет у віконце або натисніть «оберіть».</li>
+          <li>Натисніть <span class="ui red">Опублікувати навичку</span>.</li>
+        </ol>
+        <p class="muted">Назва, опис, версія й автор беруться з <code>SKILL.md</code>. Іконку та інструкцію можна змінити згодом: відкрийте картку навички й натисніть «Редагувати».</p>
+      </section>
+
+      <section id="mine">
+        <h2>Керувати своїми матеріалами</h2>
+        <p>У бічній панелі відкрийте <b>«Наповнення каталогу»</b>. Тут усе, що ви опублікували, і чернетки.</p>
+        <figure class="shot">
+          <button class="zoom" type="button" data-full="img/09-contrib.jpg" aria-label="Збільшити знімок сторінки «Наповнення каталогу»">
+            <img src="img/09-contrib.jpg" width="1920" height="1200" loading="lazy" alt="Сторінка «Наповнення каталогу» з трьома власними матеріалами й кнопками дій">
+          </button>
+        </figure>
+        <div class="tbl"><table>
+          <tbody>
+            <tr><td><span class="ui">Відкрити</span></td><td>Показує картку так, як її бачать колеги</td></tr>
+            <tr><td><span class="ui">Редагувати</span></td><td>Змінює текст, назву, опис</td></tr>
+            <tr><td><span class="ui">Зняти з публікації</span></td><td>Ховає матеріал з каталогу, він стає чернеткою</td></tr>
+            <tr><td><span class="ui red">Опублікувати</span></td><td>Повертає чернетку в каталог</td></tr>
+            <tr><td><span class="ui">Видалити</span></td><td>Видаляє матеріал назавжди</td></tr>
+          </tbody>
+        </table></div>
+        <ul class="dots">
+          <li><b>Додати файл до опублікованого:</b> відкрийте картку й натисніть «Додати файл» у блоці файлів.</li>
+          <li><b>Якщо менеджер зняв матеріал з публікації,</b> ви отримаєте сповіщення з причиною. Причину видно й у картці. Виправте матеріал і опублікуйте знову.</li>
+          <li><b>Раз на пів року хаб нагадає перевірити актуальність.</b> Відкрийте меню профілю, далі «Мій контент», і натисніть «Актуальний» або оновіть матеріал.</li>
+        </ul>
+      </section>
+
+      <section id="idea">
+        <h2>Запропонувати ідею</h2>
+        <p>Не знайшли потрібного або знаєте, як покращити роботу з AI?</p>
+        <ol class="steps">
+          <li>Натисніть <span class="ui">Поділитися ідеєю</span>: на сторінці «Для вас», у «Матеріалах» або в будь-якій картці.</li>
+          <li>Опишіть суть, бізнес-задачу й очікуваний ефект.</li>
+          <li>Натисніть <span class="ui red">Надіслати</span>. Статус і рішення команди хабу видно в меню профілю, пункт «Мої ідеї».</li>
+        </ol>
+      </section>
+
+      <!-- ============ Бути в курсі ============ -->
+      <p class="chapter">Бути в курсі</p>
+      <section id="notify">
+        <h2>Сповіщення</h2>
+        <p>Червоне число на дзвіночку означає нові сповіщення.</p>
+        <ol class="steps">
+          <li>Натисніть дзвіночок.</li>
+          <li>Клацніть сповіщення: відкриється картка, якої воно стосується.</li>
+          <li><span class="ui">Прочитати всі</span> прибирає позначки нових.</li>
+        </ol>
+        <p class="muted">Сповіщення приходять, коли хтось прокоментував ваш матеріал, менеджер зняв його з публікації, позначив «Потребує оновлення» чи видалив, або настав час перевірити актуальність.</p>
+        <figure class="shot narrow">
+          <button class="zoom" type="button" data-full="img/10-notifications.jpg" aria-label="Збільшити знімок сповіщень">
+            <img src="img/10-notifications.jpg" width="558" height="314" loading="lazy" alt="Сповіщення про новий коментар до матеріалу">
+          </button>
+        </figure>
+      </section>
+
+      <section id="learn">
+        <h2>Навчання</h2>
+        <h3>Навчальні маршрути</h3>
+        <p>Добірки матеріалів від простого до складного.</p>
+        <ol class="steps">
+          <li>У бічній панелі натисніть <b>«Мої маршрути»</b>.</li>
+          <li>Відкрийте маршрут і натисніть <span class="ui red">Продовжити</span>.</li>
+          <li>Пройдений крок позначайте кнопкою з його номером. Прогрес видно на сторінці «Для вас».</li>
+        </ol>
+        <h3>Рівень роботи з AI</h3>
+        <p>На сторінці «Для вас» натисніть <span class="ui">Вказати рівень</span>. Хаб почне рекомендувати матеріали саме для вас.</p>
+      </section>
+
+      <section id="profile">
+        <h2>Профіль і тема</h2>
+        <div class="split">
+          <ul class="dots">
+            <li>Натисніть <b>аватар</b> у правому верхньому куті.</li>
+            <li><b>Обране</b>, <b>Мої ідеї</b>, <b>Мій контент</b>: особисті списки.</li>
+            <li><b>Знайомство з інтерфейсом</b>: ще раз пройти підказки по екрану.</li>
+            <li><b>Тема</b>: світла або темна.</li>
+            <li><b>Вийти</b>: завершити роботу.</li>
+          </ul>
+          <figure class="shot phone">
+            <button class="zoom" type="button" data-full="img/11-profile.jpg" aria-label="Збільшити знімок меню профілю">
+              <img src="img/11-profile.jpg" width="423" height="453" loading="lazy" alt="Меню профілю: Обране, Мої ідеї, Мій контент, Тема, Вийти">
+            </button>
+          </figure>
+        </div>
+      </section>
+
+      <section id="phone">
+        <h2>На телефоні</h2>
+        <div class="split">
+          <ul class="dots">
+            <li>Унизу є вкладки: <b>«База знань»</b>, <b>«Матеріали»</b>, <b>«Обране»</b>.</li>
+            <li>Бічна панель з розділами відкривається кнопкою ліворуч від логотипа.</li>
+            <li>Усі дії ті самі, що й на комп’ютері.</li>
+          </ul>
+          <figure class="shot phone">
+            <button class="zoom" type="button" data-full="img/12-phone.jpg" aria-label="Збільшити знімок хабу на телефоні">
+              <img src="img/12-phone.jpg" width="780" height="1688" loading="lazy" alt="Сторінка «Матеріали» на телефоні з вкладками внизу">
+            </button>
+          </figure>
+        </div>
+      </section>
+
+      <!-- ============ Інше ============ -->
+      <div class="staff" id="manager">
+        <h2>Для менеджера каталогу</h2>
+        <p>Угорі є перемикач <b>«База знань» / «Керування»</b>. Число на «Керуванні» показує, скільки публікацій користувачів чекає перегляду.</p>
+        <ol class="steps">
+          <li>Відкрийте <b>«Керування»</b>, розділ <b>«Наповнення каталогу»</b>.</li>
+          <li>У блоці «Потребують перегляду» нові й змінені матеріали користувачів. Вони вже в каталозі.</li>
+          <li>Натисніть <span class="ui">Відкрити</span>, щоб переглянути картку. Відкрита картка зникає з черги. Якщо дій не потрібно, натисніть <span class="ui">Переглянуто</span>.</li>
+          <li>За потреби редагуйте, змініть стан у списку (наприклад, на «Чернетка» чи «Архів») або видаліть. Вкажіть причину: автор отримає її в сповіщенні.</li>
+        </ol>
+        <p>Нижче на тій самій сторінці: усі матеріали й навички з фільтрами, коментарі й оцінки, категорії навичок.</p>
+        <figure class="shot">
+          <button class="zoom" type="button" data-full="img/13-manager.jpg" aria-label="Збільшити знімок консолі менеджера">
+            <img src="img/13-manager.jpg" width="1920" height="1200" loading="lazy" alt="«Керування», «Наповнення каталогу»: черга «Потребують перегляду» і список усіх матеріалів">
+          </button>
+        </figure>
+        <p class="muted">Інші розділи «Керування»: «Структура каталогу» (розділи, колекції, довідники), «Ідеї», «Маршрути», «KPI хабу», «Використання». Адміністратор також бачить «Користувачі»: облікові записи й ролі.</p>
+      </div>
+
+      <section id="faq">
+        <h2>Часті запитання</h2>
+        <dl class="faq">
+          <dt>Мій матеріал не видно в каталозі.</dt>
+          <dd>Імовірно, це чернетка. Відкрийте «Наповнення каталогу» і натисніть «Опублікувати». Якщо матеріал зняв менеджер, причина вказана в сповіщенні й у картці.</dd>
+          <dt>Хто бачить мою чернетку?</dt>
+          <dd>Лише ви й менеджери каталогу.</dd>
+          <dt>Що означає позначка «Потребує оновлення»?</dt>
+          <dd>Матеріал міг застаріти. Перш ніж використовувати, звірте його з чинними правилами або зверніться до власника, вказаного в картці.</dd>
+          <dt>Які файли можна додати?</dt>
+          <dd>Будь-які. Текст із .docx, .pdf, .md, .txt хаб витягне в поле картки, решта файлів прикріплюються до неї. Зображення й відео показуються в картці одразу.</dd>
+          <dt>Пошук нічого не знайшов.</dt>
+          <dd>Спробуйте «Опишіть задачу» або інші слова. Якщо матеріалу справді немає, натисніть «Поділитися ідеєю» чи опублікуйте власне рішення.</dd>
+          <dt>Чи можна вставляти в промпт конфіденційні дані?</dt>
+          <dd>Дотримуйтесь правил компанії щодо роботи з даними в AI. Інструкція «Робота з конфіденційними даними в ШІ» є в каталозі.</dd>
+        </dl>
+      </section>
+
+      <footer>AI Knowledge Hub · інструкція для нових користувачів · жовтень 2026</footer>
+    </main>
+  </div>
+</div>
+
+<div class="lb" id="lb" hidden>
+  <button type="button" id="lb-x" aria-label="Закрити">×</button>
+  <img id="lb-img" alt="">
+</div>
+
+<script>
+(function () {
+  var lb = document.getElementById("lb"), img = document.getElementById("lb-img");
+  var last = null;
+  function open(btn) {
+    last = btn;
+    img.src = btn.getAttribute("data-full");
+    var inner = btn.querySelector("img");
+    img.alt = inner ? inner.alt : "";
+    lb.hidden = false;
+    document.getElementById("lb-x").focus();
+  }
+  function close() {
+    lb.hidden = true;
+    img.removeAttribute("src");
+    if (last) last.focus();
+  }
+  document.querySelectorAll(".zoom").forEach(function (b) {
+    b.addEventListener("click", function () { open(b); });
+  });
+  lb.addEventListener("click", close);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !lb.hidden) close();
+  });
+})();
+</script>
+</body>
+</html>
