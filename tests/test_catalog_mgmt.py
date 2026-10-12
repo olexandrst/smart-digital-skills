@@ -1,9 +1,7 @@
 """Тести менеджменту каталогу навичок: атрибути, публікація, версії, видалення."""
 import io
 import zipfile
-from app.models import Skill, UserSkill, GroupSkill, Group, GroupMembership, User
-from app.extensions import db
-from app.services import skill_service
+from app.models import Skill
 from tests.conftest import login, auth
 
 MD_FULL = """---
@@ -12,11 +10,6 @@ description: Перекладає текст.
 author: Іван Тестовий
 category: Мова
 version: 1.2.0
-runtime: python
-entrypoint: main.py
-inputs:
-  - name: text
-    required: true
 ---
 # Перекладач
 """
@@ -124,70 +117,35 @@ def test_manual_create_endpoint_removed(client):
 
 # ---------- Нова версія в контексті навички ----------
 
-def test_upload_new_version_keeps_identity_and_links(client):
+def test_upload_new_version_keeps_identity_and_state(client):
     sm = login(client, "sm", "pass")
     sid = upload(client, sm, make_zip({"SKILL.md": MD_FULL, "main.py": MAIN_PY})).get_json()["id"]
     client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
-
-    # u1 активує навичку — зв'язок має пережити оновлення версії.
     u1 = login(client, "u1", "pass")
-    client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
+    client.get(f"/api/skills/{sid}/download", headers=auth(u1))
 
-    res = upload(client, sm, make_zip({"SKILL.md": MD_V2, "main.py": MAIN_PY}), skill_id=sid)
+    v2 = make_zip({"SKILL.md": MD_V2, "main.py": MAIN_PY})
+    res = upload(client, sm, v2, skill_id=sid)
     assert res.status_code == 200
     d = res.get_json()
     assert d["id"] == sid                      # та сама навичка
     assert d["version"] == "2.0.0"             # нова версія
     assert "(v2)" in d["description"]
-    assert d["activations_count"] == 1         # активації збережено
+    assert d["status"] == "published"          # публікація не скидається
+    assert d["downloads_count"] == 1           # історія завантажень збережена
+    # Завантажується вже новий архів.
+    assert client.get(f"/api/skills/{sid}/download", headers=auth(u1)).data == v2
 
-    uid = User.query.filter_by(username="u1").first().id
-    assert UserSkill.query.filter_by(user_id=uid, skill_id=sid, is_active=True).first()
 
-
-# ---------- Скачування пакета ----------
-
-def test_download_package(client):
+def test_only_managers_upload_or_edit(client):
     sm = login(client, "sm", "pass")
-    zip_bytes = make_zip({"SKILL.md": MD_FULL, "main.py": MAIN_PY})
-    sid = upload(client, sm, zip_bytes).get_json()["id"]
-    res = client.get(f"/api/skills/{sid}/download", headers=auth(sm))
-    assert res.status_code == 200
-    assert res.data == zip_bytes  # віддається той самий архів
-
-    # Звичайному користувачу скачування менеджменту недоступне.
+    sid = upload(client, sm, make_zip({"SKILL.md": MD_FULL})).get_json()["id"]
     u1 = login(client, "u1", "pass")
-    assert client.get(f"/api/skills/{sid}/download", headers=auth(u1)).status_code == 403
-
-
-# ---------- Видалення чистить усі зв'язки ----------
-
-def test_delete_removes_all_links(client, app):
-    sm = login(client, "sm", "pass")
-    admin = login(client, "admin", "Admin123!")
-    sid = upload(client, sm, make_zip({"SKILL.md": MD_FULL, "main.py": MAIN_PY})).get_json()["id"]
-    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
-
-    # Створюємо групу, призначаємо навичку групі; u2 активує самостійно.
-    admin_user = User.query.filter_by(username="admin").first()
-    u1 = User.query.filter_by(username="u1").first()
-    group = Group(name="DelG", created_by=admin_user.id)
-    db.session.add(group)
-    db.session.flush()
-    db.session.add(GroupMembership(group_id=group.id, user_id=u1.id,
-                                   role="manager", status="active"))
-    db.session.commit()
-    skill_service.assign_to_group(group.id, sid, admin_user.id)
-    u2 = login(client, "u2", "pass")
-    client.post(f"/api/skills/{sid}/activate", headers=auth(u2))
-
-    assert UserSkill.query.filter_by(skill_id=sid).count() >= 2
-    assert GroupSkill.query.filter_by(skill_id=sid).count() == 1
-
-    res = client.delete(f"/api/skills/{sid}", headers=auth(admin))
-    assert res.status_code == 200
-
-    # Усі зв'язки видалено — повторне встановлення вимагатиме нової активації.
-    assert Skill.query.get(sid) is None
-    assert UserSkill.query.filter_by(skill_id=sid).count() == 0
-    assert GroupSkill.query.filter_by(skill_id=sid).count() == 0
+    assert upload(client, u1, make_zip({"SKILL.md": MD_FULL})).status_code == 403
+    assert upload(client, u1, make_zip({"SKILL.md": MD_V2}), skill_id=sid).status_code == 403
+    assert client.patch(f"/api/skills/{sid}", headers=auth(u1),
+                        json={"name": "X"}).status_code == 403
+    assert client.post(f"/api/skills/{sid}/status", headers=auth(u1),
+                       json={"status": "published"}).status_code == 403
+    assert client.delete(f"/api/skills/{sid}", headers=auth(u1)).status_code == 403
+    assert Skill.query.get(sid).name == "Перекладач"

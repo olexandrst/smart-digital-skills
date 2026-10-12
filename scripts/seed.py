@@ -1,19 +1,15 @@
 """Ідемпотентне наповнення початковими даними (п.8 архітектури).
 
 Запуск: python -m scripts.seed
-Створює: ролі, супер-адміна, демо-моделі, демо-скіл, демо-групу та демо-користувачів.
+Створює: ролі, супер-адміна, демо-користувачів, демо-навички, розділи,
+колекції, довідники, демо-матеріали каталогу та навчальні маршрути.
 """
 import os
-import json
 from datetime import datetime
 from app import create_app
 from app.extensions import db
 from app.core.security import hash_password
-from app.models import (
-    Role, User, UserRole, Group, GroupMembership,
-    Model, Skill, SkillInput,
-)
-from app.services import skill_service
+from app.models import Role, User, UserRole, Skill
 
 
 def _get_or_create(model, defaults=None, **kwargs):
@@ -41,7 +37,7 @@ def seed():
         sm_role, _ = _get_or_create(
             Role, code="skill_manager",
             defaults={"name": "Skill-менеджер",
-                      "description": "Управління скілами"})
+                      "description": "Керування каталогом і навичками"})
 
         # 2. Супер-адмін
         admin_username = os.getenv("ADMIN_USERNAME", "admin")
@@ -70,34 +66,29 @@ def seed():
         if sm_created:
             db.session.add(UserRole(user_id=sm_user.id, role_id=sm_role.id))
 
-        # 4. Демо-користувачі (мембери)
-        member1, _ = _get_or_create(
+        # 4. Демо-користувачі
+        _get_or_create(
             User, username="user1",
             defaults={"full_name": "Олена Мембер",
                       "email": "user1@profihub.local",
                       "password_hash": hash_password("User123!"),
                       "is_active": True})
-        member2, _ = _get_or_create(
+        _get_or_create(
             User, username="user2",
             defaults={"full_name": "Іван Мембер",
                       "email": "user2@profihub.local",
                       "password_hash": hash_password("User123!"),
                       "is_active": True})
 
-        # 5. Реєстр моделей — ПОРОЖНІЙ на першому запуску.
-        # Користувач додає власні моделі (Azure OpenAI або локальні
-        # Ollama/LM Studio) у вкладці «Моделі».
-
-        # 6. Демо-скіл Summarizer (published). Модель НЕ прив'язуємо — її обере
-        # користувач після додавання власної.
-        skill, skill_created = _get_or_create(
+        # 5. Демо-навичка без пакета — лише інструкції, які копіюють у свій
+        # інструмент. Показує, як виглядає навичка-«рецепт» у каталозі.
+        _get_or_create(
             Skill, name="Summarizer",
             defaults={
                 "description": "Стисло підсумовує наданий текст.",
                 "author": "Metinvest Digital",
                 "category": "Текст",
                 "prompt_template": "Зроби стислий підсумок тексту мовою {language}:\n\n{text}",
-                "parameters": json.dumps({"temperature": 0.3}),
                 "input_spec": "Будь-який текст (стаття, лист, нотатки) та, опційно, "
                               "мова відповіді.",
                 "output_spec": "Стислий підсумок наданого тексту в кілька речень.",
@@ -107,49 +98,23 @@ def seed():
                 "version": "1.0.0",
                 "created_by": admin.id,
             })
-        if skill_created:
-            db.session.add(SkillInput(
-                skill_id=skill.id, name="text", label="Текст",
-                data_type="string", is_required=True,
-                description="Текст для опрацювання", position=0))
-            db.session.add(SkillInput(
-                skill_id=skill.id, name="language", label="Мова відповіді",
-                data_type="string", is_required=False,
-                default_value="українською", position=1))
-
-        # 7. Демо-група з адміном-менеджером (правило безперервності управління)
-        group, group_created = _get_or_create(
-            Group, name="Default Department",
-            defaults={"description": "Демонстраційний відділ",
-                      "created_by": admin.id})
-        if group_created:
-            db.session.add(GroupMembership(
-                group_id=group.id, user_id=admin.id,
-                role="member", status="active"))
-            db.session.add(GroupMembership(
-                group_id=group.id, user_id=member1.id,
-                role="member", status="active"))
         db.session.commit()
 
-        # 8. Призначення демо-скіла групі + самостійна активація для member2
-        skill_service.assign_to_group(group.id, skill.id, admin.id)
-        skill_service.self_activate(member2.id, skill.id)
-
-        # 9. Демо-скіл-ПАКЕТ (виконання Python-коду з архіву)
+        # 6. Демо-навичка-пакет (архів зі skill.md, який завантажують із каталогу)
         _seed_package_skill(admin)
 
-        # 10. Розділи каталогу (дзеркало меню корпоративного AI Knowledge Hub)
+        # 7. Розділи каталогу (дзеркало меню корпоративного AI Knowledge Hub)
         sections = _seed_catalog_sections()
 
-        # 11. Колекції та довідники метаданих
+        # 8. Колекції та довідники метаданих
         folders = _seed_catalog_folders(sections)
         from app.core.schema import seed_catalog_terms
         seed_catalog_terms()
 
-        # 12. Наповнення каталогу: промпти, інструкції, кейси, агенти, посилання
+        # 9. Наповнення каталогу: промпти, інструкції, кейси, агенти, посилання
         _seed_catalog_resources(admin, sections, folders)
 
-        # 13. Навчальні маршрути поверх наявних карток
+        # 10. Навчальні маршрути поверх наявних карток
         _seed_learning_paths()
 
         print("✓ Seed завершено.")
@@ -173,10 +138,8 @@ def _zip_dir_to_bytes(src_dir):
 
 
 def _seed_package_skill(admin):
-    """Збирає приклад examples/skills/word-counter у архів та реєструє як скіл-пакет."""
-    from datetime import datetime
+    """Збирає приклад examples/skills/word-counter в архів і реєструє як навичку-пакет."""
     from app.services import package_service
-    from app.models import SkillInput
 
     if Skill.query.filter_by(name="Word Counter").first():
         return
@@ -184,7 +147,7 @@ def _seed_package_skill(admin):
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     example_dir = os.path.join(base_dir, "examples", "skills", "word-counter")
     if not os.path.isdir(example_dir):
-        print("  (приклад word-counter не знайдено — пропускаю скіл-пакет)")
+        print("  (приклад word-counter не знайдено — пропускаю навичку-пакет)")
         return
 
     file_bytes = _zip_dir_to_bytes(example_dir)
@@ -194,21 +157,14 @@ def _seed_package_skill(admin):
         name=meta["name"], description=meta["description"],
         author=meta.get("author") or "Metinvest Digital",
         category=meta.get("category") or "Загальне",
-        skill_kind="package", runtime=meta["runtime"], entrypoint=meta["entrypoint"],
-        version=meta["version"], prompt_template=meta.get("instructions"),
+        skill_kind="package", version=meta["version"],
+        prompt_template=meta.get("instructions"),
         status="published", published_at=datetime.utcnow(),
         package_filename="word-counter.zip", created_by=admin.id,
     )
     db.session.add(skill)
     db.session.flush()
-    skill.package_path = package_service.store_package(skill.id, file_bytes, "word-counter.zip")
-    for spec in meta["inputs"]:
-        db.session.add(SkillInput(
-            skill_id=skill.id, name=spec["name"], label=spec.get("label"),
-            data_type=spec.get("data_type", "string"),
-            is_required=spec.get("is_required", True),
-            default_value=spec.get("default_value"),
-            description=spec.get("description"), position=spec.get("position", 0)))
+    skill.package_path = package_service.store_package(skill.id, file_bytes)
     db.session.commit()
 
 

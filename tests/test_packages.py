@@ -1,4 +1,9 @@
-"""Тести скілів-пакетів: розбір, завантаження, реальне виконання коду, безпека."""
+"""Пакети навичок: розбір skill.md, безпека архіву, перелік файлів.
+
+Пакет хостимо, а не виконуємо: важливо, щоб його атрибути читалися з
+skill.md, небезпечний архів не потрапляв у каталог, а користувач бачив, що
+саме завантажує.
+"""
 import io
 import zipfile
 import pytest
@@ -8,27 +13,21 @@ from tests.conftest import login, auth
 
 SKILL_MD = """---
 name: Echo Upper
-description: Повертає текст у верхньому регістрі (виконується як код).
-version: 1.0.0
+description: Повертає текст у верхньому регістрі.
+author: R&D
+category: Текст
+version: 1.4.0
 runtime: python
 entrypoint: main.py
 inputs:
   - name: text
-    label: Текст
     required: true
 ---
 # Echo Upper
-Демо-пакет.
+Запустіть `python main.py` і передайте текст.
 """
 
-MAIN_PY = (
-    "import sys, json\n"
-    "data = json.load(sys.stdin)\n"
-    "text = data.get('inputs', {}).get('text', '')\n"
-    "print(json.dumps({'output': text.upper(), "
-    "'usage': {'prompt_tokens': len(text), 'completion_tokens': len(text)}}, "
-    "ensure_ascii=False))\n"
-)
+MAIN_PY = "import sys, json\nprint(json.dumps({'output': sys.stdin.read().upper()}))\n"
 
 
 def make_zip(files):
@@ -48,12 +47,27 @@ def upload(client, token, zip_bytes, filename="skill.zip"):
 
 # ---------- Розбір ----------
 
-def test_parse_package_reads_frontmatter(app):
+def test_parse_package_reads_frontmatter_and_instructions(app):
     meta = package_service.parse_package(make_zip({"skill.md": SKILL_MD, "main.py": MAIN_PY}))
+    assert meta == {
+        "name": "Echo Upper",
+        "description": "Повертає текст у верхньому регістрі.",
+        "author": "R&D",
+        "category": "Текст",
+        "version": "1.4.0",
+        "instructions": "# Echo Upper\nЗапустіть `python main.py` і передайте текст.",
+    }
+
+
+def test_package_without_code_is_fine(app):
+    """Пакету-«рецепту» з самим skill.md достатньо: entrypoint ніхто не шукає."""
+    meta = package_service.parse_package(make_zip({"SKILL.md": SKILL_MD}))
     assert meta["name"] == "Echo Upper"
-    assert meta["entrypoint"] == "main.py"
-    assert meta["runtime"] == "python"
-    assert [i["name"] for i in meta["inputs"]] == ["text"]
+
+
+def test_description_defaults_to_name(app):
+    md = "---\nname: Лише назва\n---\nТіло"
+    assert package_service.parse_package(make_zip({"SKILL.md": md}))["description"] == "Лише назва"
 
 
 def test_parse_package_missing_skill_md(app):
@@ -61,18 +75,33 @@ def test_parse_package_missing_skill_md(app):
         package_service.parse_package(make_zip({"main.py": MAIN_PY}))
 
 
-def test_parse_package_missing_entrypoint(app):
+def test_parse_package_requires_name(app):
     with pytest.raises(ApiError):
-        package_service.parse_package(make_zip({"skill.md": SKILL_MD}))
+        package_service.parse_package(make_zip({"SKILL.md": "---\ndescription: x\n---\n"}))
+
+
+def test_not_a_zip_rejected(app):
+    with pytest.raises(ApiError):
+        package_service.parse_package(b"definitely not a zip")
 
 
 def test_zip_slip_rejected(app):
-    bad = make_zip({"skill.md": SKILL_MD, "../evil.py": "x=1", "main.py": MAIN_PY})
+    bad = make_zip({"skill.md": SKILL_MD, "../evil.py": "x=1"})
     with pytest.raises(ApiError):
         package_service.parse_package(bad)
 
 
-# ---------- Завантаження та виконання через API ----------
+def test_zip_bomb_rejected(app):
+    app.config["SKILL_PACKAGE_MAX_UNZIPPED"] = 1024
+    try:
+        big = make_zip({"skill.md": SKILL_MD, "data.txt": "x" * 4096})
+        with pytest.raises(ApiError):
+            package_service.parse_package(big)
+    finally:
+        app.config["SKILL_PACKAGE_MAX_UNZIPPED"] = 50 * 1024 * 1024
+
+
+# ---------- Через API ----------
 
 def test_upload_requires_role(client):
     token = login(client, "u1", "pass")  # звичайний користувач
@@ -80,24 +109,22 @@ def test_upload_requires_role(client):
     assert res.status_code == 403
 
 
-def test_upload_and_execute_package(client):
+def test_upload_rejects_wrong_extension(client):
     sm = login(client, "sm", "pass")
-    res = upload(client, sm, make_zip({"skill.md": SKILL_MD, "main.py": MAIN_PY}))
-    assert res.status_code == 201
-    skill = res.get_json()
-    assert skill["skill_kind"] == "package"
-    sid = skill["id"]
+    res = upload(client, sm, make_zip({"skill.md": SKILL_MD}), filename="skill.rar")
+    assert res.status_code == 400
 
-    # Публікуємо та активуємо для u1, потім запускаємо (реальне виконання коду).
-    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
-    u1 = login(client, "u1", "pass")
-    client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
-    res = client.post(f"/api/skills/{sid}/run", headers=auth(u1),
-                      json={"inputs": {"text": "hello світ"}})
-    assert res.status_code == 200
+
+def test_upload_package_in_top_level_folder(client):
+    """Архів з однією верхньою текою (pkg/skill.md, pkg/main.py) приймається."""
+    sm = login(client, "sm", "pass")
+    res = upload(client, sm, make_zip({"pkg/skill.md": SKILL_MD, "pkg/main.py": MAIN_PY}),
+                 filename="pkg.skill")
+    assert res.status_code == 201
     data = res.get_json()
-    assert data["content"] == "HELLO СВІТ"
-    assert data["usage"]["total_tokens"] > 0
+    assert data["skill_kind"] == "package"
+    assert data["package_filename"] == "pkg.skill"
+    assert data["instructions"].startswith("# Echo Upper")
 
 
 def test_list_package_files(client):
@@ -106,88 +133,4 @@ def test_list_package_files(client):
                                        "lib/helper.py": "x=1"})).get_json()["id"]
     res = client.get(f"/api/skills/{sid}/files", headers=auth(sm))
     assert res.status_code == 200
-    names = {f["name"] for f in res.get_json()}
-    assert "main.py" in names and "lib/helper.py" in names
-
-
-def test_exec_disabled(client, app):
-    sm = login(client, "sm", "pass")
-    sid = upload(client, sm, make_zip({"skill.md": SKILL_MD, "main.py": MAIN_PY})).get_json()["id"]
-    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
-    u1 = login(client, "u1", "pass")
-    client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
-
-    app.config["SKILL_EXEC_ENABLED"] = False
-    try:
-        res = client.post(f"/api/skills/{sid}/run", headers=auth(u1),
-                          json={"inputs": {"text": "hi"}})
-        assert res.status_code == 403
-    finally:
-        app.config["SKILL_EXEC_ENABLED"] = True
-
-
-def test_package_skill_in_chat(client):
-    sm = login(client, "sm", "pass")
-    sid = upload(client, sm, make_zip({"skill.md": SKILL_MD, "main.py": MAIN_PY})).get_json()["id"]
-    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
-
-    u1 = login(client, "u1", "pass")
-    client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
-    from app.models import Model
-    mid = Model.query.filter_by(name="gpt-4o").first().id
-    chat = client.post("/api/chat/sessions", headers=auth(u1), json={"model_id": mid}).get_json()
-    res = client.post(f"/api/chat/sessions/{chat['id']}/messages", headers=auth(u1),
-                      json={"content": "привіт", "skill_id": sid})
-    assert res.status_code == 200
-    # У чаті застосовано код-пакет → відповідь = вивід коду (верхній регістр).
-    assert res.get_json()["content"] == "ПРИВІТ"
-
-
-# ---------- Гнучке визначення entrypoint ----------
-
-SKILL_MD_NO_EP = """---
-name: No Entry
-description: Без явного entrypoint.
-version: 1.0.0
-runtime: python
-inputs:
-  - name: text
-    required: true
----
-# No Entry
-"""
-
-
-def test_entrypoint_in_top_level_folder(client):
-    """Архів з однією верхньою текою (pkg/skill.md, pkg/main.py) має працювати."""
-    sm = login(client, "sm", "pass")
-    z = make_zip({"pkg/skill.md": SKILL_MD, "pkg/main.py": MAIN_PY})
-    res = upload(client, sm, z, filename="pkg.skill")
-    assert res.status_code == 201
-    sid = res.get_json()["id"]
-    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
-    u1 = login(client, "u1", "pass")
-    client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
-    res = client.post(f"/api/skills/{sid}/run", headers=auth(u1),
-                      json={"inputs": {"text": "hi"}})
-    assert res.status_code == 200
-    assert res.get_json()["content"] == "HI"
-
-
-def test_no_entrypoint_is_agent_skill(client):
-    """Стандартний формат: без entrypoint скіл стає агентним (entrypoint=None)."""
-    sm = login(client, "sm", "pass")
-    z = make_zip({"SKILL.md": SKILL_MD_NO_EP, "estimate.py": MAIN_PY})
-    res = upload(client, sm, z)
-    assert res.status_code == 201
-    data = res.get_json()
-    assert data["skill_kind"] == "package"
-    assert data["entrypoint"] is None  # агентний скіл
-
-
-def test_multiple_py_no_entrypoint_ok(app):
-    """Кілька .py без entrypoint — це коректний агентний скіл (без помилки)."""
-    meta = package_service.parse_package(make_zip({
-        "SKILL.md": SKILL_MD_NO_EP, "a.py": "x=1", "b.py": "y=2"}))
-    assert meta["entrypoint"] is None
-    assert meta["name"] == "No Entry"
+    assert {f["name"] for f in res.get_json()} == {"skill.md", "main.py", "lib/helper.py"}

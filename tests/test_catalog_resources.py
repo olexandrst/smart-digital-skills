@@ -1,6 +1,5 @@
 """Ресурси каталогу (промпти, інструкції, агенти, посилання) та «Обране»."""
-from app.extensions import db
-from app.models import CatalogResource, CatalogFavorite, Skill, User
+from app.models import CatalogResource, CatalogFavorite, Skill
 
 
 def _login(client, username, password="pass"):

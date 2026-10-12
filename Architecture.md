@@ -1,22 +1,36 @@
 # Архітектура рішення AI Knowledge Hub
 
-**Стек:** Python 3.11+, Flask (REST API), SQLAlchemy + SQLite
-**Документ:** архітектура рішення + структура БД (основа для задачі Claude Code)
+**Стек:** Python 3.11+, Flask (REST API), SQLAlchemy + SQLite, Alembic
+**Документ:** архітектура рішення, модель прав і структура бази даних
 
 ---
 
 ## 1. Принципи та ключові рішення
 
-1. **REST API-first.** Бекенд віддає чистий JSON API. Це дозволяє перевикористати той самий бекенд для веб-панелі (MVP) і для iOS-застосунку (наступний етап) без дублювання логіки.
-2. **Гібридна рольова модель (RBAC).** Розрізняємо два типи ролей:
-   - *Глобальні* (системні): `Admin`, `Skill Manager` — зберігаються у зв'язці `user_roles`.
-   - *Локальні* (в межах групи): `Group Manager`, `Group Member` — зберігаються як атрибут членства у `group_memberships.role`. Один користувач може мати різні ролі в різних групах.
-3. **Подвійне призначення скілів.** Скіл стає доступним користувачу двома шляхами: (а) призначення на рівні **групи** (Group Manager → усі члени групи) та (б) **самостійна активація** користувачем для себе з каталогу `published`-скілів. Ефективний доступ матеріалізується в таблиці `user_skills` (одна стрічка на користувача), що дає простий і точний підрахунок активацій.
-4. **Шарова архітектура** (API → Service → Repository/ORM) для чистого розділення відповідальностей і простоти тестування.
-5. **Інтеграція з Azure AI Foundry** ізольована в окремому модулі-адаптері. Уся робота з моделями (LLM/CV) проходить через нього → облік токенів централізований. Реєструвати/підключати моделі може **лише Admin**.
-6. **SQLite з можливістю міграції на PostgreSQL.** Працюємо через SQLAlchemy + Alembic, не використовуємо SQLite-специфічних конструкцій без потреби, вмикаємо WAL та `foreign_keys=ON`. Схема ведеться **версійними міграціями** (`alembic upgrade head`), а не доповненням при старті: на кількох процесах і на PostgreSQL правити схему під час запуску небезпечно. Довідкові дані (види матеріалів, статуси, рівні, словники) — окрема річ і синхронізуються при старті, бо це дані, а не схема.
-8. **Довідники замість констант.** Види матеріалів, статуси, рівні зрілості, рівні повторного використання й акценти оформлення — записи `catalog_terms`. Вид матеріалу несе свою поведінку даними (`requires_url`, `requires_body`, `has_scope`, підписи полів), тому новий вид додається з інтерфейсу й одразу працює в каталозі, фільтрах і редакторі без релізу.
-7. **Forward-compatible схема.** Поля під Entra ID та детальні ліміти токенів закладені одразу (NULL у MVP), щоб уникнути важких міграцій на Етапі 2.
+1. **Каталог, а не середовище виконання.** Хаб зберігає, впорядковує й віддає
+   AI-знання: навички, промпти, інструкції, кейси, агентів, MCP-сервери,
+   посилання. Вбудованого чату з моделями немає, навички на сервері не
+   запускаються. Немає й обліку токенів, квот, реєстру моделей і груп доступу:
+   усе, що бачить користувач, визначається статусом матеріалу та його роллю.
+2. **REST API-first.** Бекенд віддає чистий JSON API. Той самий API
+   обслуговує веб-панель і може обслуговувати інші клієнти.
+3. **Проста рольова модель.** Дві глобальні ролі — `admin` і `skill_manager`
+   (зв'язка `user_roles`); решта — звичайні користувачі. Ролі можуть
+   приходити з груп Entra ID.
+4. **Шарова архітектура** (API → Service → ORM) для розділення
+   відповідальностей і простоти тестування.
+5. **SQLite з можливістю міграції на PostgreSQL.** Працюємо через SQLAlchemy +
+   Alembic, без SQLite-специфічних конструкцій без потреби. Схема ведеться
+   **версійними міграціями** (`alembic upgrade head`), а не доповненням при
+   старті. Довідкові дані (види матеріалів, статуси, рівні, словники) — окрема
+   річ: вони синхронізуються при старті, бо це дані, а не схема.
+6. **Довідники замість констант.** Види матеріалів, статуси, рівні зрілості,
+   рівні повторного використання й акценти — записи `catalog_terms`. Вид
+   матеріалу несе свою поведінку даними (`requires_url`, `requires_body`,
+   `has_scope`, підписи полів), тому новий вид додається з інтерфейсу без
+   релізу.
+7. **Файли — поза базою.** Пакети навичок, іконки й вкладення лежать у теках
+   стану (`INSTANCE_DIR`), база тримає лише метадані та шляхи.
 
 ---
 
@@ -25,13 +39,13 @@
 | Шар | Технологія |
 | --- | --- |
 | Web framework | Flask + Blueprints |
-| ORM / міграції | Flask-SQLAlchemy + Flask-Migrate (Alembic) |
-| Авторизація | Flask-JWT-Extended (JWT access + refresh) |
-| Хешування паролів | Werkzeug / Argon2 (passlib) |
-| Валідація / серіалізація | Marshmallow (або Pydantic) |
-| Планувальник (Етап 2) | APScheduler (скидання лімітів) |
-| AI-інтеграція | openai SDK у режимі Azure / azure-ai-* |
-| База даних | SQLite (WAL), сумісно з PostgreSQL |
+| ORM / міграції | Flask-SQLAlchemy + Alembic |
+| Авторизація | Flask-JWT-Extended (JWT access + refresh), Entra ID (OIDC + PKCE) |
+| Хешування паролів | Werkzeug (PBKDF2) |
+| Планувальник | APScheduler (щоденні нагадування про перегляд матеріалів) |
+| Витяг тексту | stdlib для `.txt/.md/.docx`, pypdf для `.pdf` |
+| База даних | SQLite, сумісно з PostgreSQL |
+| Frontend | Vanilla JS SPA без збірки |
 
 ---
 
@@ -39,105 +53,109 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  КЛІЄНТИ:  Веб-панель (MVP)        iOS-застосунок (Етап 2)     │
+│  КЛІЄНТ:  веб-SPA (index.html · app.js · style.css)           │
 └───────────────────────────┬──────────────────────────────────┘
                             │ HTTPS / JSON (JWT)
 ┌───────────────────────────▼──────────────────────────────────┐
-│  API LAYER (Flask Blueprints)                                 │
-│  auth · users · groups · skills · models · chat · usage       │
-│  ── декоратори RBAC, валідація схем, обробка помилок           │
+│  API LAYER (Flask Blueprints, /api)                           │
+│  auth · users · skills · categories · catalog · ideas · paths │
+│  ── декоратори RBAC, обробка помилок                          │
 ├──────────────────────────────────────────────────────────────┤
-│  SERVICE LAYER (бізнес-логіка)                                │
-│  AuthService · UserService · GroupService · SkillService ·    │
-│  ChatService · TokenService · AuditService                    │
+│  SERVICE LAYER                                                │
+│  package · file · search · assistant · review · usage ·       │
+│  text_extract · entra                                         │
 ├──────────────────────────────────────────────────────────────┤
-│  DATA ACCESS LAYER (SQLAlchemy models / repositories)         │
-├──────────────────────────────────────────────────────────────┤
-│  INTEGRATION LAYER                                            │
-│  AzureFoundryClient (LLM/CV) · (Етап 2) EntraIDProvider       │
-└───────────────────────────┬──────────────────────────────────┘
-                            │
-                  ┌─────────▼─────────┐         ┌──────────────────┐
-                  │   SQLite (WAL)    │         │ Azure AI Foundry │
-                  └───────────────────┘         │  (LLM + CV)      │
-                                                └──────────────────┘
+│  DATA ACCESS LAYER (SQLAlchemy models)                        │
+└──────────────┬──────────────────────────────┬────────────────┘
+               │                              │
+     ┌─────────▼─────────┐        ┌───────────▼─────────────┐
+     │      SQLite       │        │  Теки стану:            │
+     └───────────────────┘        │  skill_packages ·       │
+                                  │  skill_icons ·          │
+                                  │  user_files             │
+                                  └─────────────────────────┘
+                 Зовнішнє: Microsoft Entra ID (корпоративний вхід)
 ```
 
 **Призначення сервісів:**
-- **AuthService** — логін/пароль, видача JWT, refresh, (Етап 2) OIDC через Entra ID.
-- **UserService** — CRUD користувачів, скидання паролів, призначення глобальних ролей (тільки Admin).
-- **GroupService** — створення груп, членство, інвайти, призначення скілів групі; enforced-правило «мінімум 1 менеджер»; синхронізація `user_skills` при змінах членства.
-- **SkillService** — життєвий цикл скілів, параметри вхідних даних, самостійна активація користувачем, перерахунок лічильника активацій; реєстр моделей (підключення — лише Admin).
-- **PackageService** — скіли-пакети: розбір архіву та `skill.md`, безпечне розпакування, збереження та **ізольоване виконання Python-коду** (підпроцес, таймаут, ліміти ресурсів), захоплення створених файлів.
-- **FileService** — постійне сховище файлів користувача: підкаталог з GUID-назвою (`storage_uid`), збереження файлів від скілів та завантажених користувачем, перелік, звантаження, видалення.
-- **QuotaService** — тижневі квоти токенів: системна (`global`) та персональна (`user`, пріоритетна), лічильник використання (`token_counters`), енфорсмент (429) і скидання щопонеділка о 00:05 UTC (планувальник + «ліниве» за тижневим вікном).
-- **ChatService** — оркестрація чату з **обраною користувачем моделлю**: створення сесій, багатоходовий діалог з історією, **опційне застосування скілів** до повідомлень, виклик відповідного провайдера через фабрику клієнтів та облік токенів (вхідні/вихідні/загальні). Доступні лише `is_active`-моделі.
-- **TokenService** — логування використання токенів, агрегація, (Етап 2) перевірка лімітів.
-- **AuditService** — журнал значимих дій (адмін-операції, зміни доступів).
+- **package_service** — пакети навичок: розбір архіву та `skill.md`
+  (фронтматер + інструкція), перевірка безпеки архіву (zip-slip, абсолютні
+  шляхи, zip-бомби), збереження архіву, перелік файлів, іконки. Нічого не
+  розпаковує на диск і не виконує.
+- **file_service** — вкладення до карток: тека з GUID-назвою
+  (`users.storage_uid`) на кожного, хто завантажує, збереження й видалення.
+- **search_service** — пошук мовою задачі: нормалізація, синоніми,
+  ранжування за полями картки.
+- **assistant_service** — помічник «Опишіть задачу»: добирає картки пошуком і
+  пояснює, які слова задачі збіглися. Детермінований, без моделі ШІ.
+- **review_service** — розгляд матеріалів і сповіщення: подання, рішення,
+  нагадування власникам про перегляд (щодня через APScheduler).
+- **usage_service** — облік переглядів і сесій для аналітики та KPI.
+- **text_extract_service** — текст із `.txt/.md/.docx/.pdf` для майстра
+  «Додати матеріал».
+- **entra_service** — OIDC-вхід через Entra ID і зіставлення груп із ролями.
 
 ---
 
 ## 4. Модель безпеки та матриця прав
 
-| Дія | Admin | Skill Manager | Group Manager | Group Member |
-| --- | :---: | :---: | :---: | :---: |
-| Системні налаштування | ✓ | ✗ | ✗ | ✗ |
-| CRUD користувачів (глобально), скидання паролів | ✓ | ✗ | ✗ | ✗ |
-| Призначення глобальних ролей | ✓ | ✗ | ✗ | ✗ |
-| Реєстрація/підключення моделей | ✓ | ✗ | ✗ | ✗ |
-| CRUD скілів (тест/деплой/публікація/делістинг) | ✓ | ✓ | ✗ | ✗ |
-| Визначення вхідних параметрів скіла | ✓ | ✓ | ✗ | ✗ |
-| Створення груп | ✓ | ✗ | ✗ | ✗ |
-| Запрошення/видалення мемберів | ✓ (будь-яка) | ✗ | ✓ (своя група) | ✗ |
-| Призначення скілів **групі** | ✓ | ✗ | ✓ (своя група) | ✗ |
-| **Самостійна** активація `published`-скіла (для себе) | ✓ | ✓ | ✓ | ✓ |
-| Використання скілів / чат | ✓ | ✓ | ✓ | ✓ |
-| Перегляд токенів (глобально) | ✓ | ✗ | ✗ | ✗ |
-| Перегляд токенів групи | ✓ | ✗ | ✓ (своя група) | ✗ |
-| Перегляд власних токенів | ✓ | ✓ | ✓ | ✓ |
+| Дія | Admin | Skill Manager | Користувач |
+| --- | :---: | :---: | :---: |
+| Керування користувачами, ролями, паролями | ✓ | ✗ | ✗ |
+| Завантаження, редагування, публікація, видалення навичок | ✓ | ✓ | ✗ |
+| Перегляд і завантаження неопублікованих навичок | ✓ | ✓ | ✗ |
+| Перегляд і завантаження опублікованих навичок | ✓ | ✓ | ✓ |
+| Створення матеріалу (чернетка) і подання на розгляд | ✓ | ✓ | ✓ |
+| Публікація, повернення, життєвий цикл матеріалів | ✓ | ✓ | ✗ |
+| Розділи, колекції, довідники, синоніми, маршрути | ✓ | ✓ | ✗ |
+| Подати ідею | ✓ | ✓ | ✓ |
+| Розгляд ідей | ✓ | ✓ | ✗ |
+| Аналітика, KPI, відгуки команди | ✓ | ✓ | ✗ |
+| Оцінки, відгуки, «Обране», маршрути навчання | ✓ | ✓ | ✓ |
 
-> Перевірка прав — через декоратори: `@require_global_role('admin')`, `@require_group_role('manager', group_id)`. `is_system_admin` дає швидкий шлях для супер-адміна.
+> Перевірка прав — декоратори `@require_auth` і
+> `@require_global_role('admin', 'skill_manager')` з `app/core/permissions.py`.
+> Видимість окремого запису (чернетка навички, чужа чернетка матеріалу)
+> перевіряється в обробнику: для навички — 404, щоб не підтверджувати сам
+> факт чернетки.
 
 ---
 
-## 5. Структура проєкту (для Claude Code)
+## 5. Структура проєкту
 
 ```
 smart-digital-skills/
 ├── app/
-│   ├── __init__.py            # фабрика застосунку (create_app)
-│   ├── config.py              # конфіги Dev/Prod, шлях до SQLite, секрети
-│   ├── extensions.py          # db, migrate, jwt, ma
-│   ├── models/                # SQLAlchemy моделі (по файлу на домен)
-│   │   ├── user.py  role.py  group.py  skill.py  model.py
-│   │   ├── chat.py  token_usage.py  audit.py
-│   ├── api/                   # Blueprints (REST endpoints)
-│   │   ├── auth.py  users.py  groups.py  skills.py
-│   │   ├── models.py  chat.py  usage.py
-│   ├── services/              # бізнес-логіка
-│   ├── schemas/               # Marshmallow-схеми
+│   ├── __init__.py            # фабрика застосунку (create_app), планувальник
+│   ├── config.py              # конфіги Dev/Prod, теки стану, секрети
+│   ├── extensions.py          # db, jwt, cors
+│   ├── models/                # user · skill · resource · file · idea ·
+│   │                          # learning · notification · survey · usage · setting
+│   ├── api/                   # auth · users · skills · categories · catalog · ideas · paths
+│   ├── services/              # бізнес-логіка (див. розділ 3)
 │   ├── core/
-│   │   ├── security.py        # хеш паролів, JWT
+│   │   ├── security.py        # хеш паролів, JWT, поточний користувач
 │   │   ├── permissions.py     # декоратори RBAC
-│   │   └── errors.py
-│   └── integrations/
-│       └── azure_foundry.py
-│   └── static/                # SPA: index.html, app.js, style.css
+│   │   ├── errors.py
+│   │   └── schema.py          # синхронізація довідників, запасне доповнення схеми
+│   └── static/                # SPA: index.html, app.js, style.css, hero.jpg
 │       └── fonts/             # Inter var (SIL OFL) — без зовнішніх запитів
 ├── docs/
 │   ├── DESIGN.md              # візуальна мова, токени, модель навігації
 │   ├── GOVERNANCE.md          # регламент управління контентом (BR-10)
 │   └── ROLE-SERVICE-SUPPORT.md # роль операційної підтримки (BR-11а)
 ├── migrations/                # Alembic
+├── examples/skills/           # приклад пакета навички
 ├── scripts/
-│   ├── init_db.py             # створення схеми
-│   └── seed.py                # початкові дані
+│   ├── init_db.py             # міграції + довідники
+│   ├── seed.py                # демо-дані
+│   └── backup_db.py           # онлайн-копія SQLite
 ├── tests/
-├── instance/profihub.db
+├── instance/                  # стан: profihub.db, skill_packages, skill_icons, user_files
 ├── requirements.txt
 ├── .env.example
-├── wsgi.py
-└── README.md
+├── startup.sh
+└── wsgi.py
 ```
 
 ---
@@ -150,584 +168,516 @@ smart-digital-skills/
 erDiagram
     users ||--o{ user_roles : has
     roles ||--o{ user_roles : assigned
-    users ||--o{ group_memberships : member_of
-    groups ||--o{ group_memberships : contains
-    groups ||--o{ invitations : issues
-    groups ||--o{ group_skills : assigned
-    skills ||--o{ group_skills : in
-    skills ||--o{ user_skills : activated
-    users ||--o{ user_skills : activates
-    skills ||--o{ skill_inputs : defines
-    models ||--o{ skills : powers
-    users ||--o{ chat_sessions : owns
-    chat_sessions ||--o{ chat_messages : has
-    users ||--o{ token_usage_logs : generates
-    models ||--o{ token_usage_logs : via
+    catalog_sections ||--o{ catalog_folders : contains
+    catalog_sections ||--o{ catalog_resources : groups
+    catalog_sections ||--o{ skills : groups
+    catalog_folders ||--o{ catalog_resources : holds
+    catalog_resources ||--o{ catalog_resource_tags : tagged
+    catalog_terms ||--o{ catalog_resource_tags : tag
+    catalog_resources ||--o{ catalog_resource_maturity : level
+    catalog_resources ||--o{ user_files : attachments
+    catalog_resources ||--o{ notifications : about
+    skills ||--o{ skill_feedback : receives
+    users ||--o{ catalog_favorites : stars
+    users ||--o{ notifications : receives
+    learning_paths ||--o{ learning_path_steps : has
+    learning_path_steps ||--o{ learning_progress : done_by
+    users ||--o{ ideas : submits
 ```
 
 ### Опис таблиць
 
 | Таблиця | Призначення |
 | --- | --- |
-| `roles` | Довідник глобальних ролей (`admin`, `skill_manager`) |
-| `users` | Користувачі (логін/пароль + поля під Entra ID) |
-| `user_roles` | M:N глобальних ролей користувача |
-| `groups` | Групи (відділи/департаменти) |
-| `group_memberships` | Членство + роль у групі (`manager`/`member`) + статус |
-| `invitations` | Запрошення нових користувачів за email |
-| `models` | Реєстр моделей Azure AI Foundry (LLM/CV) |
-| `skills` | Каталог скілів, життєвий цикл, версія, лічильник активацій |
-| `skill_inputs` | Параметри вхідних даних скіла (обов'язкові/опціональні) |
-| `catalog_sections` | Розділи каталогу («Business Box») — друга вісь навігації хабу |
-| `catalog_folders` | Колекції всередині розділу («Folder») — третій рівень навігації |
-| `catalog_terms` | Керовані довідники: теги, складність, бізнес-цінність, види матеріалів |
-| `catalog_resource_tags` | Зв'язок «картка ↔ тег» |
-| `catalog_resources` | Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання |
-| `catalog_favorites` | «Обране» користувача (спільне для скілів і ресурсів каталогу) |
-| `ideas` | Воронка ідей: подання, життєвий цикл, маршрутизація до процесу оцінки |
-| `user_sessions` | Сесія роботи в хабі (розрив після 30 хв бездіяльності) |
-| `resource_views` | Перегляди карток, розділів і колекцій — джерело для DAU/WAU/MAU |
-| `survey_responses` | Відповіді NPS / CSAT / CES |
-| `survey_prompts` | Коли користувача востаннє питали — щоб не питати надто часто |
-| `search_synonyms` | Словник формулювань задач: «як питають» → «за чим шукати» |
-| `catalog_resource_maturity` | Зв'язок «картка ↔ рівень AI-зрілості» |
-| `learning_paths` / `learning_path_steps` | Навчальні маршрути та їхні кроки |
-| `learning_progress` | Пройдені кроки маршруту за користувачем |
-| `hidden_recommendations` | Рекомендації, які користувач приховав назавжди |
-| `notifications` | Сповіщення в застосунку (нагадування власникам про перегляд) |
-| `review_logs` | Журнал життєвого циклу матеріалу (хто, коли, з якого статусу в який) |
-| `search_query_logs` | Пошукові запити користувачів для аналітики хабу |
-| `group_skills` | Призначення скілів групам (груповий доступ) |
-| `user_skills` | Матеріалізований ефективний доступ користувача до скіла (self/group) |
-| `chat_sessions` / `chat_messages` | Діалоги з моделями |
-| `token_usage_logs` | Облік токенів (MVP) |
-| `token_limits` | Детальні ліміти (Етап 2, схема наперед) |
-| `audit_logs` | Журнал дій |
+| `roles` / `user_roles` | Глобальні ролі (`admin`, `skill_manager`) і їх призначення |
+| `users` | Користувачі (логін/пароль або Entra ID, `storage_uid` для тек вкладень) |
 | `refresh_tokens` | Refresh-токени JWT |
+| `skills` | Навички: атрибути, інструкція, пакет (`package_path`), статус, версія, `downloads_count` |
+| `skill_categories` | Довідник категорій навичок |
+| `skill_feedback` | Відгуки про навички |
+| `catalog_sections` / `catalog_folders` | Розділи й колекції каталогу |
+| `catalog_terms` | Довідники: теги, складність, бізнес-цінність, види матеріалів, рівні зрілості |
+| `catalog_resources` | Матеріали: промпти, інструкції, кейси, агенти, MCP, посилання |
+| `catalog_resource_tags` / `catalog_resource_maturity` | Теги та рівні зрілості картки |
+| `catalog_favorites` | «Обране» (спільне для навичок і матеріалів) |
+| `user_files` | Вкладення до карток каталогу |
+| `review_logs` | Журнал переходів статусів (матеріали й навички) |
+| `notifications` | Сповіщення: розгляд, рішення, нагадування про перегляд |
+| `ideas` | Воронка ідей |
+| `search_synonyms` / `search_query_logs` | Словник формулювань задач і лог пошуку |
+| `learning_paths` / `learning_path_steps` / `learning_progress` | Навчальні маршрути, кроки, прогрес |
+| `hidden_recommendations` | Рекомендації, які користувач приховав |
+| `user_sessions` / `resource_views` | Сесії та перегляди — джерело DAU/WAU/MAU і KPI |
+| `survey_responses` / `survey_prompts` | Опитування NPS/CSAT/CES і коли питали востаннє |
+| `app_settings` | Налаштування застосунку (сувора публікація, частота опитувань) |
 
 ---
 
 ## 7. SQL DDL (SQLite)
 
+Нижче — DDL, згенерований із поточних моделей SQLAlchemy. Авторитетне
+джерело схеми — міграції в `migrations/versions/`; `tests/test_migrations.py`
+перевіряє, що вони збігаються з моделями. Актуальний DDL можна отримати з
+чистої бази (офлайн-режим `--sql` не підходить: batch-міграції SQLite
+потребують живого з'єднання):
+
+```bash
+DATABASE_URL=sqlite:////tmp/schema.db alembic upgrade head && sqlite3 /tmp/schema.db .schema
+```
+
 ```sql
-PRAGMA foreign_keys = ON;
-
--- Глобальні ролі
-CREATE TABLE roles (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    code        TEXT NOT NULL UNIQUE,          -- 'admin', 'skill_manager'
-    name        TEXT NOT NULL,
-    description TEXT
+CREATE TABLE app_settings (
+    id INTEGER NOT NULL,
+    "key" VARCHAR NOT NULL,
+    value VARCHAR,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE ("key")
 );
 
--- Користувачі
-CREATE TABLE users (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    username        TEXT NOT NULL UNIQUE,
-    email           TEXT UNIQUE,
-    password_hash   TEXT,                       -- NULL для Entra ID
-    full_name       TEXT,
-    auth_provider   TEXT NOT NULL DEFAULT 'local'
-                    CHECK (auth_provider IN ('local','entra_id')),
-    external_id     TEXT,                       -- Entra ID object id (Етап 2)
-    is_active       INTEGER NOT NULL DEFAULT 1,
-    is_system_admin INTEGER NOT NULL DEFAULT 0,
-    storage_uid     TEXT UNIQUE,                 -- GUID-назва теки файлів користувача
-    last_login_at   TEXT,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Файли користувача (зберігаються назавжди у <USER_FILES_DIR>/<storage_uid>/)
-CREATE TABLE user_files (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    filename     TEXT NOT NULL,                  -- відображувана назва
-    stored_name  TEXT NOT NULL,                  -- фізична назва у теці користувача
-    content_type TEXT,
-    size         INTEGER NOT NULL DEFAULT 0,
-    source       TEXT NOT NULL DEFAULT 'upload'
-                 CHECK (source IN ('upload','skill_run','attachment')),
-    skill_id     INTEGER REFERENCES skills(id),  -- якщо створено скілом
-    -- Вкладення до картки каталогу: файл лежить у сховищі того, хто його
-    -- завантажив, але належить картці й зникає разом із нею.
-    resource_id  INTEGER REFERENCES catalog_resources(id),
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Глобальні ролі користувача (M:N)
-CREATE TABLE user_roles (
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, role_id)
-);
-
--- Групи
-CREATE TABLE groups (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE,
-    description TEXT,
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    created_by  INTEGER REFERENCES users(id),
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Членство в групі + локальна роль
-CREATE TABLE group_memberships (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id   INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role       TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('manager','member')),
-    status     TEXT NOT NULL DEFAULT 'active'
-               CHECK (status IN ('invited','active','removed')),
-    invited_by INTEGER REFERENCES users(id),
-    joined_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (group_id, user_id)
-);
-
--- Запрошення за email
-CREATE TABLE invitations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    email       TEXT NOT NULL,
-    role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('manager','member')),
-    token       TEXT NOT NULL UNIQUE,
-    invited_by  INTEGER NOT NULL REFERENCES users(id),
-    status      TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending','accepted','expired','revoked')),
-    expires_at  TEXT,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    accepted_at TEXT
-);
-
--- Реєстр моделей Azure AI Foundry (підключає лише Admin)
-CREATE TABLE models (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    name            TEXT NOT NULL,
-    model_type      TEXT NOT NULL CHECK (model_type IN ('llm','cv')),
-    provider        TEXT NOT NULL DEFAULT 'azure_ai_foundry',
-    deployment_name TEXT NOT NULL,               -- деплоймент у Foundry
-    api_version     TEXT,
-    context_window  INTEGER,
-    config          TEXT,                         -- JSON
-    is_active       INTEGER NOT NULL DEFAULT 1,
-    is_system       INTEGER NOT NULL DEFAULT 0,    -- системна модель (службові задачі)
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Каталог навичок (LLM-навички та навички-пакети з кодом)
-CREATE TABLE skills (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    name              TEXT NOT NULL,
-    description       TEXT NOT NULL,                -- обов'язковий опис
-    author            TEXT,                         -- автор (зі skill.md, редагується)
-    category          TEXT,                         -- категорія (зі skill.md, редагується)
-    skill_kind        TEXT NOT NULL DEFAULT 'prompt'-- 'prompt' (LLM) | 'package' (код)
-                      CHECK (skill_kind IN ('prompt','package')),
-    model_id          INTEGER REFERENCES models(id),-- nullable: пакетам не потрібен
-    prompt_template   TEXT,                         -- для LLM; для пакета — інструкції
-    parameters        TEXT,                         -- JSON: temperature, top_p
-    runtime           TEXT,                         -- скіл-пакет: напр. 'python'
-    entrypoint        TEXT,                         -- скіл-пакет: файл запуску
-    package_filename  TEXT,                         -- оригінальна назва архіву
-    package_path      TEXT,                         -- шлях до збереженого архіву
-    status            TEXT NOT NULL DEFAULT 'draft'  -- 'draft' = «Не опублікована»
-                      CHECK (status IN ('draft','published')),
-    version           TEXT NOT NULL DEFAULT '1.0.0',-- семантична версія
-    activations_count INTEGER NOT NULL DEFAULT 0,   -- к-сть унікальних активацій (denormalized)
-    created_by        INTEGER REFERENCES users(id),
-    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
-    published_at      TEXT
-);
-
--- Розділи каталогу («Business Box») — друга вісь навігації.
--- url заповнено, якщо розділ поки живе у зовнішньому порталі (гібридний режим).
 CREATE TABLE catalog_sections (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE,
+    id INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
     description TEXT,
-    icon_emoji  TEXT,
-    accent      TEXT,
-    url         TEXT,                          -- зовнішній розділ; NULL = власні матеріали
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    icon_emoji VARCHAR,
+    accent VARCHAR,
+    url VARCHAR,
+    position INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (name)
 );
 
--- Воронка ідей: вхідна точка процесу збору ідей (BR-15, FR-10).
--- Hub збирає й маршрутизує ідеї; опрацювання ведеться у зовнішньому процесі,
--- посилання на який зберігається в external_url.
-CREATE TABLE ideas (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    title              TEXT NOT NULL,
-    body               TEXT NOT NULL,              -- суть ідеї
-    problem            TEXT,                       -- бізнес-задача
-    expected_effect    TEXT,                       -- очікуваний ефект
-    contact            TEXT,                       -- як зв'язатися з автором
-    author_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    author_name        TEXT,                       -- знімок імені на момент подання
-    source_resource_id INTEGER REFERENCES catalog_resources(id),  -- звідки виникла
-    resource_id        INTEGER REFERENCES catalog_resources(id),  -- що з неї вийшло
-    external_url       TEXT,                       -- картка у процесі оцінки
-    status             TEXT NOT NULL DEFAULT 'submitted'
-                       CHECK (status IN ('submitted','in_review','accepted',
-                                         'rejected','implemented')),
-    status_note        TEXT,                       -- рішення, яке бачить автор
-    created_at         TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Навчальний маршрут: упорядкована послідовність матеріалів (BR-9).
-CREATE TABLE learning_paths (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    name              TEXT NOT NULL UNIQUE,
-    description       TEXT,
-    icon_emoji        TEXT,
-    maturity_level_id INTEGER REFERENCES catalog_terms(id),
-    audience_role     TEXT,
-    is_starter        INTEGER NOT NULL DEFAULT 0,   -- пропонувати новачкам
-    position          INTEGER NOT NULL DEFAULT 0,
-    is_active         INTEGER NOT NULL DEFAULT 1,
-    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Крок маршруту. resource_id БЕЗ каскаду: якщо картку вилучили з каталогу,
--- крок лишається й позначається недоступним — інакше маршрут мовчки коротшав
--- би, а прогрес користувачів «зсувався».
-CREATE TABLE learning_path_steps (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    path_id      INTEGER NOT NULL REFERENCES learning_paths(id) ON DELETE CASCADE,
-    position     INTEGER NOT NULL DEFAULT 0,
-    title        TEXT,
-    note         TEXT,
-    resource_id  INTEGER REFERENCES catalog_resources(id),
-    external_url TEXT
-);
-
-CREATE TABLE learning_progress (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    path_id      INTEGER NOT NULL REFERENCES learning_paths(id) ON DELETE CASCADE,
-    step_id      INTEGER NOT NULL REFERENCES learning_path_steps(id) ON DELETE CASCADE,
-    completed_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (user_id, step_id)
-);
-
--- Словник формулювань задач (BR-07). Користувач шукає свою задачу
--- («обробляти документи»), а картка названа інструментом — словник з'єднує одне
--- з одним і поповнюється з інтерфейсу, без релізу.
-CREATE TABLE search_synonyms (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    phrase     TEXT NOT NULL,                  -- як формулює користувач
-    terms      TEXT NOT NULL,                  -- канонічні слова через кому
-    is_active  INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Сесія роботи в хабі. `ended_at` заповнюється ліниво — наступною дією
--- користувача або запитом аналітики; фонового процесу не потрібно.
-CREATE TABLE user_sessions (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
-    ended_at     TEXT,
-    views_count  INTEGER NOT NULL DEFAULT 0,   -- глибина перегляду за сесію
-    day          DATE NOT NULL                 -- агрегати за днями без функцій по даті
-);
-
--- Перегляди. Один матеріал за сесію рахується один раз: інакше «відкрив і
--- скопіював» дало б два перегляди. Лічильник catalog_resources.opens_count
--- живе окремо й рахує саме дії.
-CREATE TABLE resource_views (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    target_type TEXT NOT NULL DEFAULT 'resource'
-                CHECK (target_type IN ('resource','skill','section','folder')),
-    target_id   INTEGER NOT NULL,
-    target_name TEXT,                          -- знімок назви на момент перегляду
-    session_id  INTEGER REFERENCES user_sessions(id) ON DELETE SET NULL,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    day         DATE NOT NULL
-);
-
--- Опитування задоволеності: NPS 0–10, CSAT 1–5, CES 1–5.
-CREATE TABLE survey_responses (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind       TEXT NOT NULL CHECK (kind IN ('nps','csat','ces')),
-    score      INTEGER NOT NULL,
-    comment    TEXT,
-    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
-    user_role  TEXT,                           -- роль на момент відповіді
-    context    TEXT,                           -- де саме запитали
-    context_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    day        DATE NOT NULL
-);
-
--- Коли користувача востаннє питали. Рядок на пару «користувач + тип»:
--- закрити NPS не має відкладати CSAT.
-CREATE TABLE survey_prompts (
-    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    kind     TEXT NOT NULL,
-    shown_at TEXT NOT NULL DEFAULT (datetime('now')),
-    answered INTEGER NOT NULL DEFAULT 0,       -- 0 = закрив без відповіді
-    UNIQUE (user_id, kind)
-);
-
--- Колекції всередині розділу — третій рівень моделі Warehouse → Boxes → Folders → Files.
-CREATE TABLE catalog_folders (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    section_id  INTEGER NOT NULL REFERENCES catalog_sections(id),
-    name        TEXT NOT NULL,
-    description TEXT,                          -- призначення колекції
-    icon_emoji  TEXT,
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (section_id, name)
-);
-
--- Керовані довідники метаданих. Картка посилається на термін за id, тому
--- перейменування одразу видно в усіх матеріалах.
--- code заповнений лише для material_type — прив'язка до констант у коді.
 CREATE TABLE catalog_terms (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind        TEXT NOT NULL
-                CHECK (kind IN ('tag','complexity','business_value','material_type')),
-    name        TEXT NOT NULL,
-    name_norm   TEXT NOT NULL,                 -- нижній регістр без зайвих пробілів
-    code        TEXT,
+    id INTEGER NOT NULL,
+    kind VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    name_norm VARCHAR NOT NULL,
+    code VARCHAR,
     description TEXT,
-    position    INTEGER NOT NULL DEFAULT 0,
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    position INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    icon_emoji VARCHAR,
+    color VARCHAR,
+    requires_url BOOLEAN NOT NULL,
+    requires_body BOOLEAN NOT NULL,
+    has_scope BOOLEAN NOT NULL,
+    url_label VARCHAR,
+    body_label VARCHAR,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
     UNIQUE (kind, name_norm)
 );
 
-CREATE TABLE catalog_resource_tags (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    resource_id INTEGER NOT NULL REFERENCES catalog_resources(id) ON DELETE CASCADE,
-    term_id     INTEGER NOT NULL REFERENCES catalog_terms(id) ON DELETE CASCADE,
-    UNIQUE (resource_id, term_id)
+CREATE TABLE roles (
+    id INTEGER NOT NULL,
+    code VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    description TEXT,
+    PRIMARY KEY (id),
+    UNIQUE (code)
 );
 
--- Наповнення каталогу поза скілами: промпти, інструкції, кейси, агенти, посилання
-CREATE TABLE catalog_resources (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    resource_type  TEXT NOT NULL DEFAULT 'prompt'
-                   CHECK (resource_type IN ('prompt','instruction','case',
-                                            'agent','mcp','link')),
-    name           TEXT NOT NULL,
-    description    TEXT NOT NULL DEFAULT '',
-    category       TEXT,
-    section_id     INTEGER REFERENCES catalog_sections(id),
-    folder_id      INTEGER REFERENCES catalog_folders(id),
-    complexity_id      INTEGER REFERENCES catalog_terms(id),
-    business_value_id  INTEGER REFERENCES catalog_terms(id),
-    author         TEXT,
-    owner          TEXT,                         -- відповідальний за матеріал
-    owner_contact  TEXT,                         -- email або посилання для зв'язку
-    reuse_guidance TEXT,                         -- покроково «як повторити рішення»
-    tags           TEXT,                         -- спадщина: до переходу на catalog_resource_tags
-    body           TEXT,                         -- текст промпту / інструкції (Markdown)
-    url            TEXT,                         -- посилання (agent | link)
-    link_scope     TEXT CHECK (link_scope IN ('external','internal')),
-    tools          TEXT,                         -- інструменти та платформи
-    reuse_level    TEXT CHECK (reuse_level IN ('ready','adaptable','reference')),
-    reviewed_at    TEXT,                         -- дата останнього перегляду
-    next_review_at TEXT,                         -- дата наступного перегляду
-    icon_emoji     TEXT,                         -- емодзі-іконка плитки
-    accent         TEXT,                         -- колір плитки; NULL = типовий для виду
-    is_featured    INTEGER NOT NULL DEFAULT 0,   -- «рекомендований» — першим у каталозі
-    status         TEXT NOT NULL DEFAULT 'draft'
-                   CHECK (status IN ('draft','published','needs_update','archived')),
-    version        TEXT NOT NULL DEFAULT '1.0.0',
-    opens_count    INTEGER NOT NULL DEFAULT 0,   -- відкриття / копіювання
-    created_by     INTEGER REFERENCES users(id),
-    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
-    published_at   TEXT
+CREATE TABLE search_synonyms (
+    id INTEGER NOT NULL,
+    phrase VARCHAR NOT NULL,
+    terms VARCHAR NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id)
 );
 
--- Журнал життєвого циклу матеріалу: хто, коли і з якого статусу в який перевів
-CREATE TABLE review_logs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_type     TEXT NOT NULL DEFAULT 'resource'
-                  CHECK (item_type IN ('resource','skill')),
-    item_id       INTEGER NOT NULL,
-    item_name     TEXT,                          -- знімок назви
-    actor_user_id INTEGER REFERENCES users(id),
-    actor_name    TEXT,
-    from_status   TEXT,
-    to_status     TEXT NOT NULL,
-    note          TEXT,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE skill_categories (
+    id INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (name)
 );
 
--- Пошукові запити користувачів: що шукають і що не знаходять
-CREATE TABLE search_query_logs (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    query            TEXT NOT NULL,
-    query_norm       TEXT NOT NULL,              -- нижній регістр — для групування
-    results_count    INTEGER NOT NULL DEFAULT 0,
-    section_id       INTEGER REFERENCES catalog_sections(id),
-    kind             TEXT,                       -- активний фільтр за видом
-    user_id          INTEGER REFERENCES users(id),
-    opened_item_type TEXT,                       -- заповнено, якщо запит завершився відкриттям
-    opened_item_id   INTEGER,
-    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE catalog_folders (
+    id INTEGER NOT NULL,
+    section_id INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
+    description TEXT,
+    icon_emoji VARCHAR,
+    position INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (section_id, name),
+    FOREIGN KEY(section_id) REFERENCES catalog_sections (id)
 );
 
--- «Обране» користувача — спільне для скілів і ресурсів каталогу
+CREATE TABLE learning_paths (
+    id INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
+    description TEXT,
+    icon_emoji VARCHAR,
+    maturity_level_id INTEGER,
+    audience_role VARCHAR,
+    is_starter BOOLEAN NOT NULL,
+    position INTEGER NOT NULL,
+    is_active BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (name),
+    FOREIGN KEY(maturity_level_id) REFERENCES catalog_terms (id)
+);
+
+CREATE TABLE users (
+    id INTEGER NOT NULL,
+    username VARCHAR NOT NULL,
+    email VARCHAR,
+    password_hash VARCHAR,
+    full_name VARCHAR,
+    auth_provider VARCHAR NOT NULL,
+    external_id VARCHAR,
+    is_active BOOLEAN NOT NULL,
+    is_system_admin BOOLEAN NOT NULL,
+    storage_uid VARCHAR,
+    maturity_level_id INTEGER,
+    department VARCHAR,
+    last_login_at DATETIME,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (username),
+    UNIQUE (email),
+    UNIQUE (storage_uid),
+    FOREIGN KEY(maturity_level_id) REFERENCES catalog_terms (id)
+);
+
 CREATE TABLE catalog_favorites (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    item_type  TEXT NOT NULL DEFAULT 'skill' CHECK (item_type IN ('skill','resource')),
-    item_id    INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (user_id, item_type, item_id)
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    item_type VARCHAR NOT NULL,
+    item_id INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, item_type, item_id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- Параметри вхідних даних скіла (обов'язкові / опціональні)
-CREATE TABLE skill_inputs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    skill_id      INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-    name          TEXT NOT NULL,                  -- технічний ключ параметра
-    label         TEXT,                           -- людська назва
-    data_type     TEXT NOT NULL DEFAULT 'string'
-                  CHECK (data_type IN ('string','number','boolean','image','file','json')),
-    is_required   INTEGER NOT NULL DEFAULT 1,     -- 1 = обов'язковий, 0 = опціональний
-    default_value TEXT,
-    description   TEXT,
-    position      INTEGER NOT NULL DEFAULT 0,     -- порядок у формі
-    UNIQUE (skill_id, name)
+CREATE TABLE catalog_resources (
+    id INTEGER NOT NULL,
+    resource_type VARCHAR NOT NULL,
+    name VARCHAR NOT NULL,
+    description TEXT NOT NULL,
+    category VARCHAR,
+    author VARCHAR,
+    tags VARCHAR,
+    body TEXT,
+    url VARCHAR,
+    link_scope VARCHAR,
+    section_id INTEGER,
+    folder_id INTEGER,
+    complexity_id INTEGER,
+    business_value_id INTEGER,
+    owner VARCHAR,
+    owner_contact VARCHAR,
+    tools VARCHAR,
+    reuse_level VARCHAR,
+    reuse_guidance TEXT,
+    reviewed_at DATETIME,
+    next_review_at DATETIME,
+    icon_emoji VARCHAR,
+    accent VARCHAR,
+    is_featured BOOLEAN NOT NULL,
+    status VARCHAR NOT NULL,
+    submitted_at DATETIME,
+    review_note TEXT,
+    version VARCHAR NOT NULL,
+    opens_count INTEGER NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    published_at DATETIME,
+    PRIMARY KEY (id),
+    FOREIGN KEY(section_id) REFERENCES catalog_sections (id),
+    FOREIGN KEY(folder_id) REFERENCES catalog_folders (id),
+    FOREIGN KEY(complexity_id) REFERENCES catalog_terms (id),
+    FOREIGN KEY(business_value_id) REFERENCES catalog_terms (id),
+    FOREIGN KEY(created_by) REFERENCES users (id)
 );
 
--- Призначення скілів групам (груповий доступ)
-CREATE TABLE group_skills (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-    skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-    assigned_by INTEGER REFERENCES users(id),
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (group_id, skill_id)
+CREATE TABLE hidden_recommendations (
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    item_type VARCHAR NOT NULL,
+    item_id INTEGER NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, item_type, item_id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- Матеріалізований ефективний доступ користувача до скіла.
--- Одна стрічка на (user, skill) => природний підрахунок унікальних активацій.
-CREATE TABLE user_skills (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    skill_id    INTEGER NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
-    source      TEXT NOT NULL DEFAULT 'self' CHECK (source IN ('self','group')),
-    group_id    INTEGER REFERENCES groups(id),  -- джерело-група, якщо source='group'
-    assigned_by INTEGER REFERENCES users(id),
-    is_active   INTEGER NOT NULL DEFAULT 1,
-    assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE (user_id, skill_id)                   -- "крім тих, у кого вже був скіл"
-);
+CREATE INDEX ix_hidden_recommendations_user_id ON hidden_recommendations (user_id);
 
--- Сесії чату (користувач обирає модель для діалогу)
-CREATE TABLE chat_sessions (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    group_id   INTEGER REFERENCES groups(id),
-    model_id   INTEGER REFERENCES models(id),      -- обрана модель чату
-    skill_id   INTEGER REFERENCES skills(id),      -- для сесій запуску скіла
-    title      TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Повідомлення чату
-CREATE TABLE chat_messages (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id        INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    role              TEXT NOT NULL CHECK (role IN ('system','user','assistant')),
-    content           TEXT,
-    skill_id          INTEGER REFERENCES skills(id), -- застосований до повідомлення скіл (опц.)
-    metadata          TEXT,                       -- JSON: вкладення, CV-результати
-    prompt_tokens     INTEGER DEFAULT 0,          -- вхідні токени (на user-повідомленні)
-    completion_tokens INTEGER DEFAULT 0,          -- вихідні токени (на assistant-повідомленні)
-    total_tokens      INTEGER DEFAULT 0,
-    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Облік токенів (MVP)
-CREATE TABLE token_usage_logs (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id           INTEGER NOT NULL REFERENCES users(id),
-    group_id          INTEGER REFERENCES groups(id),
-    skill_id          INTEGER REFERENCES skills(id),
-    model_id          INTEGER REFERENCES models(id),
-    session_id        INTEGER REFERENCES chat_sessions(id),
-    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
-    completion_tokens INTEGER NOT NULL DEFAULT 0,
-    total_tokens      INTEGER NOT NULL DEFAULT 0,
-    feature           TEXT NOT NULL DEFAULT 'chat',  -- 'chat' | 'chat_naming' | ...
-    is_system         INTEGER NOT NULL DEFAULT 0,    -- системне використання (поза квотами)
-    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Квоти токенів: 'global' (системна) та 'user' (персональна, пріоритетна)
-CREATE TABLE token_limits (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    scope_type   TEXT NOT NULL CHECK (scope_type IN ('global','group','user')),
-    scope_id     INTEGER,                         -- NULL для global, інакше user_id
-    period       TEXT NOT NULL DEFAULT 'weekly',  -- у MVP — 'weekly'
-    limit_tokens INTEGER NOT NULL,
-    is_active    INTEGER NOT NULL DEFAULT 1,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Тижневий лічильник використаних токенів користувача
-CREATE TABLE token_counters (
-    user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    used_tokens  INTEGER NOT NULL DEFAULT 0,
-    period_start TEXT,                            -- початок поточного тижня (UTC)
-    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Аудит
-CREATE TABLE audit_logs (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    actor_user_id INTEGER REFERENCES users(id),
-    action        TEXT NOT NULL,
-    entity_type   TEXT,
-    entity_id     INTEGER,
-    details       TEXT,                            -- JSON
-    ip_address    TEXT,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Refresh-токени JWT
 CREATE TABLE refresh_tokens (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    revoked    INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    token_hash VARCHAR NOT NULL,
+    expires_at DATETIME NOT NULL,
+    revoked BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
--- Індекси
-CREATE INDEX idx_gm_user       ON group_memberships(user_id);
-CREATE INDEX idx_gm_group      ON group_memberships(group_id);
-CREATE INDEX idx_user_skills_s ON user_skills(skill_id);
-CREATE INDEX idx_user_skills_u ON user_skills(user_id);
-CREATE INDEX idx_skill_inputs  ON skill_inputs(skill_id);
-CREATE INDEX idx_usage_user    ON token_usage_logs(user_id);
-CREATE INDEX idx_usage_group   ON token_usage_logs(group_id);
-CREATE INDEX idx_usage_date    ON token_usage_logs(created_at);
-CREATE INDEX idx_msg_session   ON chat_messages(session_id);
-CREATE INDEX idx_skills_status ON skills(status);
+CREATE TABLE review_logs (
+    id INTEGER NOT NULL,
+    item_type VARCHAR NOT NULL,
+    item_id INTEGER NOT NULL,
+    item_name VARCHAR,
+    actor_user_id INTEGER,
+    actor_name VARCHAR,
+    from_status VARCHAR,
+    to_status VARCHAR NOT NULL,
+    note TEXT,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(actor_user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE search_query_logs (
+    id INTEGER NOT NULL,
+    "query" VARCHAR NOT NULL,
+    query_norm VARCHAR NOT NULL,
+    results_count INTEGER NOT NULL,
+    section_id INTEGER,
+    kind VARCHAR,
+    user_id INTEGER,
+    opened_item_type VARCHAR,
+    opened_item_id INTEGER,
+    assistant_helpful BOOLEAN,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(section_id) REFERENCES catalog_sections (id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE skills (
+    id INTEGER NOT NULL,
+    name VARCHAR NOT NULL,
+    description TEXT NOT NULL,
+    author VARCHAR,
+    category VARCHAR,
+    section_id INTEGER,
+    folder_id INTEGER,
+    owner VARCHAR,
+    icon_path VARCHAR,
+    skill_kind VARCHAR NOT NULL,
+    prompt_template TEXT,
+    input_spec TEXT,
+    output_spec TEXT,
+    starter_prompt TEXT,
+    package_filename VARCHAR,
+    package_path VARCHAR,
+    status VARCHAR NOT NULL,
+    version VARCHAR NOT NULL,
+    downloads_count INTEGER NOT NULL,
+    created_by INTEGER,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    published_at DATETIME,
+    PRIMARY KEY (id),
+    FOREIGN KEY(section_id) REFERENCES catalog_sections (id),
+    FOREIGN KEY(folder_id) REFERENCES catalog_folders (id),
+    FOREIGN KEY(created_by) REFERENCES users (id)
+);
+
+CREATE TABLE survey_prompts (
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    kind VARCHAR NOT NULL,
+    shown_at DATETIME NOT NULL,
+    answered BOOLEAN NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, kind),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE TABLE survey_responses (
+    id INTEGER NOT NULL,
+    kind VARCHAR NOT NULL,
+    score INTEGER NOT NULL,
+    comment TEXT,
+    user_id INTEGER,
+    user_role VARCHAR,
+    context VARCHAR,
+    context_id INTEGER,
+    created_at DATETIME NOT NULL,
+    day DATE NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_survey_responses_day ON survey_responses (day);
+
+CREATE TABLE user_roles (
+    user_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (user_id, role_id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY(role_id) REFERENCES roles (id) ON DELETE CASCADE
+);
+
+CREATE TABLE user_sessions (
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    started_at DATETIME NOT NULL,
+    last_seen_at DATETIME NOT NULL,
+    ended_at DATETIME,
+    views_count INTEGER NOT NULL,
+    day DATE NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_user_sessions_day ON user_sessions (day);
+CREATE INDEX ix_user_sessions_user_id ON user_sessions (user_id);
+
+CREATE TABLE catalog_resource_maturity (
+    id INTEGER NOT NULL,
+    resource_id INTEGER NOT NULL,
+    term_id INTEGER NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (resource_id, term_id),
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id) ON DELETE CASCADE,
+    FOREIGN KEY(term_id) REFERENCES catalog_terms (id) ON DELETE CASCADE
+);
+
+CREATE TABLE catalog_resource_tags (
+    id INTEGER NOT NULL,
+    resource_id INTEGER NOT NULL,
+    term_id INTEGER NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (resource_id, term_id),
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id) ON DELETE CASCADE,
+    FOREIGN KEY(term_id) REFERENCES catalog_terms (id) ON DELETE CASCADE
+);
+
+CREATE TABLE ideas (
+    id INTEGER NOT NULL,
+    title VARCHAR NOT NULL,
+    body TEXT NOT NULL,
+    problem TEXT,
+    expected_effect TEXT,
+    contact VARCHAR,
+    author_id INTEGER,
+    author_name VARCHAR,
+    source_resource_id INTEGER,
+    resource_id INTEGER,
+    external_url VARCHAR,
+    status VARCHAR NOT NULL,
+    status_note TEXT,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(author_id) REFERENCES users (id) ON DELETE SET NULL,
+    FOREIGN KEY(source_resource_id) REFERENCES catalog_resources (id),
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id)
+);
+
+CREATE TABLE learning_path_steps (
+    id INTEGER NOT NULL,
+    path_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    title VARCHAR,
+    note TEXT,
+    resource_id INTEGER,
+    external_url VARCHAR,
+    PRIMARY KEY (id),
+    FOREIGN KEY(path_id) REFERENCES learning_paths (id) ON DELETE CASCADE,
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id)
+);
+
+CREATE TABLE notifications (
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    kind VARCHAR NOT NULL,
+    title VARCHAR NOT NULL,
+    body TEXT,
+    resource_id INTEGER,
+    dedupe_key VARCHAR NOT NULL,
+    is_read BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, dedupe_key),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_notifications_user_id ON notifications (user_id);
+
+CREATE TABLE resource_views (
+    id INTEGER NOT NULL,
+    user_id INTEGER,
+    target_type VARCHAR NOT NULL,
+    target_id INTEGER NOT NULL,
+    target_name VARCHAR,
+    session_id INTEGER,
+    created_at DATETIME NOT NULL,
+    day DATE NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE SET NULL,
+    FOREIGN KEY(session_id) REFERENCES user_sessions (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_resource_views_day ON resource_views (day);
+CREATE INDEX ix_resource_views_user_id ON resource_views (user_id);
+
+CREATE TABLE skill_feedback (
+    id INTEGER NOT NULL,
+    item_type VARCHAR NOT NULL,
+    skill_id INTEGER,
+    resource_id INTEGER,
+    skill_name VARCHAR NOT NULL,
+    skill_version VARCHAR,
+    rating INTEGER,
+    user_id INTEGER,
+    username VARCHAR,
+    message TEXT NOT NULL,
+    is_read BOOLEAN NOT NULL,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(skill_id) REFERENCES skills (id) ON DELETE SET NULL,
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id) ON DELETE SET NULL,
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE TABLE user_files (
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    filename VARCHAR NOT NULL,
+    stored_name VARCHAR NOT NULL,
+    content_type VARCHAR,
+    size INTEGER NOT NULL,
+    source VARCHAR NOT NULL,
+    resource_id INTEGER,
+    created_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY(resource_id) REFERENCES catalog_resources (id)
+);
+
+CREATE TABLE learning_progress (
+    id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    path_id INTEGER NOT NULL,
+    step_id INTEGER NOT NULL,
+    completed_at DATETIME NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE (user_id, step_id),
+    FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE,
+    FOREIGN KEY(path_id) REFERENCES learning_paths (id) ON DELETE CASCADE,
+    FOREIGN KEY(step_id) REFERENCES learning_path_steps (id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_learning_progress_path_id ON learning_progress (path_id);
+CREATE INDEX ix_learning_progress_user_id ON learning_progress (user_id);
 ```
 
 ---
@@ -735,73 +685,70 @@ CREATE INDEX idx_skills_status ON skills(status);
 ## 8. Початкові дані (seed)
 
 - **Ролі:** `admin`, `skill_manager`.
-- **Супер-адмін:** `admin` (зі згенерованим паролем, `is_system_admin = 1`).
-- **Демо-моделі:** `gpt-4o` (`llm`), `image-analyzer` (`cv`).
-- **Демо-скіл:** `Summarizer` (`status = 'published'`, `version = '1.0.0'`) на базі LLM-моделі, з параметрами вхідних даних:
-  - `text` (string, **обов'язковий**) — текст для опрацювання;
-  - `language` (string, опціональний) — мова відповіді.
-- **Демо-група:** `Default Department` з адміном як менеджером (демонстрація правила безперервності управління).
-- **Демо-користувачі:** 1–2 мембери для перевірки призначення скілів (групового та самостійного).
+- **Супер-адмін:** `admin` (`ADMIN_USERNAME` / `ADMIN_PASSWORD`, `is_system_admin = 1`).
+- **Демо-користувачі:** `skillmanager` (Skill Manager), `user1`, `user2`.
+- **Навички:** `Summarizer` — інструкція без пакета (зі стартовим промптом);
+  `Word Counter` — пакет, зібраний з `examples/skills/word-counter`.
+- **Каталог:** розділи, колекції, довідники, демо-матеріали всіх видів,
+  навчальні маршрути.
+
+`seed --if-empty` наповнює лише порожню базу — так його безпечно викликати
+на кожному старті контейнера.
 
 ---
 
-## 9. Ключові бізнес-правила (enforced у Service Layer)
+## 9. Ключові бізнес-правила
 
-1. **Мінімум один менеджер у групі.** При видаленні останнього `group_manager` система автоматично призначає менеджером системного `Admin` (правило з PRD).
+1. **Скоуп Skill Manager** — увесь контент каталогу, навички, ідеї, маршрути й
+   аналітика. Користувачами та ролями керує лише Admin.
 
-2. **Підключення моделей — лише Admin.** Skill Manager будує скіли поверх наявних моделей, але не реєструє самі моделі. Admin може **додавати, видаляти та активувати/деактивувати** моделі. Видалення заблоковане, якщо модель використовується хоча б одним скілом.
+2. **Видимість навички.** Неопубліковану (`draft`) бачать і завантажують лише
+   менеджери; для решти її не існує (404). Опублікована доступна всім.
 
-2a. **Лише активні моделі (`is_active=1`) доступні користувачам** для вибору в чаті. Деактивована модель зникає зі списку вибору, а спроба чату з нею відхиляється.
+3. **Навички — хостинг.** Пакет приймається лише після перевірки безпеки
+   архіву: шляхи з `..`, абсолютні шляхи, розмір у розпакованому вигляді
+   (`SKILL_PACKAGE_MAX_UNZIPPED`). Сервер архів не розпаковує на диск і не
+   виконує. Атрибути й інструкція беруться з фронтматеру й тіла `skill.md`.
 
-2b. **Мультипровайдерність.** Кожна модель має `provider` (`azure_ai_foundry` / `openai` / `gemini`). Фабрика клієнтів обирає відповідний адаптер; у MVP усі працюють у режимі моку (`LLM_MOCK=1`).
+4. **Лічильник завантажень.** Кожне завантаження пакета опублікованої навички
+   збільшує `downloads_count` атомарним `UPDATE … SET downloads_count =
+   downloads_count + 1`, тож паралельні завантаження не губляться. Перевірки
+   менеджерів на чернетках у лічильник не йдуть. Лічильник — популярність
+   навички в каталозі.
 
-3. **Кожен скіл обов'язково має:** `description` (опис), `version` (семантична версія), перелік вхідних параметрів у `skill_inputs` з прапорцем `is_required` (обов'язкові/опціональні), та `activations_count` (к-сть активацій).
+5. **Версії навички.** Пакет без контексту створює нову навичку; пакет у
+   контексті наявної — її нову версію: ідентифікатор, лічильник, відгуки,
+   іконка й розміщення зберігаються. Видалення навички прибирає пакет, іконку
+   й «Обране»; відгуки лишаються без прив'язки.
 
-4. **Подвійне призначення скіла → таблиця `user_skills`** (одна стрічка на користувача, `UNIQUE(user_id, skill_id)`):
-   - *Самостійна активація:* `INSERT user_skills(user, skill, source='self')`. Якщо стрічка вже є — активацій не додається.
-   - *Призначення групі:* запис у `group_skills` + для кожного активного мембера `INSERT OR IGNORE user_skills(user, skill, source='group', group_id)`. Кількість реально вставлених стрічок і є приростом активацій.
-   - *Новий мембер групи* успадковує всі скіли групи (`INSERT OR IGNORE`).
-   - *Видалення скіла з групи / мембера з групи:* деактивуються стрічки `source='group'` цієї групи, **якщо** користувач не має іншого джерела доступу (self або інша група).
+6. **Життєвий цикл матеріалу:** `draft → review → published → needs_update →
+   archived`. Користувач створює лише чернетки й подає їх на розгляд;
+   публікує або повертає з коментарем менеджер. Кожен перехід пишеться в
+   `review_logs`, учасники отримують сповіщення.
 
-5. **Лічильник активацій** = к-сть унікальних користувачів з активним доступом:
-   `UPDATE skills SET activations_count = (SELECT COUNT(*) FROM user_skills WHERE skill_id=? AND is_active=1) WHERE id=?`
-   Це автоматично реалізує правило «плюс усі члени групи, крім тих, у кого скіл уже був» (за рахунок `UNIQUE(user_id, skill_id)`).
+7. **Вкладення.** Файл картки видимий тим, хто бачить картку, і віддається
+   лише з JWT. Видалення картки видаляє її вкладення (з диска теж) і
+   сповіщення про неї.
 
-6. **Видимість скіла для мембера** = наявність активної стрічки в `user_skills`. У каталозі для самостійної активації показуються лише `published`-скіли.
+8. **Видалення користувача — явний каскад.** У SQLite перевірка зовнішніх
+   ключів типово вимкнена, тому обробник сам видаляє особисте (ролі, токени,
+   обране, сповіщення, прогрес, завантажені ним вкладення, сесії) і
+   відв'язує історію (ідеї, журнали, відгуки, перегляди). Себе й системного
+   адміністратора видалити не можна.
 
-7. **Життєвий цикл навички:** два стани — `draft` («Не опублікована», статус щойно завантаженої) та `published` («Опублікована»). Admin/Skill Manager публікує та скасовує публікацію. Призначати/активувати можна лише `published`. Керування каталогом — лише завантаженням пакетів: без контексту = нова навичка, у контексті наявної = її нова версія (ідентичність і зв'язки зберігаються). Обов'язкові атрибути (назва, версія, автор, опис, категорія) читаються зі `skill.md` і редагуються в UI. Видалення навички видаляє всі її зв'язки з групами та користувачами (повторне встановлення вимагає нової активації).
+9. **Помічник пошуку не вигадує.** Відповідь складається лише з карток, які
+   знайшов пошук по базі; пояснення будується зі збігу слів задачі.
 
-8. **Облік токенів** записується у `token_usage_logs` при кожному виклику моделі (на основі `usage` з відповіді провайдера): окремо **вхідні** (`prompt_tokens`), **вихідні** (`completion_tokens`) та **загальні** (`total_tokens`). Деталізація також зберігається на рівні `chat_messages`, а агрегація доступна по користувачу, групі та глобально.
-
-8a. **Чат із моделлю.** Користувач створює сесію з обраною активною моделлю; історія діалогу (останні N повідомлень) передається провайдеру. До окремого повідомлення можна застосувати скіл (його prompt-шаблон форматує текст), при цьому генерація йде через модель сесії.
-
-10. **Скіли-пакети (`skill_kind='package'`), стандартний формат Agent Skills.** Архів (`.zip`/`.skill`) зі `SKILL.md` (YAML-фронтматер + інструкції), кодом та файлами. Два режими: **агентний** (без `entrypoint`) — `SKILL.md` і файли передаються моделі, яка через код-пісочницю (протокол ` ```run-python `, до `SKILL_AGENT_MAX_STEPS` кроків) сама виконує bundled-скрипти; **скрипт** (явний `entrypoint`) — платформа виконує файл напряму (stdin `{"inputs":{...}}` → stdout). Виконання — в окремому підпроцесі з ізоляцією (тимчасова тека, таймаут, ліміти CPU/пам'яті/розміру, чисте середовище, захист zip-slip/bomb), у **UTF-8-режимі** (`-X utf8`, важливо для Windows). Записи у `/tmp` перенаправляються у теку застосунку. Рушій вмикається `SKILL_EXEC_ENABLED`; для повної ізоляції — контейнер/VM.
-
-12. **Тижневі квоти токенів.** Системна квота (`token_limits.scope_type='global'`, `period='weekly'`, дефолт `DEFAULT_WEEKLY_TOKEN_LIMIT`) діє для всіх; персональна (`scope_type='user'`) має пріоритет, якщо задана (Admin може створити/оновити/видалити). Використання рахується в `token_counters` за поточний тиждень; перевищення блокує виклики моделей (429). Скидання — щопонеділка о 00:05 UTC через APScheduler, плюс «ліниве» скидання при зсуві тижневого вікна (`current_period_start`).
-
-11. **Файли користувача.** Кожному користувачу відповідає підкаталог з GUID-назвою (`users.storage_uid`) у `USER_FILES_DIR`. Файли, які код скіла створює у своїй робочій теці під час виконання, автоматично виявляються (порівняння знімків теки до/після) і **зберігаються назавжди** у сховищі користувача, що запустив скіл (`source='skill_run'`). Користувач також може завантажувати власні файли (`source='upload'`). Доступ суворо ізольований: операції перевіряють власника; звантаження — автентифікованим запитом.
-
-9. **Скоуп Skill Manager** обмежений скілами: жодного доступу до користувачів, груп, системних налаштувань, реєстрації моделей.
+10. **Нагадування власникам** про перегляд матеріалів формуються щодня о
+    07:00 UTC планувальником у процесі застосунку. Дублів не буде навіть
+    за кількох процесів: сповіщення має унікальний ключ у базі.
 
 ---
 
-## 10. Дорожня карта за етапами
+## 10. Історія обсягу
 
 | Етап | Обсяг |
 | --- | --- |
-| **MVP (веб)** | Логін/пароль, JWT; CRUD користувачів; групи + членство + інвайти; реєстр моделей (Admin); каталог і життєвий цикл скілів з вхідними параметрами; призначення скілів групі + самостійна активація; лічильник активацій; чат із моделями; базовий облік токенів |
-| **Етап 2** | SSO через Entra ID (OIDC); детальні місячні ліміти (`token_limits`) + аналітика/графіки |
-| **Етап 3 (Could)** | Кастомні мікро-скіли (prompt-шаблони), складніші ієрархії груп |
-| **iOS** | Той самий REST API: доступ мемберів до призначених/активованих скілів і чату |
-
----
-
-## 11. Рекомендації для задачі Claude Code
-
-- Реалізувати через **фабрику застосунку** (`create_app`) + Blueprints, як у структурі вище.
-- Моделі — **SQLAlchemy** (1:1 до DDL); схему БД заводити через **Alembic-міграцію**, а не сирий DDL.
-- RBAC — **декоратори** `permissions.py`, що читають глобальні ролі + роль у конкретній групі.
-- Логіку **активацій** інкапсулювати в `SkillService` (методи `assign_to_group`, `self_activate`, `sync_member_skills`, `recompute_activations`) — це центральна нетривіальна частина.
-- `azure_foundry.py` — спершу зробити **stub/mock** (повертає фейкову відповідь + лічильник токенів), щоб MVP стартував без реального ключа Foundry.
-- `scripts/seed.py` — ідемпотентне наповнення (п.8).
-- Покрити тестами критичні правила: «мінімум 1 менеджер», скоуп Skill Manager, видимість/активації скілів (груповий + self, без подвійного підрахунку).
+| **MVP** | Логін/пароль, JWT; користувачі й ролі; каталог навичок; чат із моделями, облік токенів, групи |
+| **Хвилі BR-01…BR-16** | Розділи й колекції, життєвий цикл і розгляд матеріалів, пошук мовою задачі, помічник, рекомендації, маршрути, ідеї, аналітика й KPI, Entra ID |
+| **Жовтень 2026** | Хаб став чистим каталогом знань: прибрано чат, LLM-інтеграції, веб-пошук, запуск навичок, групи, квоти, облік токенів, доступи до моделей і навичок. Навички хостяться й завантажуються (міграція `b7e2d4f6a8c1`) |

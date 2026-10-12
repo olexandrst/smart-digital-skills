@@ -1,7 +1,7 @@
-"""Тести нових можливостей каталогу: категорії, іконки, вилучення навички."""
+"""Тести можливостей каталогу навичок: категорії, іконки, дати публікації."""
 import base64
 import io
-from app.models import Skill, SkillCategory, UserSkill, User
+from app.models import Skill, SkillCategory
 from tests.conftest import login, auth
 from tests.test_catalog_mgmt import make_zip, upload, MD_FULL, MAIN_PY
 
@@ -13,33 +13,6 @@ PNG_BYTES = base64.b64decode(
 
 def _summarizer_id():
     return Skill.query.filter_by(name="Summarizer").first().id
-
-
-# ---------- Вилучення (self-deactivate) ----------
-
-def test_install_then_remove_skill(client):
-    sid = _summarizer_id()
-    u1 = login(client, "u1", "pass")
-
-    res = client.post(f"/api/skills/{sid}/activate", headers=auth(u1))
-    assert res.status_code == 200
-    assert res.get_json()["activations_count"] == 1
-
-    res = client.post(f"/api/skills/{sid}/deactivate", headers=auth(u1))
-    assert res.status_code == 200
-    assert res.get_json()["activations_count"] == 0
-
-    uid = User.query.filter_by(username="u1").first().id
-    assert UserSkill.query.filter_by(user_id=uid, skill_id=sid,
-                                     is_active=True).first() is None
-
-
-def test_remove_when_not_installed_is_noop(client):
-    sid = _summarizer_id()
-    u1 = login(client, "u1", "pass")
-    res = client.post(f"/api/skills/{sid}/deactivate", headers=auth(u1))
-    assert res.status_code == 200
-    assert res.get_json()["activations_count"] == 0
 
 
 # ---------- Категорії ----------

@@ -1,6 +1,5 @@
 """Рівні зрілості, навчальні маршрути та рекомендації (AKH-13…AKH-15)."""
-from app.extensions import db
-from app.models import LearningProgress, LearningPathStep, User
+from app.models import LearningProgress, LearningPathStep
 
 
 def _login(client, username, password="pass"):

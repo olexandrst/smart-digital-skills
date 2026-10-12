@@ -4,7 +4,7 @@ from app import create_app
 from app.config import BaseConfig
 from app.extensions import db as _db
 from app.core.security import hash_password
-from app.models import Role, User, UserRole, Model, Skill, SkillInput, Group, GroupMembership
+from app.models import Role, User, UserRole, Skill
 
 
 import tempfile
@@ -19,12 +19,10 @@ class TestConfig(BaseConfig):
     AUTO_MIGRATE = False  # тести керують схемою самостійно
     SYNC_REFERENCE_DATA = False  # довідники наповнюються явно в тестах
     ENABLE_SCHEDULER = False  # без фонового планувальника у тестах
-    CHAT_AUTONAME = False  # без фонового іменування чатів у тестах
     # Артефакти тестів — у тимчасову теку, не у instance/.
     SKILL_PACKAGES_DIR = os.path.join(_TMP, "skill_packages")
     SKILL_ICONS_DIR = os.path.join(_TMP, "skill_icons")
     USER_FILES_DIR = os.path.join(_TMP, "user_files")
-    SKILL_RUN_DIR = os.path.join(_TMP, "run_tmp")
 
 
 @pytest.fixture
@@ -59,18 +57,8 @@ def _seed_minimal():
     _db.session.add(UserRole(user_id=admin.id, role_id=admin_role.id))
     _db.session.add(UserRole(user_id=sm.id, role_id=sm_role.id))
 
-    # Ціни, щоб у тестах нараховувалась вартість (USD за 1M токенів).
-    # Системна → доступна всім користувачам у чаті без призначення груп.
-    model = Model(name="gpt-4o", model_type="llm", deployment_name="gpt-4o",
-                  price_in=1000.0, price_out=1000.0, is_system=True)
-    _db.session.add(model)
-    _db.session.flush()
-
-    skill = Skill(name="Summarizer", description="desc", model_id=model.id,
-                  status="published", prompt_template="{text}")
-    _db.session.add(skill)
-    _db.session.flush()
-    _db.session.add(SkillInput(skill_id=skill.id, name="text", is_required=True))
+    _db.session.add(Skill(name="Summarizer", description="desc", status="published",
+                          prompt_template="{text}"))
     _db.session.commit()
 
 

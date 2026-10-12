@@ -1,5 +1,5 @@
 """AI Knowledge Hub: розділи, життєвий цикл, рейтинг, пошук та аналітика."""
-from app.models import CatalogSection, CatalogResource, ReviewLog, SearchQueryLog, Skill
+from app.models import CatalogSection, CatalogResource, SearchQueryLog, Skill
 
 
 def _login(client, username, password="pass"):

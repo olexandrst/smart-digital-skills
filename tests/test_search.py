@@ -285,8 +285,8 @@ def test_assistant_rejects_empty_question(client):
                        headers=_admin(client)).status_code == 400
 
 
-def test_assistant_works_in_mock_mode_without_network(client, app):
-    """Тести не ходять у мережу: пояснення збираються з полів картки."""
+def test_assistant_explains_from_card_fields(client, app):
+    """Пояснення збираються з полів картки — без мовної моделі й мережі."""
     _seed_synonyms(app)
     h = _admin(client)
     _catalog(client, h)
@@ -295,8 +295,9 @@ def test_assistant_works_in_mock_mode_without_network(client, app):
                   "description": "Перетворює розшифровку на протокол.",
                   "resource_type": "prompt", "category": "Операційна робота",
                   "tags": ["наради"], "tools": None, "body": ""}]
-        out = assistant_service.answer("підсумок наради", items, use_model=False)
-    assert out["items"][0]["assistant_reason"]
+        out = assistant_service.answer("підсумок наради", items)
+    assert "збіг за" in out["items"][0]["assistant_reason"]
+    assert "Операційна робота" in out["items"][0]["assistant_reason"]
     assert out["grounded"] is True
 
 

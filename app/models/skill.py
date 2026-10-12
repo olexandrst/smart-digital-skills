@@ -1,48 +1,16 @@
-"""Моделі Azure AI Foundry, скіли, вхідні параметри та призначення."""
+"""Навички каталогу: пакет зі skill.md, категорії та зворотний зв'язок.
+
+Навичка — це матеріал каталогу, який хостимо, а не запускаємо: пакет
+(.zip / .skill) лежить у сховищі, користувач читає опис та інструкції й
+завантажує пакет собі. Виконання коду, призначення моделям і групам, облік
+активацій у застосунку більше немає.
+"""
 from datetime import datetime
 from app.extensions import db
 
 
 def _now():
     return datetime.utcnow()
-
-
-class Model(db.Model):
-    __tablename__ = "models"
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String, nullable=False)
-    model_type = db.Column(db.String, nullable=False, default="llm")  # завжди llm
-    provider = db.Column(db.String, nullable=False, default="azure_ai_foundry")
-    deployment_name = db.Column(db.String, nullable=False)
-    # Базовий URL API (для локальних моделей Ollama/LM Studio та OpenAI-сумісних).
-    base_url = db.Column(db.String)
-    api_version = db.Column(db.String)
-    context_window = db.Column(db.Integer)
-    # Вартість у USD за 1 мільйон токенів (вхідних / вихідних). nullable = не задано.
-    price_in = db.Column(db.Float)
-    price_out = db.Column(db.Float)
-    config = db.Column(db.Text)  # JSON
-    is_active = db.Column(db.Boolean, nullable=False, default=True)
-    is_system = db.Column(db.Boolean, nullable=False, default=False)  # системна модель
-    created_at = db.Column(db.DateTime, nullable=False, default=_now)
-    updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "name": self.name,
-            "model_type": self.model_type,
-            "provider": self.provider,
-            "deployment_name": self.deployment_name,
-            "base_url": self.base_url,
-            "is_system": self.is_system,
-            "api_version": self.api_version,
-            "context_window": self.context_window,
-            "price_in": self.price_in,
-            "price_out": self.price_out,
-            "is_active": self.is_active,
-        }
 
 
 class Skill(db.Model):
@@ -57,37 +25,30 @@ class Skill(db.Model):
     folder_id = db.Column(db.Integer, db.ForeignKey("catalog_folders.id"))
     owner = db.Column(db.String)         # відповідальний за матеріал (BR-11)
     icon_path = db.Column(db.String)     # шлях до завантаженої PNG-іконки (nullable)
-    # 'prompt' — LLM-навичка; 'package' — архів зі skill.md та кодом, що виконується.
+    # 'package' — архів зі skill.md і файлами; 'prompt' — навичка без пакета,
+    # лише з текстом інструкцій (історичні записи до переходу на пакети).
     skill_kind = db.Column(db.String, nullable=False, default="prompt")
-    model_id = db.Column(db.Integer, db.ForeignKey("models.id"))  # nullable: пакетам не потрібен
+    # Тіло skill.md — інструкції навички. Показуються в картці.
     prompt_template = db.Column(db.Text)
-    parameters = db.Column(db.Text)  # JSON: temperature, top_p
     # Описові атрибути для каталогу (показуються у детальній картці):
     input_spec = db.Column(db.Text)      # «Вхідні дані»
     output_spec = db.Column(db.Text)     # «Результат роботи»
     starter_prompt = db.Column(db.Text)  # «Стартовий промпт»
-    # Поля для скілів-пакетів:
-    runtime = db.Column(db.String)          # напр. 'python'
-    entrypoint = db.Column(db.String)       # шлях до файлу запуску відносно кореня пакета
-    package_filename = db.Column(db.String) # оригінальна назва завантаженого архіву
-    package_path = db.Column(db.String)     # шлях до збереженого архіву
-    status = db.Column(db.String, nullable=False, default="draft")  # draft|testing|published|delisted
+    package_filename = db.Column(db.String)  # оригінальна назва завантаженого архіву
+    package_path = db.Column(db.String)      # шлях до збереженого архіву
+    status = db.Column(db.String, nullable=False, default="draft")  # draft|published
     version = db.Column(db.String, nullable=False, default="1.0.0")
-    activations_count = db.Column(db.Integer, nullable=False, default=0)
+    # Скільки разів пакет завантажили — міра популярності навички в каталозі
+    # (замість колишнього лічильника активацій).
+    downloads_count = db.Column(db.Integer, nullable=False, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
     published_at = db.Column(db.DateTime)
 
-    model = db.relationship("Model", lazy="joined")
-    inputs = db.relationship(
-        "SkillInput", backref="skill", lazy="select",
-        cascade="all, delete-orphan", order_by="SkillInput.position",
-    )
-
-    def to_dict(self, include_inputs=True):
+    def to_dict(self):
         icon_ver = int(self.updated_at.timestamp()) if self.updated_at else 0
-        data = {
+        return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -97,10 +58,7 @@ class Skill(db.Model):
             "folder_id": self.folder_id,
             "owner": self.owner,
             "skill_kind": self.skill_kind or "prompt",
-            "model_id": self.model_id,
-            "model_name": self.model.name if self.model else None,
-            "runtime": self.runtime,
-            "entrypoint": self.entrypoint,
+            "instructions": self.prompt_template,
             "package_filename": self.package_filename,
             "has_package": bool(self.package_path),
             "has_icon": bool(self.icon_path),
@@ -112,14 +70,11 @@ class Skill(db.Model):
             "starter_prompt": self.starter_prompt,
             "status": self.status,
             "version": self.version,
-            "activations_count": self.activations_count,
+            "downloads_count": self.downloads_count or 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
-        if include_inputs:
-            data["inputs"] = [i.to_dict() for i in self.inputs]
-        return data
 
 
 class SkillCategory(db.Model):
@@ -176,80 +131,3 @@ class SkillFeedback(db.Model):
             "is_read": self.is_read,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
-
-
-class SkillInput(db.Model):
-    __tablename__ = "skill_inputs"
-    __table_args__ = (db.UniqueConstraint("skill_id", "name"),)
-
-    id = db.Column(db.Integer, primary_key=True)
-    skill_id = db.Column(db.Integer, db.ForeignKey("skills.id", ondelete="CASCADE"),
-                         nullable=False)
-    name = db.Column(db.String, nullable=False)
-    label = db.Column(db.String)
-    data_type = db.Column(db.String, nullable=False, default="string")
-    is_required = db.Column(db.Boolean, nullable=False, default=True)
-    default_value = db.Column(db.Text)
-    description = db.Column(db.Text)
-    position = db.Column(db.Integer, nullable=False, default=0)
-
-    def to_dict(self):
-        return {
-            "id": self.id,
-            "name": self.name,
-            "label": self.label,
-            "data_type": self.data_type,
-            "is_required": self.is_required,
-            "default_value": self.default_value,
-            "description": self.description,
-            "position": self.position,
-        }
-
-
-class GroupSkill(db.Model):
-    __tablename__ = "group_skills"
-    __table_args__ = (db.UniqueConstraint("group_id", "skill_id"),)
-
-    id = db.Column(db.Integer, primary_key=True)
-    group_id = db.Column(db.Integer, db.ForeignKey("groups.id", ondelete="CASCADE"),
-                         nullable=False)
-    skill_id = db.Column(db.Integer, db.ForeignKey("skills.id", ondelete="CASCADE"),
-                         nullable=False)
-    assigned_by = db.Column(db.Integer, db.ForeignKey("users.id"))
-    is_active = db.Column(db.Boolean, nullable=False, default=True)
-    assigned_at = db.Column(db.DateTime, nullable=False, default=_now)
-
-
-class GroupModel(db.Model):
-    """Доступ групи до моделі (матриця доступів «групи × моделі»).
-
-    Наявність рядка = група має доступ до моделі. Ефективний доступ користувача
-    обчислюється динамічно з його активних членств (плюс системна модель — усім).
-    """
-    __tablename__ = "group_models"
-    __table_args__ = (db.UniqueConstraint("group_id", "model_id"),)
-
-    id = db.Column(db.Integer, primary_key=True)
-    group_id = db.Column(db.Integer, db.ForeignKey("groups.id", ondelete="CASCADE"),
-                         nullable=False)
-    model_id = db.Column(db.Integer, db.ForeignKey("models.id", ondelete="CASCADE"),
-                         nullable=False)
-    assigned_by = db.Column(db.Integer, db.ForeignKey("users.id"))
-    assigned_at = db.Column(db.DateTime, nullable=False, default=_now)
-
-
-class UserSkill(db.Model):
-    """Матеріалізований ефективний доступ користувача до скіла."""
-    __tablename__ = "user_skills"
-    __table_args__ = (db.UniqueConstraint("user_id", "skill_id"),)
-
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
-                        nullable=False)
-    skill_id = db.Column(db.Integer, db.ForeignKey("skills.id", ondelete="CASCADE"),
-                         nullable=False)
-    source = db.Column(db.String, nullable=False, default="self")  # self | group
-    group_id = db.Column(db.Integer, db.ForeignKey("groups.id"))
-    assigned_by = db.Column(db.Integer, db.ForeignKey("users.id"))
-    is_active = db.Column(db.Boolean, nullable=False, default=True)
-    assigned_at = db.Column(db.DateTime, nullable=False, default=_now)

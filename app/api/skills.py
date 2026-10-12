@@ -1,10 +1,10 @@
-"""Навички: каталог, публікація (Admin/Skill Manager), активація користувачами.
+"""Навички: хостинг пакетів у каталозі.
 
-Керування каталогом: навички лише завантажуються пакетами (upload) —
-ручного створення через форму немає. Завантаження без контексту створює
-нову навичку; завантаження в контексті наявної — її нову версію.
+Навичку створює лише завантаження пакета (.zip / .skill зі skill.md):
+без контексту — нова навичка, у контексті наявної — її нова версія.
+Admin / Skill Manager керують атрибутами, публікацією та іконкою; будь-хто
+бачить опубліковані навички й завантажує їхні пакети.
 """
-import json
 import os
 import re
 from datetime import datetime
@@ -13,12 +13,8 @@ from app.extensions import db
 from app.core.permissions import require_auth, require_global_role
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.models import (
-    Skill, SkillInput, SkillFeedback, UserSkill, GroupSkill, Group,
-    CatalogFavorite, ChatSession, ChatMessage, TokenUsageLog,
-    UserFile, ReviewLog,
-)
-from app.services import skill_service, chat_service, package_service
+from app.models import Skill, SkillFeedback, CatalogFavorite, ReviewLog
+from app.services import package_service
 
 bp = Blueprint("skills", __name__)
 
@@ -26,114 +22,62 @@ bp = Blueprint("skills", __name__)
 VALID_STATUS = {"draft", "published"}
 ALLOWED_PACKAGE_EXT = (".zip", ".skill")
 DEFAULT_CATEGORY = "Загальне"
+EDITABLE_FIELDS = ("name", "description", "version", "author", "category", "owner",
+                   "input_spec", "output_spec", "starter_prompt")
+
+
+def _is_manager(user):
+    return user.has_global_role("admin") or user.has_global_role("skill_manager")
+
+
+def _visible_skill(skill_id):
+    """Навичка, яку поточний користувач має право бачити.
+
+    Неопубліковану бачать лише менеджери: для решти її не існує (404, а не
+    403 — щоб не підтверджувати сам факт чернетки).
+    """
+    skill = Skill.query.get_or_404(skill_id)
+    if skill.status != "published" and not _is_manager(current_user()):
+        raise ApiError("Навичку не знайдено", 404, "not_found")
+    return skill
 
 
 @bp.get("")
 @require_auth
 def list_skills():
     """Admin/Skill Manager бачать усі навички; решта — лише опубліковані."""
-    user = current_user()
-    if user.has_global_role("admin") or user.has_global_role("skill_manager"):
-        skills = Skill.query.order_by(Skill.id).all()
-    else:
-        skills = Skill.query.filter_by(status="published").order_by(Skill.id).all()
-    return jsonify([s.to_dict() for s in skills])
-
-
-@bp.get("/mine")
-@require_auth
-def my_skills():
-    """Навички, доступні користувачу: власні активації ∪ навички його груп."""
-    user = current_user()
-    skill_ids = skill_service.effective_skill_ids(user.id)
-    skills = (Skill.query.filter(Skill.id.in_(skill_ids))
-              .filter_by(status="published").all()) if skill_ids else []
-    return jsonify([s.to_dict() for s in skills])
-
-
-@bp.get("/settings")
-@require_auth
-def skills_settings():
-    """Налаштування доступу до навичок (для UI: Каталог та самоактивація)."""
-    return jsonify({"individual_access": skill_service.individual_access_enabled()})
-
-
-@bp.get("/access-matrix")
-@require_global_role("admin")
-def access_matrix():
-    """Матриця доступів: групи (рядки) × опубліковані навички (колонки)."""
-    groups = Group.query.order_by(Group.name).all()
-    skills = Skill.query.filter_by(status="published").order_by(Skill.name).all()
-    grants = [f"{gs.group_id}:{gs.skill_id}"
-              for gs in GroupSkill.query.filter_by(is_active=True).all()]
-    return jsonify({
-        "groups": [{"id": g.id, "name": g.name} for g in groups],
-        "skills": [{"id": s.id, "name": s.name} for s in skills],
-        "grants": grants,
-        "individual_access": skill_service.individual_access_enabled(),
-    })
-
-
-@bp.post("/access")
-@require_global_role("admin")
-def set_access():
-    """Вмикає/вимикає доступ групи до навички (чекбокс матриці)."""
-    data = request.get_json(silent=True) or {}
-    gid, sid = data.get("group_id"), data.get("skill_id")
-    if not gid or not sid:
-        raise ApiError("Вкажіть group_id та skill_id", 400, "validation_error")
-    Group.query.get_or_404(gid)
-    granted = bool(data.get("granted"))
-    if granted:
-        skill_service.assign_to_group(gid, sid, current_user().id)
-    else:
-        skill_service.remove_from_group(gid, sid)
-    return jsonify({"group_id": gid, "skill_id": sid, "granted": granted})
-
-
-@bp.post("/access-settings")
-@require_global_role("admin")
-def set_access_settings():
-    """Перемикач «Дозволити індивідуальний доступ» (Каталог + самоактивація)."""
-    data = request.get_json(silent=True) or {}
-    if "individual_access" not in data:
-        raise ApiError("Вкажіть individual_access", 400, "validation_error")
-    value = skill_service.set_individual_access(bool(data["individual_access"]))
-    return jsonify({"individual_access": value})
+    query = Skill.query
+    if not _is_manager(current_user()):
+        query = query.filter_by(status="published")
+    return jsonify([s.to_dict() for s in query.order_by(Skill.id).all()])
 
 
 @bp.get("/<int:skill_id>")
 @require_auth
 def get_skill(skill_id):
-    skill = Skill.query.get_or_404(skill_id)
-    return jsonify(skill.to_dict())
+    return jsonify(_visible_skill(skill_id).to_dict())
 
 
 @bp.patch("/<int:skill_id>")
 @require_global_role("admin", "skill_manager")
 def update_skill(skill_id):
-    """Редагування атрибутів навички: назва, версія, автор, опис, категорія."""
+    """Редагування описових атрибутів навички та її місця в каталозі."""
     skill = Skill.query.get_or_404(skill_id)
     data = request.get_json(silent=True) or {}
-    for field in ("name", "description", "version", "author", "category", "owner",
-                  "prompt_template", "input_spec", "output_spec", "starter_prompt"):
+    for field in EDITABLE_FIELDS:
         if field in data:
             value = data[field]
             if field in ("name", "version") and not (value or "").strip():
                 raise ApiError("Назва та версія не можуть бути порожніми",
                                400, "validation_error")
             setattr(skill, field, value)
+    if "instructions" in data:
+        skill.prompt_template = data["instructions"]
     if "section_id" in data or "folder_id" in data:
         # Розділ і колекція узгоджуються тим самим правилом, що й для матеріалів
         # каталогу: вибір колекції задає розділ (див. app/api/catalog.py).
         from app.api.catalog import _apply_placement
         _apply_placement(skill, data)
-    if "model_id" in data:
-        skill.model_id = data["model_id"]
-    if "parameters" in data:
-        skill.parameters = json.dumps(data["parameters"])
-    if "inputs" in data:
-        _replace_inputs(skill.id, data["inputs"])
     db.session.commit()
     return jsonify(skill.to_dict())
 
@@ -164,40 +108,13 @@ def change_status(skill_id):
     return jsonify(skill.to_dict())
 
 
-def _require_individual_access(user):
-    """Самоактивація дозволена, якщо ввімкнено індивідуальний доступ (або Admin)."""
-    if not skill_service.individual_access_enabled() and not user.has_global_role("admin"):
-        raise ApiError("Індивідуальний доступ до навичок вимкнено адміністратором",
-                       403, "individual_access_disabled")
-
-
-@bp.post("/<int:skill_id>/activate")
-@require_auth
-def activate(skill_id):
-    """Самостійна активація (встановлення) опублікованої навички для себе."""
-    user = current_user()
-    _require_individual_access(user)
-    count = skill_service.self_activate(user.id, skill_id)
-    return jsonify({"message": "Навичку встановлено", "activations_count": count})
-
-
-@bp.post("/<int:skill_id>/deactivate")
-@require_auth
-def deactivate(skill_id):
-    """Самостійне вилучення навички (доступ за групою при цьому зберігається)."""
-    user = current_user()
-    _require_individual_access(user)
-    count = skill_service.self_deactivate(user.id, skill_id)
-    return jsonify({"message": "Навичку вилучено", "activations_count": count})
-
-
 # ----------------------------- Зворотний зв'язок -----------------------------
 
 @bp.post("/<int:skill_id>/feedback")
 @require_auth
 def submit_feedback(skill_id):
     """Користувач надсилає повідомлення (фідбек) щодо навички."""
-    skill = Skill.query.get_or_404(skill_id)
+    skill = _visible_skill(skill_id)
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     rating = data.get("rating")
@@ -262,17 +179,7 @@ def mark_all_feedback_read():
     return jsonify({"message": "Усі повідомлення позначено прочитаними"})
 
 
-@bp.post("/<int:skill_id>/run")
-@require_auth
-def run(skill_id):
-    data = request.get_json(silent=True) or {}
-    result = chat_service.run_skill(
-        current_user(), skill_id,
-        inputs=data.get("inputs", {}),
-        session_id=data.get("session_id"),
-    )
-    return jsonify(result)
-
+# ----------------------------- Пакет навички -----------------------------
 
 def _read_upload():
     file = request.files.get("file")
@@ -288,16 +195,14 @@ def _apply_meta(skill, meta, filename, file_bytes):
     skill.name = meta["name"]
     skill.description = meta["description"]
     skill.version = meta["version"]
-    skill.runtime = meta["runtime"]
-    skill.entrypoint = meta["entrypoint"]
     skill.prompt_template = meta.get("instructions")
     skill.package_filename = filename
+    skill.skill_kind = "package"
     if meta.get("author"):
         skill.author = meta["author"]
     if meta.get("category"):
         skill.category = meta["category"]
-    skill.package_path = package_service.store_package(skill.id, file_bytes, filename)
-    _replace_inputs(skill.id, meta["inputs"])
+    skill.package_path = package_service.store_package(skill.id, file_bytes)
 
 
 @bp.post("/upload")
@@ -313,7 +218,6 @@ def upload_package():
         description=meta["description"],
         author=meta.get("author") or user.full_name or user.username,
         category=meta.get("category") or DEFAULT_CATEGORY,
-        skill_kind="package",
         status="draft",
         created_by=user.id,
     )
@@ -327,31 +231,47 @@ def upload_package():
 @bp.post("/<int:skill_id>/upload")
 @require_global_role("admin", "skill_manager")
 def upload_new_version(skill_id):
-    """Завантаження НОВОЇ ВЕРСІЇ наявної навички (в її контексті).
-
-    Ідентичність, активації та зв'язки з групами/користувачами зберігаються —
-    оновлюються пакет і атрибути.
-    """
+    """Нова версія наявної навички: ідентичність, розташування в каталозі,
+    обране й відгуки зберігаються — оновлюються пакет і атрибути зі skill.md."""
     skill = Skill.query.get_or_404(skill_id)
     filename, file_bytes = _read_upload()
     meta = package_service.parse_package(file_bytes)
-    skill.skill_kind = "package"
     _apply_meta(skill, meta, filename, file_bytes)
     db.session.commit()
     return jsonify(skill.to_dict())
 
 
 @bp.get("/<int:skill_id>/download")
-@require_global_role("admin", "skill_manager")
+@require_auth
 def download_package(skill_id):
-    """Завантаження (скачування) пакета навички."""
-    skill = Skill.query.get_or_404(skill_id)
+    """Завантаження пакета навички.
+
+    Опубліковану навичку завантажує будь-хто; кожне таке завантаження
+    рахується — це і є популярність навички в каталозі. Чернетку бачать і
+    завантажують лише менеджери, і в лічильник ці перевірки не йдуть.
+    """
+    skill = _visible_skill(skill_id)
     if not skill.package_path or not os.path.exists(skill.package_path):
         raise ApiError("Пакет навички відсутній", 404, "package_missing")
+    if skill.status == "published":
+        # Атомарний інкремент у базі: паралельні завантаження не губляться.
+        Skill.query.filter_by(id=skill.id).update(
+            {Skill.downloads_count: Skill.downloads_count + 1},
+            synchronize_session=False)
+        db.session.commit()
     safe = re.sub(r"[^\w.\-]+", "_", f"{skill.name}-{skill.version}", flags=re.UNICODE)
     return send_file(skill.package_path, as_attachment=True,
                      download_name=f"{safe}.zip")
 
+
+@bp.get("/<int:skill_id>/files")
+@require_auth
+def list_files(skill_id):
+    """Перелік файлів у пакеті навички — щоб видно було, що завантажуєш."""
+    return jsonify(package_service.list_package_files(_visible_skill(skill_id)))
+
+
+# ----------------------------- Іконка -----------------------------
 
 @bp.post("/<int:skill_id>/icon")
 @require_global_role("admin", "skill_manager")
@@ -388,56 +308,21 @@ def get_icon(skill_id):
     return send_file(skill.icon_path, mimetype="image/png")
 
 
-@bp.get("/<int:skill_id>/files")
-@require_auth
-def list_files(skill_id):
-    """Перелік файлів у пакеті навички."""
-    skill = Skill.query.get_or_404(skill_id)
-    if skill.skill_kind != "package":
-        raise ApiError("Навичка не є пакетом", 400, "not_a_package")
-    return jsonify(package_service.list_package_files(skill))
-
-
 @bp.delete("/<int:skill_id>")
 @require_global_role("admin", "skill_manager")
 def delete_skill(skill_id):
-    """Видалення навички + усіх її зв'язків з групами й користувачами.
+    """Видалення навички разом із пакетом, іконкою та позначками «Обране».
 
-    Після повторного встановлення навичку доведеться активувати заново.
-    Історія чатів/токенів зберігається (посилання на навичку знімається).
+    Відгуки зберігаються: вони тримають знімок назви й версії, тож лише
+    відв'язуються від навички.
     """
     skill = Skill.query.get_or_404(skill_id)
-    if skill.skill_kind == "package":
-        package_service.delete_package_file(skill)
+    package_service.delete_package_file(skill)
     package_service.delete_icon(skill)
-
-    UserSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
-    GroupSkill.query.filter_by(skill_id=skill_id).delete(synchronize_session=False)
     CatalogFavorite.query.filter_by(item_type="skill", item_id=skill_id)\
         .delete(synchronize_session=False)
-    # Фідбек зберігаємо (знімок назви/версії), лише відв'язуємо від навички.
-    for model in (ChatSession, ChatMessage, TokenUsageLog, UserFile, SkillFeedback):
-        model.query.filter_by(skill_id=skill_id).update(
-            {model.skill_id: None}, synchronize_session=False)
-
+    SkillFeedback.query.filter_by(skill_id=skill_id).update(
+        {SkillFeedback.skill_id: None}, synchronize_session=False)
     db.session.delete(skill)
     db.session.commit()
-    return jsonify({"message": "Навичку та всі її зв'язки видалено"})
-
-
-def _replace_inputs(skill_id, inputs):
-    SkillInput.query.filter_by(skill_id=skill_id).delete()
-    for idx, spec in enumerate(inputs or []):
-        name = (spec.get("name") or "").strip()
-        if not name:
-            continue
-        db.session.add(SkillInput(
-            skill_id=skill_id,
-            name=name,
-            label=spec.get("label"),
-            data_type=spec.get("data_type", "string"),
-            is_required=spec.get("is_required", True),
-            default_value=spec.get("default_value"),
-            description=spec.get("description"),
-            position=spec.get("position", idx),
-        ))
+    return jsonify({"message": "Навичку видалено"})

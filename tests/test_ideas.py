@@ -1,5 +1,5 @@
 """Воронка ідей: подання, життєвий цикл, права, маршрутизація (BR-15, FR-10)."""
-from app.models import Idea, ReviewLog
+from app.models import ReviewLog
 
 
 def _login(client, username, password="pass"):

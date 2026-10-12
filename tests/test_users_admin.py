@@ -1,7 +1,8 @@
-"""Тести менеджменту користувачів (Admin): видалення, групи користувача."""
-from app.models import User, Group, GroupMembership, UserSkill, ChatSession
+"""Тести менеджменту користувачів (Admin): CRUD і повнота видалення."""
 from app.extensions import db
-from app.services import group_service, skill_service
+from app.models import (
+    User, CatalogFavorite, Notification, Idea, SkillFeedback, Skill, UserRole,
+)
 from tests.conftest import login, auth
 
 
@@ -12,9 +13,11 @@ def _uid(username):
 def test_create_edit_delete_user(client):
     token = login(client, "admin", "Admin123!")
     res = client.post("/api/users", headers=auth(token), json={
-        "username": "temp", "full_name": "Тимчасовий", "password": "pass12"})
+        "username": "temp", "full_name": "Тимчасовий", "password": "pass12",
+        "roles": ["skill_manager"]})
     assert res.status_code == 201
     uid = res.get_json()["id"]
+    assert res.get_json()["roles"] == ["skill_manager"]
 
     res = client.patch(f"/api/users/{uid}", headers=auth(token),
                        json={"full_name": "Оновлений", "email": "t@e.com"})
@@ -22,18 +25,40 @@ def test_create_edit_delete_user(client):
 
     res = client.delete(f"/api/users/{uid}", headers=auth(token))
     assert res.status_code == 200
-    assert User.query.get(uid) is None
+    assert db.session.get(User, uid) is None
 
 
-def test_delete_user_cleans_memberships(client):
-    token = login(client, "admin", "Admin123!")
-    gid = client.post("/api/groups", headers=auth(token), json={"name": "DG"}).get_json()["id"]
+def test_user_list_has_no_quota_fields(client):
+    rows = client.get("/api/users", headers=auth(login(client, "admin", "Admin123!"))).get_json()
+    assert rows and all(not ({"used_cost", "custom_limit", "effective_limit"} & r.keys())
+                        for r in rows)
+
+
+def test_delete_user_removes_own_data_and_keeps_history(client):
+    """Особисте (обране, сповіщення, ролі) зникає; історія (ідеї, відгуки)
+    лишається, лише відв'язана від користувача."""
+    u2 = login(client, "u2", "pass")
     uid = _uid("u2")
-    client.post(f"/api/groups/{gid}/members", headers=auth(token), json={"user_id": uid})
-    assert GroupMembership.query.filter_by(user_id=uid).count() >= 1
+    sid = Skill.query.filter_by(name="Summarizer").first().id
+    client.post("/api/catalog/favorites", headers=auth(u2),
+                json={"item_type": "skill", "item_id": sid})
+    client.post(f"/api/skills/{sid}/feedback", headers=auth(u2), json={"message": "Добре"})
+    client.post("/api/ideas", headers=auth(u2), json={
+        "title": "Ідея", "body": "Опис", "problem": "Проблема"})
+    db.session.add(Notification(user_id=uid, kind="review_due", title="t",
+                                dedupe_key="k1"))
+    db.session.commit()
 
-    client.delete(f"/api/users/{uid}", headers=auth(token))
-    assert GroupMembership.query.filter_by(user_id=uid).count() == 0
+    admin = login(client, "admin", "Admin123!")
+    assert client.delete(f"/api/users/{uid}", headers=auth(admin)).status_code == 200
+
+    assert CatalogFavorite.query.filter_by(user_id=uid).count() == 0
+    assert Notification.query.filter_by(user_id=uid).count() == 0
+    assert UserRole.query.filter_by(user_id=uid).count() == 0
+    fb = SkillFeedback.query.filter_by(message="Добре").one()
+    assert fb.user_id is None
+    idea = Idea.query.filter_by(title="Ідея").one()
+    assert idea.author_id is None
 
 
 def test_cannot_delete_self_or_system_admin(client):
@@ -43,24 +68,8 @@ def test_cannot_delete_self_or_system_admin(client):
     assert res.status_code == 400  # і self, і system_admin
 
 
-def test_user_groups_list_and_remove(client):
-    token = login(client, "admin", "Admin123!")
-    gid = client.post("/api/groups", headers=auth(token), json={"name": "UG"}).get_json()["id"]
-    uid = _uid("u1")
-    client.post(f"/api/groups/{gid}/members", headers=auth(token), json={"user_id": uid})
-
-    res = client.get(f"/api/users/{uid}/groups", headers=auth(token))
-    assert res.status_code == 200
-    assert gid in [g["id"] for g in res.get_json()]
-
-    res = client.delete(f"/api/users/{uid}/groups/{gid}", headers=auth(token))
-    assert res.status_code == 200
-    res = client.get(f"/api/users/{uid}/groups", headers=auth(token))
-    assert gid not in [g["id"] for g in res.get_json()]
-
-
 def test_non_admin_cannot_manage_users(client):
     token = login(client, "u1", "pass")
     uid = _uid("u2")
+    assert client.get("/api/users", headers=auth(token)).status_code == 403
     assert client.delete(f"/api/users/{uid}", headers=auth(token)).status_code == 403
-    assert client.get(f"/api/users/{uid}/groups", headers=auth(token)).status_code == 403

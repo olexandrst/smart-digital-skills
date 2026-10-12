@@ -13,8 +13,7 @@ from app.core.errors import register_error_handlers
 # Каталоги стану, які мають існувати ще до першого запиту. Створюємо їх при
 # старті, а не ліниво: якщо /home/data недоступний для запису, краще впасти
 # одразу з видимою помилкою, ніж через тиждень на завантаженні файлу.
-_STATE_DIRS = ("SKILL_PACKAGES_DIR", "SKILL_ICONS_DIR", "USER_FILES_DIR",
-               "SKILL_RUN_DIR")
+_STATE_DIRS = ("SKILL_PACKAGES_DIR", "SKILL_ICONS_DIR", "USER_FILES_DIR")
 
 
 @event.listens_for(Engine, "connect")
@@ -35,7 +34,7 @@ def _sqlite_pragmas(dbapi_connection, _record):
         cur.execute("PRAGMA journal_mode = %s" % cfg["journal_mode"])
         cur.execute("PRAGMA synchronous = %s" % cfg["synchronous"])
         # Див. коментар до SQLITE_FOREIGN_KEYS у app/config.py: поки в схемі
-        # є зв'язки без ON DELETE, увімкнення ламає видалення матеріалів і груп.
+        # є зв'язки без ON DELETE, увімкнення ламає видалення матеріалів.
         cur.execute("PRAGMA foreign_keys = %s"
                     % ("ON" if cfg["foreign_keys"] else "OFF"))
     finally:
@@ -106,7 +105,7 @@ def create_app(config_object=None):
                 except Exception as exc:   # не валимо старт через довідники
                     app.logger.warning("Довідники не синхронізовано: %s", exc)
 
-    # Планувальник тижневого скидання квот (понеділок 00:05 UTC).
+    # Планувальник щоденних нагадувань власникам про перегляд матеріалів.
     if app.config.get("ENABLE_SCHEDULER", True):
         _start_scheduler(app)
 
@@ -121,20 +120,6 @@ def create_app(config_object=None):
         # версії ще довго після релізу.
         resp = send_from_directory(app.static_folder, "index.html")
         resp.headers["Cache-Control"] = "no-cache, must-revalidate"
-        return resp
-
-    @app.get("/files/<guid>/<path:filename>")
-    def public_user_file(guid, filename):
-        """Пряме клікабельне посилання на файл користувача: /files/<GUID>/<FILE>.
-
-        GUID (storage_uid) виступає як неперебірний капабіліті-токен. Каталог —
-        усередині застосунку (instance/user_files). send_from_directory захищає
-        від виходу за межі теки.
-        """
-        base = os.path.join(app.config["USER_FILES_DIR"], guid)
-        resp = send_from_directory(base, filename)
-        # Файл користувача — приватний: проміжні кеші його зберігати не мають.
-        resp.headers["Cache-Control"] = "private, max-age=3600"
         return resp
 
     return app
@@ -168,7 +153,7 @@ _scheduler = None
 
 
 def _start_scheduler(app):
-    """Запускає APScheduler з тижневим скиданням лічильників квот."""
+    """Запускає APScheduler зі щоденними нагадуваннями про перегляд матеріалів."""
     global _scheduler
     if _scheduler is not None:
         return
@@ -178,15 +163,11 @@ def _start_scheduler(app):
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
     except ImportError:
-        app.logger.warning("APScheduler не встановлено — тижневе скидання працює "
-                           "лише «ліниво» за зсувом тижневого вікна.")
+        app.logger.warning("APScheduler не встановлено — нагадування про перегляд "
+                           "матеріалів не надсилатимуться.")
         return
 
-    from app.services import quota_service, review_service
-
-    def _quota_job():
-        with app.app_context():
-            quota_service.reset_all()
+    from app.services import review_service
 
     def _review_job():
         """Нагадування власникам про перегляд матеріалів (AKH-18).
@@ -201,8 +182,6 @@ def _start_scheduler(app):
                 app.logger.info("Нагадувань про перегляд створено: %s", created)
 
     _scheduler = BackgroundScheduler(daemon=True, timezone="UTC")
-    _scheduler.add_job(_quota_job, "cron", day_of_week="mon", hour=0, minute=5,
-                       id="weekly_quota_reset", replace_existing=True)
     _scheduler.add_job(_review_job, "cron", hour=7, minute=0,
                        id="daily_review_reminders", replace_existing=True)
     _scheduler.start()

@@ -4,8 +4,7 @@
 отримують сповіщення, а рішення (публікація або повернення з коментарем)
 приходить авторові також сповіщенням.
 """
-from app.extensions import db
-from app.models import CatalogResource, Notification, ReviewLog, User
+from app.models import Notification, ReviewLog, User
 
 
 def _login(client, username, password="pass"):
@@ -194,3 +193,14 @@ def test_self_submission_by_manager_does_not_notify_self(client):
     _draft(client, admin, status="draft", submit=True)
     assert _notes(client, admin)["items"] == []
     assert _notes(client, _login(client, "sm"))["unread"] == 1
+
+
+def test_deleting_material_removes_its_notifications(client):
+    """Сповіщення про видалений матеріал не мають лишатися й вести в нікуди."""
+    u1 = _login(client, "u1")
+    rid = _draft(client, u1, submit=True)["id"]
+    admin = _admin(client)
+    assert _notes(client, admin)["unread"] == 1
+    assert client.delete(f"/api/catalog/resources/{rid}", headers=admin).status_code == 200
+    assert Notification.query.filter_by(resource_id=rid).count() == 0
+    assert _notes(client, admin)["items"] == []

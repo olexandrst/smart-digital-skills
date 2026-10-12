@@ -27,19 +27,6 @@ def _default_literal(col):
     return "'" + str(val).replace("'", "''") + "'"
 
 
-def _backfill_value(col):
-    """SQL-вираз для заповнення NULL у NOT NULL-колонці при перебудові таблиці."""
-    lit = _default_literal(col)
-    if lit is not None:
-        return lit
-    t = col.type
-    if isinstance(t, sa.DateTime):
-        return "datetime('now')"
-    if isinstance(t, (sa.Integer, sa.Numeric, sa.Float, sa.Boolean)):
-        return "0"
-    return "''"
-
-
 def _column_ddl(col, dialect):
     """DDL для ADD COLUMN. Повертає None, якщо безпечно додати неможливо."""
     coltype = col.type.compile(dialect=dialect)
@@ -76,10 +63,6 @@ def sync_schema():
             with engine.begin() as conn:
                 conn.execute(sa.text(f'ALTER TABLE "{table.name}" ADD COLUMN {ddl}'))
 
-    # Зняти NOT NULL зі skills.model_id (потрібно для скілів-пакетів).
-    # SQLite-специфічно: на PostgreSQL цю зміну робить Alembic-міграція.
-    if engine.dialect.name == "sqlite":
-        relax_not_null("skills", "model_id")
 
 
 def sync_reference_data():
@@ -231,38 +214,3 @@ def migrate_legacy_tags():
             changed = True
     if changed:
         db.session.commit()
-
-
-def relax_not_null(table_name, column_name):
-    """Робить колонку nullable у SQLite через перебудову таблиці (якщо потрібно)."""
-    engine = db.engine
-    inspector = sa.inspect(engine)
-    tables = set(inspector.get_table_names())
-    if table_name not in tables or f"{table_name}_old" in tables:
-        return
-    col = next((c for c in inspector.get_columns(table_name)
-                if c["name"] == column_name), None)
-    if col is None or col.get("nullable", True):
-        return  # уже nullable або колонки немає
-
-    meta_table = db.metadata.tables.get(table_name)
-    if meta_table is None:
-        return
-    old_cols = [c["name"] for c in inspector.get_columns(table_name)]
-    common = [c for c in old_cols if c in meta_table.c]
-    collist = ", ".join(f'"{c}"' for c in common)
-
-    with engine.begin() as conn:
-        conn.execute(sa.text(f'ALTER TABLE "{table_name}" RENAME TO "{table_name}_old"'))
-    db.create_all()  # відтворює table_name з метаданих (model_id уже nullable)
-    with engine.begin() as conn:
-        # Бекфіл значень для NOT NULL-колонок, де у старих рядках можуть бути NULL.
-        for cname in common:
-            mcol = meta_table.c[cname]
-            if not mcol.nullable:
-                conn.execute(sa.text(
-                    f'UPDATE "{table_name}_old" SET "{cname}"={_backfill_value(mcol)} '
-                    f'WHERE "{cname}" IS NULL'))
-        conn.execute(sa.text(
-            f'INSERT INTO "{table_name}" ({collist}) SELECT {collist} FROM "{table_name}_old"'))
-        conn.execute(sa.text(f'DROP TABLE "{table_name}_old"'))

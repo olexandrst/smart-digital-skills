@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AI Knowledge Hub</title>
-  <link rel="stylesheet" href="style.css?v=76">
+  <link rel="stylesheet" href="style.css?v=77">
 </head>
 <body>
   <!-- Екран входу -->
@@ -31,8 +31,8 @@
         <span class="grad">Автоматизуйте більше.</span>
       </h1>
       <p class="auth-sub">
-        Ваш AI-простір для спілкування з провідними моделями,<br>
-        керування токенами та доступу до бази AI-знань компанії.
+        Каталог AI-знань компанії: навички, промпти, інструкції,<br>
+        кейси й агенти — знаходьте готове й діліться своїм.
       </p>
 
       <form id="login-form" class="login-card">
@@ -100,11 +100,6 @@
 
       <div class="mode-seg" id="mode-seg"></div>
 
-      <button id="new-chat-btn" class="btn-newchat hidden" title="Новий чат">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
-        Новий чат
-      </button>
-
       <div class="spotlight">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.3"/><path d="m15.6 15.6 4.4 4.4"/></svg>
         <input id="global-q" type="text" autocomplete="off"
@@ -141,10 +136,6 @@
             <span id="user-roles" class="roles"></span>
           </div>
           <div class="me-sep"></div>
-          <button class="me-item" data-go="hub:files" role="menuitem">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.2c0-1 .8-1.8 1.8-1.8h3.4l1.8 2.2h8.2c1 0 1.8.8 1.8 1.8v8.4c0 1-.8 1.8-1.8 1.8H5.3c-1 0-1.8-.8-1.8-1.8V7.2Z"/></svg>
-            Мої файли
-          </button>
           <button class="me-item" data-go="hub:fav" role="menuitem">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8L12 3.6Z"/></svg>
             Обране<span class="me-right" id="me-fav-count"></span>
@@ -156,17 +147,6 @@
           <button class="me-item" data-act="my-content" role="menuitem" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5"/><path d="M9 12.5h6M9 16h4"/></svg>
             Мій контент
-          </button>
-          <div class="me-sep"></div>
-          <button class="me-item me-quota" id="quota" type="button" role="menuitem">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/></svg>
-            <span class="me-quota-body">
-              <span class="quota-top">
-                <span class="quota-label">Квота за тиждень</span>
-                <span class="quota-nums"><b id="quota-used">—</b> / <span id="quota-limit">—</span></span>
-              </span>
-              <span class="quota-bar"><span class="quota-fill" id="quota-fill"></span></span>
-            </span>
           </button>
           <div class="me-sep"></div>
           <div class="me-theme"><span>Тема</span><div class="theme-seg" id="theme-seg"></div></div>
@@ -193,6 +173,6 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <script src="app.js?v=76"></script>
+  <script src="app.js?v=77"></script>
 </body>
 </html>

@@ -18,7 +18,7 @@ from app.services import (
 )
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
-    CatalogResourceMaturity, HiddenRecommendation, LearningPath, LearningProgress,
+    CatalogResourceMaturity, HiddenRecommendation,
     CatalogResource, CatalogFavorite, ReviewLog, SearchQueryLog, SearchSynonym,
     UserFile,
     Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
@@ -26,7 +26,7 @@ from app.models import (
     User,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
-    TERM_KINDS, SINGLE_VALUE_TERM_KINDS, MULTI_VALUE_TERM_KINDS,
+    TERM_KINDS, MULTI_VALUE_TERM_KINDS,
     CODE_BOUND_TERM_KINDS, VIEW_TARGETS,
     SURVEY_KINDS, SURVEY_SCALES,
 )
@@ -1294,8 +1294,7 @@ def upload_resource_file(resource_id):
     file = request.files.get("file")
     if file is None or not file.filename:
         raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
-    uf = file_service.save_bytes(user, file.filename, file.read(),
-                                 source="attachment", resource_id=res.id)
+    uf = file_service.save_attachment(user, file.filename, file.read(), res.id)
     return jsonify(uf.to_dict()), 201
 
 
@@ -1346,6 +1345,10 @@ def delete_resource(resource_id):
     CatalogResourceMaturity.query.filter_by(resource_id=resource_id)\
         .delete(synchronize_session=False)
     CatalogFavorite.query.filter_by(item_type="resource", item_id=resource_id)\
+        .delete(synchronize_session=False)
+    # Сповіщення про видалений матеріал вели б у нікуди (ON DELETE CASCADE у
+    # схемі є, але SQLite без перевірки зовнішніх ключів його не виконує).
+    Notification.query.filter_by(resource_id=resource_id)\
         .delete(synchronize_session=False)
     SkillFeedback.query.filter_by(resource_id=resource_id).update(
         {SkillFeedback.resource_id: None}, synchronize_session=False)

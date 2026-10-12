@@ -1,10 +1,9 @@
-"""FileService — постійне сховище файлів користувача.
+"""FileService — фізичне сховище вкладень до карток каталогу.
 
 Кожному користувачу відповідає підкаталог з GUID-назвою:
     <USER_FILES_DIR>/<user.storage_uid>/
-
-Файли, створені скілами під час виконання, та завантажені користувачем
-зберігаються тут назавжди й доступні для завантаження через API.
+Вкладення лежить у теці того, хто його завантажив; права на читання
+визначає картка, до якої воно прикріплене (див. app/api/catalog.py).
 """
 import os
 import re
@@ -52,17 +51,14 @@ def user_dir(user):
     return path
 
 
-def save_bytes(user, filename, data, source="upload", skill_id=None,
-               resource_id=None):
-    """Зберігає байти як файл користувача; повертає UserFile."""
+def save_attachment(user, filename, data, resource_id):
+    """Зберігає байти як вкладення до картки; повертає UserFile."""
     max_bytes = current_app.config.get("USER_FILE_MAX_BYTES", 25 * 1024 * 1024)
     if len(data) > max_bytes:
         raise ApiError(f"Файл '{filename}' перевищує ліміт розміру",
                        400, "file_too_large")
 
     directory = user_dir(user)
-    # Зберігаємо під оригінальною (очищеною) назвою, щоб публічний URL був
-    # виду /files/<GUID>/<FILENAME>; за потреби — дедуплікація назви.
     stored = _unique_name(directory, _safe_basename(filename))
     with open(os.path.join(directory, stored), "wb") as fh:
         fh.write(data)
@@ -73,8 +69,7 @@ def save_bytes(user, filename, data, source="upload", skill_id=None,
         stored_name=stored,
         content_type=(mimetypes.guess_type(stored)[0] or "application/octet-stream"),
         size=len(data),
-        source=source,
-        skill_id=skill_id,
+        source="attachment",
         resource_id=resource_id,
     )
     db.session.add(uf)
@@ -82,28 +77,10 @@ def save_bytes(user, filename, data, source="upload", skill_id=None,
     return uf
 
 
-def save_path(user, src_path, display_name=None, source="skill_run", skill_id=None):
-    with open(src_path, "rb") as fh:
-        data = fh.read()
-    return save_bytes(user, display_name or os.path.basename(src_path),
-                      data, source=source, skill_id=skill_id)
-
-
-def list_files(user):
-    """Особисті файли користувача.
-
-    Вкладення до карток каталогу сюди не потрапляють: вони є вмістом картки й
-    керуються з неї, хоч і лежать у сховищі того, хто їх завантажив.
-    """
-    return (UserFile.query.filter_by(user_id=user.id, resource_id=None)
-            .order_by(UserFile.created_at.desc()).all())
-
-
 def remove_stored_file(uf):
     """Прибирає фізичний файл будь-якого власника (для вкладень і каскадів).
 
-    На відміну від delete_file, не перевіряє, чий це файл — виклик має сам
-    вирішити питання прав.
+    Права не перевіряє — виклик має сам вирішити питання доступу.
     """
     owner = uf.user
     if owner is None:
@@ -114,27 +91,3 @@ def remove_stored_file(uf):
             os.remove(path)
         except OSError:
             pass
-
-
-def get_owned_file(user, file_id):
-    uf = UserFile.query.filter_by(id=file_id, user_id=user.id).first()
-    if uf is None:
-        raise ApiError("Файл не знайдено", 404, "not_found")
-    return uf
-
-
-def file_abs_path(uf, user):
-    return os.path.join(user_dir(user), uf.stored_name)
-
-
-def delete_file(user, file_id):
-    uf = get_owned_file(user, file_id)
-    path = file_abs_path(uf, user)
-    if os.path.exists(path):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-    db.session.delete(uf)
-    db.session.commit()
-    return True

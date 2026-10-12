@@ -2,7 +2,7 @@
 import pytest
 
 from app.extensions import db
-from app.models import User, Role, UserRole
+from app.models import User
 from app.services import entra_service
 
 

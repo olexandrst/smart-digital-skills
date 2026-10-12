@@ -1,79 +1,36 @@
-"""Менеджмент користувачів (тільки Admin): CRUD, скидання пароля, ролі, групи."""
+"""Менеджмент користувачів (тільки Admin): CRUD, скидання пароля, ролі."""
 import os
 import shutil
 from flask import Blueprint, request, jsonify, current_app
-from sqlalchemy import or_
 from app.extensions import db
 from app.core.permissions import require_global_role
 from app.core.security import hash_password, current_user
 from app.core.errors import ApiError
 from app.models import (
-    User, Role, UserRole, Group, GroupMembership, UserSkill,
-    ChatSession, ChatMessage, TokenUsageLog, TokenCounter, TokenLimit,
-    RefreshToken, UserFile,
+    User, Role, UserRole, RefreshToken, UserFile, Notification, CatalogFavorite,
+    LearningProgress, HiddenRecommendation, SurveyPrompt, UserSession,
+    Idea, ReviewLog, SearchQueryLog, SkillFeedback, SurveyResponse, ResourceView,
 )
-from app.services import quota_service, group_service
 
 bp = Blueprint("users", __name__)
 
-
-@bp.get("/search")
-@require_global_role("admin")
-def search_users():
-    """Пошук користувачів за логіном, іменем або email (для додавання в групи)."""
-    q = (request.args.get("q") or "").strip()
-    query = User.query
-    if q:
-        like = f"%{q}%"
-        query = query.filter(or_(
-            User.username.ilike(like),
-            User.full_name.ilike(like),
-            User.email.ilike(like),
-        ))
-    users = query.order_by(User.username).limit(20).all()
-    return jsonify([
-        {"id": u.id, "username": u.username, "full_name": u.full_name,
-         "email": u.email, "is_active": u.is_active}
-        for u in users
-    ])
-
-
-def _with_quota(user):
-    d = user.to_dict()
-    # Квота — у грошах (USD): витрачено за тиждень, персональний та ефективний ліміт.
-    d["used_cost"] = quota_service.get_used(user.id)
-    d["custom_limit"] = quota_service.get_user_custom_limit(user.id)  # $ або None
-    d["effective_limit"] = quota_service.effective_limit(user.id)
-    return d
+# Записи, що належать користувачеві й без нього не мають сенсу. Ролі сюди не
+# входять: це колекція User.roles, і зв'язки з нею знімає сама ORM.
+_OWNED_BY_USER = (RefreshToken, UserFile, Notification, CatalogFavorite,
+                  LearningProgress, HiddenRecommendation, SurveyPrompt,
+                  UserSession)
+# Записи, що мають пережити користувача (історія, аналітика): лише
+# відв'язуються. (колонка, модель)
+_REFERENCES_TO_USER = ((Idea, "author_id"), (ReviewLog, "actor_user_id"),
+                       (SearchQueryLog, "user_id"), (SkillFeedback, "user_id"),
+                       (SurveyResponse, "user_id"), (ResourceView, "user_id"))
 
 
 @bp.get("")
 @require_global_role("admin")
 def list_users():
     users = User.query.order_by(User.id).all()
-    return jsonify([_with_quota(u) for u in users])
-
-
-@bp.post("/<int:user_id>/token-limit")
-@require_global_role("admin")
-def set_token_limit(user_id):
-    """Встановити/оновити ПЕРСОНАЛЬНУ тижневу квоту (має пріоритет над системною)."""
-    user = User.query.get_or_404(user_id)
-    data = request.get_json(silent=True) or {}
-    if "limit" not in data:
-        raise ApiError("Вкажіть limit", 400, "validation_error")
-    limit = quota_service.set_user_limit(user.id, data["limit"])
-    return jsonify({"user_id": user.id, "custom_limit": limit})
-
-
-@bp.delete("/<int:user_id>/token-limit")
-@require_global_role("admin")
-def delete_token_limit(user_id):
-    """Видалити персональну квоту — користувач повертається до системної."""
-    user = User.query.get_or_404(user_id)
-    quota_service.delete_user_limit(user.id)
-    return jsonify({"user_id": user.id,
-                    "effective_limit": quota_service.effective_limit(user.id)})
+    return jsonify([u.to_dict() for u in users])
 
 
 @bp.post("")
@@ -144,9 +101,12 @@ def reset_password(user_id):
 @bp.delete("/<int:user_id>")
 @require_global_role("admin")
 def delete_user(user_id):
-    """Повне видалення користувача та всіх його даних.
+    """Повне видалення користувача та його даних.
 
-    Заборонено видаляти себе та системного адміністратора.
+    Каскад робимо явно, а не покладаємося на ON DELETE у схемі: у SQLite
+    перевірка зовнішніх ключів типово вимкнена (див. SQLITE_FOREIGN_KEYS),
+    і без цього лишилися б осиротілі рядки. Заборонено видаляти себе та
+    системного адміністратора.
     """
     user = User.query.get_or_404(user_id)
     if user.id == current_user().id:
@@ -155,51 +115,23 @@ def delete_user(user_id):
         raise ApiError("Не можна видалити системного адміністратора", 400, "protected_user")
 
     storage_uid = user.storage_uid
-
-    # Видаляємо повідомлення чатів (за сесіями користувача), потім сесії.
-    session_ids = [s.id for s in ChatSession.query.filter_by(user_id=user_id).all()]
-    if session_ids:
-        ChatMessage.query.filter(ChatMessage.session_id.in_(session_ids)).delete(
-            synchronize_session=False)
-    for model in (ChatSession, UserSkill, TokenCounter, TokenUsageLog,
-                  RefreshToken, UserFile, GroupMembership, UserRole):
+    user.roles = []
+    for model in _OWNED_BY_USER:
         model.query.filter_by(user_id=user_id).delete(synchronize_session=False)
-    TokenLimit.query.filter_by(scope_type="user", scope_id=user_id).delete(
-        synchronize_session=False)
+    for model, column in _REFERENCES_TO_USER:
+        col = getattr(model, column)
+        model.query.filter(col == user_id).update({col: None}, synchronize_session=False)
 
     db.session.delete(user)
     db.session.commit()
 
-    # Прибираємо теку з файлами користувача (не критично, якщо не вдалося).
+    # Тека з вкладеннями, які завантажував користувач (не критично, якщо не вдалося).
     if storage_uid:
         path = os.path.join(current_app.config.get("USER_FILES_DIR", ""), storage_uid)
         if path and os.path.isdir(path):
             shutil.rmtree(path, ignore_errors=True)
 
     return jsonify({"message": "Користувача та його дані видалено"})
-
-
-@bp.get("/<int:user_id>/groups")
-@require_global_role("admin")
-def user_groups(user_id):
-    """Групи, у яких користувач є активним членом."""
-    User.query.get_or_404(user_id)
-    rows = (db.session.query(Group)
-            .join(GroupMembership, GroupMembership.group_id == Group.id)
-            .filter(GroupMembership.user_id == user_id,
-                    GroupMembership.status == "active")
-            .order_by(Group.name)
-            .all())
-    return jsonify([{"id": g.id, "name": g.name, "description": g.description}
-                    for g in rows])
-
-
-@bp.delete("/<int:user_id>/groups/<int:group_id>")
-@require_global_role("admin")
-def remove_user_from_group(user_id, group_id):
-    """Вилучає користувача з конкретної групи."""
-    group_service.remove_member(group_id, user_id)
-    return jsonify({"message": "Користувача вилучено з групи"})
 
 
 def _set_roles(user, role_codes):

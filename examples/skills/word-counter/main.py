@@ -1,6 +1,8 @@
-"""Entrypoint скіла-пакета Word Counter.
+"""Точка входу навички-пакета Word Counter.
 
-Читає JSON {"inputs": {...}} зі stdin і друкує JSON {"output": "...", "usage": {...}}.
+Читає JSON {"inputs": {...}} зі stdin і друкує JSON {"output": "..."}.
+Запускається у власному середовищі користувача — хаб пакет лише зберігає
+й віддає на завантаження.
 """
 import sys
 import json
@@ -33,16 +35,12 @@ def main():
 
     output = "\n".join(lines)
 
-    # Якщо задано save_report — створюємо файл; система збереже його у сховище
-    # користувача й надасть посилання на завантаження.
+    # Якщо задано save_report — звіт пишеться в поточну теку, поруч із місцем запуску.
     if inputs.get("save_report"):
         with open("report.txt", "w", encoding="utf-8") as fh:
             fh.write(output + "\n")
 
-    print(json.dumps({
-        "output": output,
-        "usage": {"prompt_tokens": stats["chars"], "completion_tokens": len(output)},
-    }, ensure_ascii=False))
+    print(json.dumps({"output": output}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
