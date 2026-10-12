@@ -799,8 +799,11 @@ body.theme-dark .cat-kind.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
   padding: 8px 16px; border-bottom: 1px solid var(--border);
 }
 .cat-sel:last-child { border-bottom: none; }
-.cat-sel > span { font-size: var(--fs-foot); color: var(--text); flex: 0 0 auto; }
+.cat-sel > span { font-size: var(--fs-foot); color: var(--text); flex: 1 1 auto; min-width: 0; }
+/* Довгий підпис («Повторне використання») переноситься, а не виштовхує
+   значення за край поповера. */
 .cat-sel select {
+  flex: 0 1 auto; min-width: 64px;
   margin-left: auto; width: auto; max-width: 168px; height: 28px;
   padding: 0 26px 0 9px; border: none; background-color: transparent;
   background-position: right 4px center;
