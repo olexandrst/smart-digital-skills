@@ -32,12 +32,12 @@ def seed():
         # 1. Ролі
         admin_role, _ = _get_or_create(
             Role, code="admin",
-            defaults={"name": "Адміністратор системи",
-                      "description": "Повний контроль над системою"})
+            defaults={"name": "Адміністратор",
+                      "description": "Повний контроль над системою й користувачами"})
         sm_role, _ = _get_or_create(
             Role, code="skill_manager",
-            defaults={"name": "Skill-менеджер",
-                      "description": "Керування каталогом і навичками"})
+            defaults={"name": "Менеджер каталогу",
+                      "description": "Модерація й керування всім контентом каталогу"})
 
         # 2. Супер-адмін
         admin_username = os.getenv("ADMIN_USERNAME", "admin")
@@ -54,11 +54,11 @@ def seed():
         if created:
             db.session.add(UserRole(user_id=admin.id, role_id=admin_role.id))
 
-        # 3. Демо Skill-менеджер
+        # 3. Демо-менеджер каталогу
         sm_user, sm_created = _get_or_create(
             User, username="skillmanager",
             defaults={
-                "full_name": "Демо Skill-менеджер",
+                "full_name": "Демо менеджер каталогу",
                 "email": "skill@profihub.local",
                 "password_hash": hash_password("Skill123!"),
                 "is_active": True,
@@ -119,7 +119,7 @@ def seed():
 
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
-        print("  Skill-менеджер: skillmanager / Skill123!")
+        print("  Менеджер каталогу: skillmanager / Skill123!")
         print("  Користувачі:    user1 / User123!,  user2 / User123!")
 
 

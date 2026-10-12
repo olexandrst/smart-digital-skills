@@ -69,3 +69,44 @@ def test_downgrade_and_upgrade_round_trip(tmp_path, migrated_db):
     _alembic(migrated_db, "upgrade", "head", tmp_path=tmp_path)
     tables = set(inspect(create_engine(f"sqlite:///{migrated_db}")).get_table_names())
     assert not tables & REMOVED_TABLES
+
+
+def _insert(conn, table, **values):
+    """Вставляє рядок, заповнюючи решту обов'язкових колонок нейтральними
+    значеннями: тесту важливі лише поля, які перевіряє міграція."""
+    from sqlalchemy import text
+    for col in inspect(conn).get_columns(table):
+        if col["name"] in values or col["nullable"] or col["name"] == "id":
+            continue
+        kind = str(col["type"]).upper()
+        values[col["name"]] = (0 if any(k in kind for k in ("INT", "BOOL"))
+                               else "2026-01-01 00:00:00" if "DATE" in kind else "x")
+    names = ", ".join(values)
+    marks = ", ".join(f":{k}" for k in values)
+    conn.execute(text(f"INSERT INTO {table} ({names}) VALUES ({marks})"), values)
+
+
+def test_post_moderation_migration_converts_data(tmp_path):
+    """Матеріали «на розгляді» публікуються, старі відгуки лишаються
+    приватними, роль менеджера отримує нову назву."""
+    from sqlalchemy import text
+    path = tmp_path / "data.db"
+    _alembic(path, "upgrade", "c4f1a9e3d2b7", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        _insert(conn, "roles", code="skill_manager", name="Skill-менеджер")
+        _insert(conn, "catalog_resources", name="На розгляді", status="review",
+                submitted_at="2026-09-01 10:00:00", published_at=None)
+        _insert(conn, "catalog_resources", name="Чернетка", status="draft")
+        _insert(conn, "skill_feedback", item_type="resource", skill_name="x",
+                message="приватний відгук")
+    _alembic(path, "upgrade", "head", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT name, status FROM catalog_resources")).all())
+        assert rows == {"На розгляді": "published", "Чернетка": "draft"}
+        published_at = conn.execute(text(
+            "SELECT published_at FROM catalog_resources WHERE name = 'На розгляді'")).scalar()
+        assert str(published_at).startswith("2026-09-01")
+        assert conn.execute(text("SELECT is_public FROM skill_feedback")).scalar() == 0
+        assert conn.execute(text(
+            "SELECT name FROM roles WHERE code = 'skill_manager'")).scalar() == "Менеджер каталогу"

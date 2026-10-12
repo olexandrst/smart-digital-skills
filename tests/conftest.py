@@ -43,7 +43,7 @@ def client(app):
 
 def _seed_minimal():
     admin_role = Role(code="admin", name="Admin")
-    sm_role = Role(code="skill_manager", name="Skill Manager")
+    sm_role = Role(code="skill_manager", name="Менеджер каталогу")
     _db.session.add_all([admin_role, sm_role])
     _db.session.flush()
 

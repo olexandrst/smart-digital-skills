@@ -68,7 +68,7 @@ def test_plain_user_may_not_attach_to_foreign_card(client):
 def test_author_attaches_to_own_draft(client):
     """Автор наповнює свою чернетку файлами ще до того, як її опублікують."""
     u1 = login(client, "u1", "pass")
-    rid = _resource(client, u1).get_json()["id"]
+    rid = _resource(client, u1, status="draft").get_json()["id"]
     assert _attach(client, u1, rid).status_code == 201
     files = client.get(f"/api/catalog/resources/{rid}/files", headers=auth(u1)).get_json()
     assert [f["filename"] for f in files] == ["guide.txt"]

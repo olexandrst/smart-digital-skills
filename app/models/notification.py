@@ -19,10 +19,15 @@ def _iso(value):
 
 
 # review_due / review_overdue — нагадування власникові про перегляд;
-# review_requested — менеджерам: подано матеріал на розгляд;
-# review_published / review_rejected — авторові: рішення за його матеріалом.
-NOTIFICATION_KINDS = ("review_due", "review_overdue",
-                      "review_requested", "review_published", "review_rejected")
+# content_published / content_updated — менеджерам: користувач опублікував
+#   або змінив опублікований матеріал чи навичку;
+# content_moderated — авторові: менеджер зняв його матеріал з публікації,
+#   переніс в архів, видалив тощо (з причиною, якщо вказана);
+# comment_added — авторові: новий коментар до його матеріалу.
+# Старі review_requested / review_published / review_rejected лишаються в
+# історії й показуються як звичайні сповіщення.
+NOTIFICATION_KINDS = ("review_due", "review_overdue", "content_published",
+                      "content_updated", "content_moderated", "comment_added")
 
 
 class Notification(db.Model):
@@ -35,15 +40,17 @@ class Notification(db.Model):
     kind = db.Column(db.String, nullable=False)
     title = db.Column(db.String, nullable=False)
     body = db.Column(db.Text)
-    # Матеріал, якого стосується сповіщення (якщо застосовно).
+    # Матеріал або навичка, якого стосується сповіщення (якщо застосовно).
     resource_id = db.Column(db.Integer, db.ForeignKey("catalog_resources.id",
                                                       ondelete="CASCADE"))
+    skill_id = db.Column(db.Integer, db.ForeignKey("skills.id", ondelete="CASCADE"))
     # Ключ проти повторів: «цей привід для цього матеріалу на цю дату».
     dedupe_key = db.Column(db.String, nullable=False)
     is_read = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
     resource = db.relationship("CatalogResource", lazy="joined")
+    skill = db.relationship("Skill", lazy="joined")
 
     def to_dict(self):
         return {
@@ -53,6 +60,8 @@ class Notification(db.Model):
             "body": self.body,
             "resource_id": self.resource_id,
             "resource_name": self.resource.name if self.resource else None,
+            "skill_id": self.skill_id,
+            "skill_name": self.skill.name if self.skill else None,
             "is_read": self.is_read,
             "created_at": _iso(self.created_at),
         }

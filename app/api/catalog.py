@@ -1,7 +1,8 @@
 """Каталог AI Knowledge Hub: розділи, ресурси, обране, пошук та аналітика.
 
 Навички лишаються у /api/skills — тут усе інше наповнення каталогу.
-Керування ресурсами й розділами: Admin / Skill Manager. Перегляд — усі.
+Публікує матеріали будь-який користувач; структуру каталогу (розділи,
+колекції, довідники) і модерацію веде менеджер каталогу. Перегляд — усі.
 """
 import os
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ from app.core.security import current_user
 from app.core.errors import ApiError
 from app.services import (
     file_service, usage_service, search_service, assistant_service, review_service,
-    text_extract_service,
+    text_extract_service, comment_service,
 )
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
@@ -25,7 +26,7 @@ from app.models import (
     Notification,
     User,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
-    RESOURCE_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
+    RESOURCE_STATUSES, AUTHOR_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
     TERM_KINDS, MULTI_VALUE_TERM_KINDS,
     CODE_BOUND_TERM_KINDS, VIEW_TARGETS,
     SURVEY_KINDS, SURVEY_SCALES,
@@ -95,11 +96,11 @@ def _is_manager(user):
 
 # --- Хто що може з матеріалом ---
 #
-# Додати матеріал може будь-який користувач: він потрапляє в каталог як
-# чернетка, яку бачать лише автор і менеджери, а публікує менеджер (двоступеневе
-# погодження з GOVERNANCE, рішення 3). Автор править і видаляє свою чернетку
-# сам; щойно матеріал опубліковано, зміни — лише через менеджера, бо на
-# опублікований текст уже спираються інші.
+# Пост-модерація. Будь-який користувач публікує матеріал сам (або зберігає
+# чернетку) і далі керує своїм: править, знімає з публікації, видаляє.
+# Менеджери каталогу отримують сповіщення про кожну публікацію користувача
+# й можуть зробити з будь-яким матеріалом усе — автор дізнається про їхнє
+# рішення сповіщенням. Архів і «потребує оновлення» — інструменти менеджера.
 
 def _is_author(res, user):
     return res.created_by is not None and res.created_by == user.id
@@ -111,7 +112,24 @@ def _can_see(res, user):
 
 
 def _may_edit(res, user):
-    return _is_manager(user) or (_is_author(res, user) and res.status == "draft")
+    return _is_manager(user) or _is_author(res, user)
+
+
+# Типовий період до наступного перегляду, якщо автор його не задав.
+DEFAULT_REVIEW_MONTHS = 6
+
+
+def _default_ownership(item, user):
+    """Користувач публікує сам — відповідальним стає він.
+
+    Без власника й дати перегляду опублікований матеріал ніхто не
+    актуалізує, а сувора публікація взагалі не випустила б його: таких полів
+    у майстрі немає. Автор знає матеріал найкраще, тож він і власник.
+    """
+    if not (item.owner or "").strip():
+        item.owner = user.full_name or user.username
+    if hasattr(item, "next_review_at") and item.next_review_at is None:
+        item.next_review_at = datetime.utcnow() + timedelta(days=30 * DEFAULT_REVIEW_MONTHS)
 
 
 def strict_publish_enabled():
@@ -395,17 +413,6 @@ def _log_review(item_type, item, from_status, to_status, note=None):
         actor_name=(user.full_name or user.username) if user else None,
         from_status=from_status, to_status=to_status, note=note,
     ))
-
-
-def _submit_for_review(res, user):
-    """Чернетка → «На розгляді»: автор більше не редагує, менеджери отримують
-    сповіщення. Попередній коментар повернення знімається — він стосувався
-    старої версії."""
-    res.status = "review"
-    res.submitted_at = datetime.utcnow()
-    res.review_note = None
-    _log_review("resource", res, "draft", "review")
-    review_service.notify_submitted(res, user)
 
 
 # ------------------------------- Розділи -------------------------------
@@ -853,7 +860,7 @@ def list_resources():
     `type`, `section_id`, `folder_id`, `status`, `complexity_id`,
     `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q`.
 
-    Admin/Skill Manager бачать усе; решта — опубліковані та ті, що потребують
+    Менеджери каталогу бачать усе; решта — опубліковані та ті, що потребують
     оновлення (чернетки й архів приховані). `mine=1` — лише матеріали, які
     створив поточний користувач, у будь-якому статусі: так автор бачить свої
     чернетки, не отримуючи доступу до чужих.
@@ -1050,15 +1057,20 @@ def create_resource():
     user = current_user()
     manager = _is_manager(user)
     if not manager:
-        # Користувач подає матеріал на розгляд: статус і «рекомендований»
-        # вирішує менеджер, тому ці поля з його запиту не беруться взагалі —
-        # мовчки, а не помилкою, щоб один і той самий клієнт працював для обох.
-        data = {k: v for k, v in data.items() if k not in ("status", "is_featured")}
+        # «Рекомендований» — рішення менеджера; з запиту користувача поле не
+        # береться мовчки, щоб один клієнт працював для обох ролей.
+        data = {k: v for k, v in data.items() if k != "is_featured"}
+    status = data.get("status") or "draft"
+    if status not in AUTHOR_STATUSES:
+        raise ApiError("Новий матеріал можна опублікувати (published) або зберегти "
+                       "чернеткою (draft)", 400, "validation_error")
     res = CatalogResource(created_by=user.id)
     res.author = user.full_name or user.username
     _apply_fields(res, data, creating=True)
-    publish = manager and (data.get("status") or "draft") == "published"
+    publish = status == "published"
     if publish:
+        if not manager:
+            _default_ownership(res, user)
         _require_publish_ready(res)
         res.status = "published"
         res.published_at = datetime.utcnow()
@@ -1068,10 +1080,7 @@ def create_resource():
     _set_maturity(res, data.get("maturity_ids"))
     if publish:
         _log_review("resource", res, None, "published")
-    elif data.get("submit"):
-        # Майстер подає одразу: окремий запит на /submit лишив би вікно, у
-        # якому чернетка створена, а подання не відбулося.
-        _submit_for_review(res, user)
+        review_service.notify_published("resource", res, user)
     db.session.commit()
     return jsonify(res.to_dict()), 201
 
@@ -1082,110 +1091,72 @@ def update_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
     user = current_user()
     if not _may_edit(res, user):
-        raise ApiError("Редагувати можна лише власну чернетку; опублікований "
-                       "матеріал змінює менеджер каталогу", 403, "forbidden")
+        raise ApiError("Редагувати матеріал може його автор або менеджер каталогу",
+                       403, "forbidden")
     data = request.get_json(silent=True) or {}
-    if not _is_manager(user):
-        data = {k: v for k, v in data.items() if k != "is_featured"}
+    manager = _is_manager(user)
+    if not manager:
+        data = {k: v for k, v in data.items() if k not in ("is_featured", "status")}
     _apply_fields(res, data)
     if "tags" in data:
         _set_tags(res, data.get("tags"))
     if "maturity_ids" in data:
         _set_maturity(res, data.get("maturity_ids"))
+    # Автор змінив те, що вже бачать усі, — менеджери мають про це знати.
+    if res.status in PUBLIC_STATUSES:
+        review_service.notify_published("resource", res, user, updated=True)
     db.session.commit()
     return jsonify(res.to_dict())
 
 
 @bp.post("/resources/<int:resource_id>/status")
-@require_global_role("admin", "skill_manager")
+@require_auth
 def change_resource_status(resource_id):
-    """Перехід життєвим циклом: draft → published → needs_update → archived."""
+    """Зміна стану матеріалу.
+
+    Автор може опублікувати свій матеріал або зняти його з публікації
+    (`published` / `draft`); менеджер — будь-який перехід життєвого циклу.
+    Коли менеджер змінює стан чужого матеріалу, автор отримує сповіщення з
+    причиною (`note`); коли автор публікує — сповіщення отримують менеджери.
+    """
     res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    manager = _is_manager(user)
+    if not (manager or _is_author(res, user)):
+        raise ApiError("Змінити стан матеріалу може його автор або менеджер каталогу",
+                       403, "forbidden")
     data = request.get_json(silent=True) or {}
     new_status = data.get("status")
-    if new_status not in RESOURCE_STATUSES:
-        raise ApiError("Статус має бути одним із: " + ", ".join(RESOURCE_STATUSES),
+    allowed = RESOURCE_STATUSES if manager else AUTHOR_STATUSES
+    if new_status not in allowed:
+        raise ApiError("Статус має бути одним із: " + ", ".join(allowed),
                        400, "validation_error")
+    note = " ".join((data.get("note") or "").split()) or None
+    if note and len(note) > 2000:
+        raise ApiError("Причина завелика (максимум 2000 символів)", 400, "validation_error")
     if new_status == "published":
+        if not manager:
+            _default_ownership(res, user)
         _require_publish_ready(res)
 
     old_status = res.status
-    note = (data.get("note") or "").strip() or None
+    if old_status == new_status:
+        return jsonify(res.to_dict())
     res.status = new_status
     if new_status == "published":
         if res.published_at is None:
             res.published_at = datetime.utcnow()
         res.reviewed_at = datetime.utcnow()
-    if old_status != new_status:
-        _log_review("resource", res, old_status, new_status, note)
-    # Рішення за поданим матеріалом — автор має про нього дізнатися.
-    if old_status == "review" and new_status != "review":
-        if new_status == "published":
-            res.review_note = None
-            review_service.notify_published(res, current_user())
-        else:
-            res.review_note = note or "Матеріал повернуто без коментаря."
-            review_service.notify_rejected(res, current_user(), res.review_note)
-    db.session.commit()
-    return jsonify(res.to_dict())
-
-
-@bp.post("/resources/<int:resource_id>/submit")
-@require_auth
-def submit_resource(resource_id):
-    """Автор подає чернетку на розгляд; менеджери отримують сповіщення."""
-    res = CatalogResource.query.get_or_404(resource_id)
-    user = current_user()
-    # Спершу «чи твоє», потім «чи в тому стані»: чужому — 403 незалежно від
-    # стану, своєму вже поданому — 409, а не хибне «немає прав».
-    if not (_is_manager(user) or _is_author(res, user)):
-        raise ApiError("Подати на розгляд може автор чернетки або менеджер",
-                       403, "forbidden")
-    if res.status != "draft":
-        raise ApiError("На розгляд подається лише чернетка", 409, "wrong_status")
-    _submit_for_review(res, user)
-    db.session.commit()
-    return jsonify(res.to_dict())
-
-
-@bp.post("/resources/<int:resource_id>/withdraw")
-@require_auth
-def withdraw_resource(resource_id):
-    """Автор забирає матеріал із розгляду, щоб доопрацювати."""
-    res = CatalogResource.query.get_or_404(resource_id)
-    user = current_user()
-    if not (_is_manager(user) or _is_author(res, user)):
-        raise ApiError("Відкликати може автор матеріалу або менеджер", 403, "forbidden")
-    if res.status != "review":
-        raise ApiError("Відкликати можна лише матеріал на розгляді", 409, "wrong_status")
-    res.status = "draft"
-    _log_review("resource", res, "review", "draft", "Відкликано з розгляду")
-    db.session.commit()
-    return jsonify(res.to_dict())
-
-
-@bp.post("/resources/<int:resource_id>/reject")
-@require_global_role("admin", "skill_manager")
-def reject_resource(resource_id):
-    """Менеджер повертає поданий матеріал на доопрацювання — з коментарем.
-
-    Коментар обов'язковий: повернення без причини лишає автора здогадуватися,
-    і матеріал так і не доходить до каталогу.
-    """
-    res = CatalogResource.query.get_or_404(resource_id)
-    data = request.get_json(silent=True) or {}
-    note = " ".join((data.get("note") or "").split())
-    if not note:
-        raise ApiError("Напишіть, що саме виправити — автор має зрозуміти причину",
-                       400, "validation_error")
-    if len(note) > 2000:
-        raise ApiError("Коментар завеликий (максимум 2000 символів)", 400, "validation_error")
-    if res.status != "review":
-        raise ApiError("Повернути можна лише матеріал на розгляді", 409, "wrong_status")
-    res.status = "draft"
-    res.review_note = note
-    _log_review("resource", res, "review", "draft", note)
-    review_service.notify_rejected(res, current_user(), note)
+        res.review_note = None
+    elif new_status in ("draft", "archived") and manager and not _is_author(res, user):
+        # Причина лишається в картці: автор побачить її, відкривши свій матеріал.
+        res.review_note = note
+    _log_review("resource", res, old_status, new_status, note)
+    if manager:
+        action = {"draft": "unpublished"}.get(new_status, new_status)
+        review_service.notify_moderated("resource", res, user, action, note)
+    elif new_status == "published":
+        review_service.notify_published("resource", res, user)
     db.session.commit()
     return jsonify(res.to_dict())
 
@@ -1331,10 +1302,14 @@ def delete_resource_file(resource_id, file_id):
 @bp.delete("/resources/<int:resource_id>")
 @require_auth
 def delete_resource(resource_id):
+    """Видалення матеріалу автором або менеджером. Якщо видаляє менеджер
+    чужий матеріал, автор отримує сповіщення з причиною (`note`)."""
     res = CatalogResource.query.get_or_404(resource_id)
-    if not _may_edit(res, current_user()):
-        raise ApiError("Видалити можна лише власну чернетку; опублікований "
-                       "матеріал знімає з обігу менеджер каталогу", 403, "forbidden")
+    user = current_user()
+    if not _may_edit(res, user):
+        raise ApiError("Видалити матеріал може його автор або менеджер каталогу",
+                       403, "forbidden")
+    note = " ".join(((request.get_json(silent=True) or {}).get("note") or "").split()) or None
     # Вкладення живуть лише разом із карткою — інакше у сховищі лишаються
     # файли, до яких більше немає жодного шляху з інтерфейсу.
     for uf in UserFile.query.filter_by(resource_id=resource_id).all():
@@ -1352,50 +1327,50 @@ def delete_resource(resource_id):
         .delete(synchronize_session=False)
     SkillFeedback.query.filter_by(resource_id=resource_id).update(
         {SkillFeedback.resource_id: None}, synchronize_session=False)
+    if _is_manager(user):
+        review_service.notify_moderated("resource", res, user, "deleted", note,
+                                        link=False)
     db.session.delete(res)
     db.session.commit()
     return jsonify({"message": "Ресурс видалено"})
 
 
-# -------------------------- Зворотний зв'язок --------------------------
+# ---------------------------- Коментарі й оцінки ----------------------------
 
-def _clean_rating(value):
-    if value in (None, ""):
-        return None
-    try:
-        rating = int(value)
-    except (TypeError, ValueError):
-        raise ApiError("Оцінка має бути числом від 1 до 5", 400, "validation_error")
-    if not 1 <= rating <= 5:
-        raise ApiError("Оцінка має бути числом від 1 до 5", 400, "validation_error")
-    return rating
+@bp.get("/resources/<int:resource_id>/feedback")
+@require_auth
+def resource_comments(resource_id):
+    """Публічна стрічка коментарів картки, середня оцінка й власна оцінка."""
+    res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    if not _can_see(res, user):
+        raise ApiError("Ресурс недоступний", 403, "forbidden")
+    return jsonify(comment_service.thread("resource", res.id, user))
 
 
 @bp.post("/resources/<int:resource_id>/feedback")
 @require_auth
 def submit_resource_feedback(resource_id):
-    """Відгук та/або оцінка матеріалу каталогу (BR-13)."""
+    """Коментар та/або оцінка матеріалу (BR-13). Коментар бачать усі; автор
+    матеріалу отримує сповіщення."""
     res = CatalogResource.query.get_or_404(resource_id)
-    if res.status not in PUBLIC_STATUSES and not _is_manager(current_user()):
+    user = current_user()
+    if not _can_see(res, user):
         raise ApiError("Ресурс недоступний", 403, "forbidden")
     data = request.get_json(silent=True) or {}
-    message = (data.get("message") or "").strip()
-    rating = _clean_rating(data.get("rating"))
-    if not message and rating is None:
-        raise ApiError("Залиште оцінку або повідомлення", 400, "validation_error")
-    if len(message) > 5000:
-        raise ApiError("Повідомлення завелике (максимум 5000 символів)",
-                       400, "validation_error")
-    user = current_user()
-    fb = SkillFeedback(
-        item_type="resource", resource_id=res.id, skill_name=res.name,
-        skill_version=res.version, rating=rating,
-        user_id=user.id, username=user.full_name or user.username,
-        message=message or "(без коментаря)",
-    )
-    db.session.add(fb)
+    fb = comment_service.add("resource", res, user, data.get("message"), data.get("rating"))
     db.session.commit()
-    return jsonify({"message": "Дякуємо! Відгук надіслано.", "id": fb.id}), 201
+    return jsonify(comment_service.public_dict(fb, user)), 201
+
+
+@bp.delete("/feedback/<int:feedback_id>")
+@require_auth
+def delete_feedback(feedback_id):
+    """Видалення коментаря (матеріалу чи навички): автор коментаря або менеджер."""
+    fb = SkillFeedback.query.get_or_404(feedback_id)
+    comment_service.remove(fb, current_user())
+    db.session.commit()
+    return jsonify({"message": "Коментар видалено"})
 
 
 # -------------------------------- Обране --------------------------------

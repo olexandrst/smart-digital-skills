@@ -42,29 +42,44 @@ def test_skill_manager_publishes_directly(client):
     assert res.get_json()["status"] == "published"
 
 
-# --- Подання матеріалу звичайним користувачем ---
+# --- Публікація звичайним користувачем ---
 #
-# Будь-хто може додати матеріал, але він стає чернеткою: статус і позначку
-# «рекомендований» з запиту користувача не беруть, публікує менеджер.
+# Будь-хто публікує матеріал сам (або зберігає чернетку) і керує своїм.
+# «Рекомендований» — рішення менеджера: з запиту користувача поле не береться.
 
-def test_plain_user_creates_draft_only(client):
-    res = _make(client, _login(client, "u1"), status="published", is_featured=True)
+def test_plain_user_publishes_directly(client):
+    res = _make(client, _login(client, "u1"), is_featured=True)
     assert res.status_code == 201, res.get_json()
     data = res.get_json()
-    assert data["status"] == "draft"
+    assert data["status"] == "published"
+    assert data["published_at"]
     assert data["is_featured"] is False
-    assert data["published_at"] is None
     assert data["author"]
+    # Відповідальним стає сам автор, а перегляд призначається наперед.
+    assert data["owner"] == data["author"]
+    assert data["next_review_at"]
+
+
+def test_plain_user_may_save_draft_but_not_other_statuses(client):
+    u1 = _login(client, "u1")
+    draft = _make(client, u1, status="draft").get_json()
+    assert draft["status"] == "draft" and draft["published_at"] is None
+    assert _make(client, u1, status="archived").status_code == 400
+    # Без статусу — чернетка: публікація має бути свідомою дією клієнта.
+    payload = {"resource_type": "prompt", "name": "Без статусу", "description": "Опис",
+               "body": "Текст"}
+    res = client.post("/api/catalog/resources", json=payload, headers=u1)
+    assert res.get_json()["status"] == "draft"
 
 
 def test_author_sees_own_draft_others_do_not(client):
     u1, u2 = _login(client, "u1"), _login(client, "u2")
-    rid = _make(client, u1).get_json()["id"]
+    rid = _make(client, u1, status="draft").get_json()["id"]
 
     assert client.get(f"/api/catalog/resources/{rid}", headers=u1).status_code == 200
     assert client.get(f"/api/catalog/resources/{rid}", headers=u2).status_code == 403
 
-    # У каталозі чернетки немає навіть для автора — вона на «Мої матеріали».
+    # У каталозі чернетки немає навіть для автора — вона в «Наповненні каталогу».
     ids = [r["id"] for r in client.get("/api/catalog/resources", headers=u1).get_json()]
     assert rid not in ids
     mine = client.get("/api/catalog/resources?mine=1", headers=u1).get_json()
@@ -72,39 +87,38 @@ def test_author_sees_own_draft_others_do_not(client):
     assert client.get("/api/catalog/resources?mine=1", headers=u2).get_json() == []
 
 
-def test_author_edits_and_deletes_own_draft_until_published(client):
+def test_author_manages_own_material_in_any_state(client):
     u1 = _login(client, "u1")
     rid = _make(client, u1).get_json()["id"]
 
     upd = client.patch(f"/api/catalog/resources/{rid}",
-                       json={"name": "Уточнена назва", "is_featured": True}, headers=u1)
+                       json={"name": "Уточнена назва", "is_featured": True,
+                             "status": "archived"}, headers=u1)
     assert upd.status_code == 200
     assert upd.get_json()["name"] == "Уточнена назва"
     assert upd.get_json()["is_featured"] is False   # не його рішення
+    assert upd.get_json()["status"] == "published"  # статус — окремою дією
 
-    # Публікувати автор не може — це крок менеджера.
+    # Зняти з публікації й опублікувати знову автор може сам; архів — ні.
     assert client.post(f"/api/catalog/resources/{rid}/status",
-                       json={"status": "published"}, headers=u1).status_code == 403
-    pub = client.post(f"/api/catalog/resources/{rid}/status",
-                      json={"status": "published"}, headers=_admin(client))
-    assert pub.status_code == 200
+                       json={"status": "draft"}, headers=u1).get_json()["status"] == "draft"
+    assert client.post(f"/api/catalog/resources/{rid}/status",
+                       json={"status": "archived"}, headers=u1).status_code == 400
+    assert client.post(f"/api/catalog/resources/{rid}/status",
+                       json={"status": "published"}, headers=u1).get_json()["status"] == "published"
 
-    # Після публікації текст змінює лише менеджер; видалити теж не можна.
-    assert client.patch(f"/api/catalog/resources/{rid}",
-                        json={"name": "Ще раз"}, headers=u1).status_code == 403
-    assert client.delete(f"/api/catalog/resources/{rid}", headers=u1).status_code == 403
-
-    other = _make(client, u1, name="Чернетка на викид").get_json()["id"]
-    assert client.delete(f"/api/catalog/resources/{other}", headers=u1).status_code == 200
-    assert CatalogResource.query.get(other) is None
+    assert client.delete(f"/api/catalog/resources/{rid}", headers=u1).status_code == 200
+    assert CatalogResource.query.get(rid) is None
 
 
-def test_author_may_not_touch_foreign_draft(client):
+def test_author_may_not_touch_foreign_material(client):
     rid = _make(client, _login(client, "u1")).get_json()["id"]
     u2 = _login(client, "u2")
     assert client.patch(f"/api/catalog/resources/{rid}",
                         json={"name": "Чуже"}, headers=u2).status_code == 403
     assert client.delete(f"/api/catalog/resources/{rid}", headers=u2).status_code == 403
+    assert client.post(f"/api/catalog/resources/{rid}/status",
+                       json={"status": "draft"}, headers=u2).status_code == 403
 
 
 def test_prompt_requires_body(client):

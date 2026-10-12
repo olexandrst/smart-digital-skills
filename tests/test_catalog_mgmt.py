@@ -137,15 +137,17 @@ def test_upload_new_version_keeps_identity_and_state(client):
     assert client.get(f"/api/skills/{sid}/download", headers=auth(u1)).data == v2
 
 
-def test_only_managers_upload_or_edit(client):
+def test_user_may_not_manage_foreign_skill(client):
+    """Користувач публікує власні навички, але чужими не керує."""
     sm = login(client, "sm", "pass")
     sid = upload(client, sm, make_zip({"SKILL.md": MD_FULL})).get_json()["id"]
+    client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})
     u1 = login(client, "u1", "pass")
-    assert upload(client, u1, make_zip({"SKILL.md": MD_FULL})).status_code == 403
+    assert upload(client, u1, make_zip({"SKILL.md": MD_FULL})).status_code == 201
     assert upload(client, u1, make_zip({"SKILL.md": MD_V2}), skill_id=sid).status_code == 403
     assert client.patch(f"/api/skills/{sid}", headers=auth(u1),
                         json={"name": "X"}).status_code == 403
     assert client.post(f"/api/skills/{sid}/status", headers=auth(u1),
-                       json={"status": "published"}).status_code == 403
+                       json={"status": "draft"}).status_code == 403
     assert client.delete(f"/api/skills/{sid}", headers=auth(u1)).status_code == 403
     assert Skill.query.get(sid).name == "Перекладач"

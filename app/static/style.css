@@ -1049,8 +1049,6 @@ body.theme-dark .cat-kind.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
 .md-block .res-file { padding: 9px 14px; }
 .md-block-head + .res-file { border-top: 0; }
 .modal .md-block .res-file-empty { margin: 0; padding: 10px 14px; }
-.sm-feedback h3 { margin: 4px 0 4px; font-size: var(--fs-call); font-weight: 580; }
-.sm-feedback textarea { min-height: 70px; }
 
 /* Блок усередині аркуша: текст промпта, сценарій повторення, вкладення */
 .md-block {
@@ -1111,7 +1109,79 @@ body.theme-dark .cat-kind.active { box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
 .fb-star:hover { background: var(--fill); }
 .fb-star.on { color: var(--primary); }
 .fb-star.on svg { fill: var(--primary); }
-.fb-rate-note { margin-left: 8px; font-size: var(--fs-micro); color: var(--muted); }
+
+/* ----- Керування матеріалом у картці: автор («Ваш матеріал») чи менеджер
+   («Модерація»). Окрема смужка, щоб дії з матеріалом не змішувалися з
+   діями над його змістом (копіювати, перейти). ----- */
+.sm-manage {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin: 0 0 14px; padding: 8px 10px; border-radius: var(--r-md);
+  background: var(--soft); border: 1px solid var(--border);
+}
+.sm-manage-k {
+  margin-right: auto; font-size: var(--fs-micro); font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.sm-manage .ghost-act {
+  display: inline-flex; align-items: center; gap: 6px; width: auto; height: 30px;
+  padding: 0 12px; border-radius: var(--r-sm); background: var(--panel);
+  color: var(--text); font-size: var(--fs-foot); font-weight: 540;
+  border: 1px solid var(--border);
+}
+.sm-manage .ghost-act:hover { background: var(--fill); }
+.sm-manage .ghost-act svg { width: 14px; height: 14px; }
+.sm-manage .danger-act { color: var(--danger); }
+.sm-manage .danger-act:hover { background: var(--danger-soft); }
+
+/* ----- Обговорення під карткою: коментарі й оцінка ----- */
+.cm h3 { margin: 0; font-size: var(--fs-call); font-weight: 600; }
+.cm-head { display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; gap: 8px 16px; margin-bottom: 10px; }
+.cm-n { margin-left: 4px; font-weight: 500; color: var(--faint); }
+.cm-rate { display: flex; align-items: center; gap: 6px; }
+.cm-rate-k { font-size: var(--fs-micro); color: var(--muted); }
+.cm-rate .fb-rate { margin: 0; }
+.cm-rate .fb-star { width: 26px; height: 26px; }
+.cm-rate .fb-star svg { width: 17px; height: 17px; }
+.cm-list { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.cm-empty { margin: 4px 0 8px; font-size: var(--fs-foot); }
+.cm-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0;
+  border-top: 1px solid var(--border); }
+.cm-item:first-child { border-top: 0; }
+.cm-ava {
+  flex: 0 0 auto; display: grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 50%; background: var(--fill); color: var(--muted);
+  font-size: var(--fs-foot); font-weight: 600;
+}
+.cm-main { flex: 1; min-width: 0; }
+.cm-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  font-size: var(--fs-micro); color: var(--faint); }
+.cm-meta b { font-size: var(--fs-foot); font-weight: 600; color: var(--text); }
+.cm-stars { color: var(--primary); letter-spacing: 1px; }
+.cm-text { margin-top: 2px; font-size: var(--fs-foot); line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.cm-del {
+  flex: 0 0 auto; width: 24px; height: 24px; padding: 0; border-radius: 50%;
+  background: none; color: var(--faint); font-size: var(--fs-call); line-height: 1;
+}
+.cm-del:hover { background: var(--danger-soft); color: var(--danger); }
+.cm-form { display: flex; align-items: flex-end; gap: 8px; }
+.cm-form textarea { flex: 1; min-height: 44px; resize: vertical; }
+.cm-form button { flex: 0 0 auto; width: auto; }
+@media (max-width: 560px) {
+  .cm-form { flex-direction: column; align-items: stretch; }
+}
+
+/* Діалог причини (менеджер знімає чи видаляє чужий матеріал) */
+.reason-dlg { max-width: 520px; }
+.reason-dlg .row { margin-top: 12px; }
+
+/* Редактор навички з картки — у модалці, без подвійної рамки картки */
+.sk-editor-modal { max-width: 760px; }
+.sk-edit-in h2 { margin-top: 0; }
+
+/* Приватний відгук у стрічці команди (залишений до публічних коментарів) */
+.fb-private { color: var(--muted); font-style: italic; }
 
 /* Керування: стан контенту та розділи */
 .res-health { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 0; }
@@ -1756,9 +1826,9 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.5); }
 .mine-steps b { color: var(--primary); margin-right: 6px; }
 
 /* =====================================================================
-   Розгляд поданих матеріалів: сторінка «Наповнення каталогу», сповіщення
+   «Наповнення каталогу»: власні публікації, черга перегляду менеджера,
+   сповіщення
    ===================================================================== */
-.badge.review { color: var(--orange); background: var(--orange-t); }
 .sb-item.sb-attn .sb-count { color: var(--primary); font-weight: 620; }
 
 .contrib-sec { margin-bottom: 28px; }

@@ -1,4 +1,8 @@
-"""Нагадування власникам контенту про перегляд матеріалів (AKH-18).
+"""Сповіщення про контент: нагадування власникам і модерація.
+
+Два напрями. Нагадування власникам про перегляд матеріалів (AKH-18) — нижче.
+Модерація: менеджери дізнаються про публікації користувачів, автори — про
+рішення менеджерів і коментарі до свого матеріалу (див. розділ нижче).
 
 Власник отримує сповіщення за тиждень до дати наступного перегляду і в день,
 коли вона минула. Повторів немає навіть за кількох процесів: кожне сповіщення
@@ -85,63 +89,117 @@ def create_reminders(now=None):
     return created
 
 
-# --- Сповіщення розгляду: подано → менеджерам, рішення → авторові ---
+# --- Сповіщення модерації ---
 #
-# Ключ проти повторів містить час події, а не лише id матеріалу: той самий
-# матеріал можуть подати, повернути й подати знову — кожен раз це нове
-# сповіщення. Запис лише додається в сесію; фіксує її ендпоінт разом зі
-# зміною статусу, щоб сповіщення без зміни (або навпаки) не траплялося.
+# Попереднього розгляду немає: користувач публікує сам, а менеджери каталогу
+# дізнаються про це сповіщенням і модерують уже опубліковане. У зворотний бік
+# автор дізнається, що менеджер зняв його матеріал з публікації, переніс в
+# архів чи видалив, — разом із причиною.
+#
+# Запис лише додається в сесію; фіксує її ендпоінт разом зі зміною, щоб
+# сповіщення без зміни (або навпаки) не траплялося. Ключ проти повторів
+# містить час події: той самий матеріал можуть опублікувати, зняти й
+# опублікувати знову — кожен раз це нове сповіщення.
+
+ITEM_LABELS = {"resource": "матеріал", "skill": "навичку"}
+
+
+def is_manager(user):
+    return bool(user) and (user.has_global_role("admin")
+                           or user.has_global_role("skill_manager"))
+
 
 def _managers(except_user=None):
-    """Усі, хто розглядає подані матеріали, крім того, хто сам і діє."""
+    """Усі менеджери каталогу (й адміністратори), крім того, хто сам і діє."""
     return [u for u in User.query.filter_by(is_active=True).all()
-            if (u.has_global_role("admin") or u.has_global_role("skill_manager"))
-            and (except_user is None or u.id != except_user.id)]
+            if is_manager(u) and (except_user is None or u.id != except_user.id)]
 
 
-def _author(res):
-    return db.session.get(User, res.created_by) if res.created_by else None
+def _author(item):
+    return db.session.get(User, item.created_by) if item.created_by else None
 
 
-def _push(user, kind, title, body, res, key):
+def _who(user):
+    return user.full_name or user.username
+
+
+def _push(user, kind, title, body, key, item_type=None, item=None):
     if Notification.query.filter_by(user_id=user.id, dedupe_key=key).first():
         return False
+    link = {}
+    if item is not None:
+        link = {"skill_id": item.id} if item_type == "skill" else {"resource_id": item.id}
     db.session.add(Notification(user_id=user.id, kind=kind, title=title, body=body,
-                                resource_id=res.id, dedupe_key=key))
+                                dedupe_key=key, **link))
     return True
 
 
-def notify_submitted(res, actor):
-    """Менеджерам: матеріал подано на розгляд. Повертає кількість адресатів."""
-    stamp = (res.submitted_at or datetime.utcnow()).isoformat()
-    who = actor.full_name or actor.username
-    sent = 0
-    for manager in _managers(except_user=actor):
-        sent += _push(manager, "review_requested", "Матеріал на розгляд",
-                      f"«{res.name}» — подав(ла) {who}. Перегляньте й опублікуйте "
-                      f"або поверніть з коментарем.",
-                      res, f"review_requested:{res.id}:{stamp}")
-    return sent
+def notify_published(item_type, item, actor, updated=False):
+    """Менеджерам: користувач опублікував матеріал чи навичку або змінив уже
+    опубліковане. Публікації самих менеджерів не сповіщаються — вони й є ті,
+    хто модерує. Зміни опублікованого — не частіше разу на добу на матеріал,
+    інакше кожне збереження чернетки сипало б сповіщеннями.
+    """
+    if is_manager(actor):
+        return 0
+    now = datetime.utcnow()
+    what = ITEM_LABELS.get(item_type, "матеріал")
+    if updated:
+        kind, title = "content_updated", "Опублікований матеріал змінено"
+        body = f"«{item.name}» — {_who(actor)} змінив(ла) {what}. Перегляньте зміни."
+        key = f"content_updated:{item_type}:{item.id}:{now.date().isoformat()}"
+    else:
+        kind, title = "content_published", "Новий матеріал у каталозі"
+        body = (f"«{item.name}» — {_who(actor)} опублікував(ла) {what}. Перегляньте: "
+                f"за потреби відредагуйте, зніміть з публікації або видаліть.")
+        key = f"content_published:{item_type}:{item.id}:{now.isoformat()}"
+    return sum(_push(m, kind, title, body, key, item_type, item)
+               for m in _managers(except_user=actor))
 
 
-def notify_published(res, actor):
-    """Авторові: матеріал опубліковано (якщо публікував не він сам)."""
-    author = _author(res)
+# Що сталося з матеріалом автора: заголовок і продовження речення.
+_MODERATION_TEXT = {
+    "unpublished": ("Матеріал знято з публікації",
+                    "знято з публікації — тепер його бачите лише ви й менеджери. "
+                    "Виправте й опублікуйте знову"),
+    "archived": ("Матеріал перенесено в архів", "перенесено в архів"),
+    "needs_update": ("Матеріал потребує оновлення",
+                     "позначено як «потребує оновлення» — перегляньте зміст"),
+    "published": ("Матеріал опубліковано", "опубліковано менеджером каталогу"),
+    "deleted": ("Матеріал видалено", "видалено з каталогу"),
+}
+
+
+def notify_moderated(item_type, item, actor, action, note=None, link=True):
+    """Авторові: менеджер змінив стан його матеріалу (або видалив його).
+
+    `link=False` — для видалення: посилатися вже нема на що, тож сповіщення
+    несе лише назву й причину.
+    """
+    author = _author(item)
+    if author is None or author.id == actor.id or action not in _MODERATION_TEXT:
+        return False
+    title, text = _MODERATION_TEXT[action]
+    body = f"«{item.name}» {text}."
+    if note:
+        body += f" Причина: {note}"
+    key = f"content_moderated:{action}:{item_type}:{item.id}:{datetime.utcnow().isoformat()}"
+    return _push(author, "content_moderated", title, body, key,
+                 item_type if link else None, item if link else None)
+
+
+def notify_comment(item_type, item, actor, text):
+    """Авторові: новий коментар до його матеріалу (не від нього самого)."""
+    author = _author(item)
     if author is None or author.id == actor.id:
         return False
-    return _push(author, "review_published", "Матеріал опубліковано",
-                 f"«{res.name}» тепер у каталозі.",
-                 res, f"review_published:{res.id}:{datetime.utcnow().isoformat()}")
-
-
-def notify_rejected(res, actor, note):
-    """Авторові: матеріал повернуто на доопрацювання з коментарем."""
-    author = _author(res)
-    if author is None or author.id == actor.id:
-        return False
-    return _push(author, "review_rejected", "Матеріал повернуто на доопрацювання",
-                 f"«{res.name}»: {note}",
-                 res, f"review_rejected:{res.id}:{datetime.utcnow().isoformat()}")
+    preview = " ".join(text.split())
+    if len(preview) > 140:
+        preview = preview[:139] + "…"
+    body = f"«{item.name}» — {_who(actor)}: {preview}"
+    key = f"comment_added:{item_type}:{item.id}:{datetime.utcnow().isoformat()}"
+    return _push(author, "comment_added", "Новий коментар до вашого матеріалу",
+                 body, key, item_type, item)
 
 
 def email_digest_enabled(user):

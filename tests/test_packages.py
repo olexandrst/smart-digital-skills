@@ -103,10 +103,12 @@ def test_zip_bomb_rejected(app):
 
 # ---------- Через API ----------
 
-def test_upload_requires_role(client):
+def test_plain_user_uploads_skill(client):
+    """Навичку публікує будь-хто — як і решту матеріалів каталогу."""
     token = login(client, "u1", "pass")  # звичайний користувач
     res = upload(client, token, make_zip({"skill.md": SKILL_MD, "main.py": MAIN_PY}))
-    assert res.status_code == 403
+    assert res.status_code == 201
+    assert res.get_json()["status"] == "draft"   # без поля status — чернетка
 
 
 def test_upload_rejects_wrong_extension(client):

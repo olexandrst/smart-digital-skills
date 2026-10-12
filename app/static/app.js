@@ -319,7 +319,7 @@ async function showApp() {
   applyTheme();  // застосовуємо тему користувача (лише в застосунку)
   const display = state.user.full_name || state.user.username;
   $("#user-name").textContent = display;
-  $("#user-roles").textContent = state.user.roles.length ? state.user.roles.join(", ") : "member";
+  $("#user-roles").textContent = roleLabel(state.user);
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
 }
@@ -400,6 +400,15 @@ function visibleModes() {
 }
 function isManager() { return hasRole("admin") || hasRole("skill_manager"); }
 
+// Три ролі: адміністратор — усе; менеджер каталогу — усе в каталозі
+// (модерація, структура, аналітика); користувач — переглядає, коментує,
+// оцінює й публікує власне. Код ролі менеджера історично skill_manager.
+const ROLE_LABELS = { admin: "Адміністратор", skill_manager: "Менеджер каталогу" };
+function roleLabel(u) {
+  const code = ["admin", "skill_manager"].find(c => (u.roles || []).includes(c));
+  return code ? ROLE_LABELS[code] : "Користувач";
+}
+
 // Сумісність зі старими викликами openTab("catalog") тощо.
 const LEGACY_TAB = {
   catalog: "hub:home", mine: "hub:contrib", contrib: "hub:contrib",
@@ -472,10 +481,11 @@ function bindProfileMenu() {
 
 // ---- Сповіщення: дзвіночок у верхній панелі ----
 //
-// Сповіщення — це дії, що чекають на людину: подано матеріал на розгляд,
-// рішення за її матеріалом, нагадування про перегляд. Тому вони в шапці,
-// а не в прихованому меню, і клік веде одразу туди, де діяти.
-let notifState = { items: [], unread: 0, timer: null };
+// Сповіщення — це дії, що чекають на людину: менеджеру — нова публікація
+// користувача, авторові — рішення менеджера чи коментар до його матеріалу,
+// власникові — нагадування про перегляд. Тому вони в шапці, а не в
+// прихованому меню, і клік відкриває саме ту картку, де діяти.
+let notifState = { items: [], unread: 0, timer: null, queue: 0 };
 
 async function refreshNotifications() {
   if (!state.token || !$("#notif-btn")) return;
@@ -484,7 +494,18 @@ async function refreshNotifications() {
   notifState.items = data.items || [];
   notifState.unread = data.unread || 0;
   paintNotifBadge();
+  syncReviewCount();
   if (!$("#notif-pop").classList.contains("hidden")) paintNotifications();
+}
+
+// Лічильник непереглянутих публікацій у бічній панелі менеджера живе зі
+// сповіщень — перемальовуємо панель, лише коли число справді змінилося.
+function syncReviewCount() {
+  if (!isManager()) return;
+  const n = reviewQueue().length;
+  if (n === notifState.queue) return;
+  notifState.queue = n;
+  if (nav.mode === "hub" && $("#sidebar") && catalogState.sections) buildSidebar();
 }
 
 function paintNotifBadge() {
@@ -534,9 +555,11 @@ async function openNotification(id) {
     api("/catalog/notifications/read", { method: "POST", body: { ids: [id] } }).catch(() => {});
   }
   if (nt.kind === "review_due" || nt.kind === "review_overdue") { openMyContent(); return; }
-  // Рішення чи подання — на сторінку наповнення й одразу в картку.
-  await go("hub:contrib");
-  if (nt.resource_id) openResourceModal(nt.resource_id);
+  // Картку відкриваємо поверх поточної сторінки — звідти й діють.
+  if (nt.skill_id) { openSkillModal(nt.skill_id); return; }
+  if (nt.resource_id) { openResourceModal(nt.resource_id); return; }
+  // Матеріал уже видалено: сповіщення несе лише назву й причину.
+  go("hub:contrib");
 }
 
 function closeNotifPop() {
@@ -566,7 +589,7 @@ function bindNotifications() {
     paintNotifBadge();
     paintNotifications();
   });
-  // Раз на хвилину достатньо: подання на розгляд — не щосекундна подія,
+  // Раз на хвилину достатньо: публікації й коментарі — не щосекундні події,
   // а при кожному переході сторінок лічильник оновлюється й так.
   if (notifState.timer) clearInterval(notifState.timer);
   notifState.timer = setInterval(refreshNotifications, 60000);
@@ -723,10 +746,11 @@ function hubSidebarHtml() {
 
   html += `<div class="sb-group">Навчання</div>`
     + sbItem("hub:paths", "Мої маршрути", "path", catalogState.paths.length || "");
-  // Наповнення каталогу — окремий пункт для всіх: автор бачить своє,
-  // менеджер — ще й чергу на розгляд, і лічильник показує саме її.
-  const pending = isManager() ? (catalogState.reviewCount || 0)
-                              : (catalogState.mine || []).length;
+  // Наповнення каталогу — окремий пункт для всіх. Лічильник автора — його
+  // матеріали й навички; менеджера — публікації користувачів, які він ще
+  // не переглянув.
+  const pending = isManager() ? reviewQueue().length
+    : (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
   html += `<div class="sb-group">Контент</div>`
     + sbItem("hub:contrib", "Наповнення каталогу", "pen", pending || "",
              isManager() && pending ? "sb-attn" : "");
@@ -867,7 +891,7 @@ const REUSE_HINTS = {
 
 // Матеріал, що потребує оновлення, лишається видимим — але з попередженням.
 const STATUS_LABELS = {
-  draft: "Чернетка", review: "На розгляді", published: "Опублікований",
+  draft: "Чернетка", published: "Опублікований",
   needs_update: "Потребує оновлення", archived: "Архів",
 };
 
@@ -931,14 +955,17 @@ async function ensureHubData(force = false) {
   catalogState.showcase = showcase || [];
   // Персональні блоки не мають затримувати каталог: якщо щось із них впаде,
   // сторінка все одно має відкритися.
-  const [paths, recs, maturity, mineRes] = await Promise.all([
+  const [paths, recs, maturity, mineRes, mineSkills] = await Promise.all([
     api("/paths?mine=1").catch(() => []),
     api("/catalog/recommendations").catch(() => ({ items: [] })),
     api("/catalog/maturity").catch(() => null),
     api("/catalog/resources?mine=1").catch(() => []),
+    api("/skills?mine=1").catch(() => []),
   ]);
   catalogState.paths = paths || [];
-  catalogState.mine = mineRes || [];   // для лічильника «Мої матеріали» в панелі
+  // Власні матеріали й навички — для лічильника «Наповнення каталогу».
+  catalogState.mine = mineRes || [];
+  catalogState.mineSkills = mineSkills || [];
   catalogState.recommendations = (recs && recs.items) || [];
   catalogState.maturity = maturity;
   catalogState.sections = sections;
@@ -954,9 +981,6 @@ async function ensureHubData(force = false) {
     catalogState.folderId = null;
   }
   catalogState.skills = all.filter(x => x.status === "published").map(normSkill);
-  // Черга на розгляд — для лічильника в бічній панелі менеджера (API віддає
-  // їй усі статуси; звичайному користувачу review-матеріалів тут не буде).
-  catalogState.reviewCount = resources.filter(r => r.status === "review").length;
   // Каталог показує опубліковані матеріали та ті, що потребують оновлення;
   // чернетки й архів API віддає лише менеджерам — тут їх відфільтровуємо.
   catalogState.resources = resources
@@ -1809,45 +1833,108 @@ function catalogCard(it) {
   return card;
 }
 
-// Блок зворотного зв'язку з оцінкою (BR-13). `hint` — пояснення під заголовком.
-function feedbackBlockHtml(hint) {
+// Обговорення під карткою (BR-13): публічні коментарі й оцінка. Коментарі
+// бачать усі, автор матеріалу отримує сповіщення про новий. Оцінка — одна
+// на людину: клік по зірці зберігає її одразу, новий клік замінює попередню.
+function commentsBlockHtml() {
   const stars = [1, 2, 3, 4, 5].map(n =>
-    `<button type="button" class="fb-star" data-star="${n}" aria-label="Оцінка ${n}">${ICO_STAR}</button>`).join("");
-  return `<div class="sm-feedback">
-      <h3>Зворотний зв'язок</h3>
-      <p class="muted">${esc(hint)}</p>
-      <div class="fb-rate" id="fb-rate">${stars}<span class="fb-rate-note" id="fb-rate-note">Оцінка не обов'язкова</span></div>
-      <textarea id="sm-fb-text" placeholder="Ваше повідомлення…" rows="3"></textarea>
-      <div class="row" style="margin-top:8px">
-        <button id="sm-fb-send">Надіслати</button>
+    `<button type="button" class="fb-star" data-star="${n}" aria-label="Оцінка ${n} з 5">${ICO_STAR}</button>`).join("");
+  return `<section class="cm" id="cm">
+      <div class="cm-head">
+        <h3>Обговорення <span class="cm-n" id="cm-n"></span></h3>
+        <div class="cm-rate"><span class="cm-rate-k" id="cm-rate-k">Оцініть</span>
+          <div class="fb-rate" id="cm-stars">${stars}</div></div>
       </div>
-    </div>`;
+      <div class="cm-list" id="cm-list"><p class="muted cm-empty">Отримую коментарі…</p></div>
+      <div class="cm-form">
+        <textarea id="cm-text" rows="2" maxlength="5000"
+          placeholder="Поділіться досвідом, запитайте автора або підкажіть, що покращити"></textarea>
+        <button id="cm-send">Надіслати</button>
+      </div>
+    </section>`;
 }
 
-// Прив'язує зірочки та кнопку надсилання; `send(rating, text)` виконує запит.
-function bindFeedbackBlock(overlay, send) {
-  let rating = 0;
-  const stars = [...overlay.querySelectorAll(".fb-star")];
-  const note = overlay.querySelector("#fb-rate-note");
-  const paint = (value) => stars.forEach((b, i) => b.classList.toggle("on", i < value));
+// `base` — адреса стрічки (`/catalog/resources/1/feedback`, `/skills/2/feedback`);
+// `onRated(data)` — щоб картка оновила середню оцінку в заголовку.
+function bindComments(overlay, base, { onRated } = {}) {
+  const list = overlay.querySelector("#cm-list");
+  const stars = [...overlay.querySelectorAll("#cm-stars .fb-star")];
+  const rateK = overlay.querySelector("#cm-rate-k");
+  let mine = 0;
+  const paintStars = (v) => stars.forEach((b, i) => b.classList.toggle("on", i < v));
+  const paint = (data) => {
+    mine = data.my_rating || 0;
+    paintStars(mine);
+    rateK.textContent = mine ? `Ваша оцінка: ${mine} з 5` : "Оцініть";
+    overlay.querySelector("#cm-n").textContent = data.items.length || "";
+    list.innerHTML = data.items.length ? data.items.map(c => `
+      <div class="cm-item">
+        <span class="cm-ava" aria-hidden="true">${esc((c.author || "?").trim().charAt(0).toUpperCase())}</span>
+        <div class="cm-main">
+          <div class="cm-meta"><b>${esc(c.author)}</b><span>${timeAgo(c.created_at)}</span>${
+            c.rating ? `<span class="cm-stars" title="Оцінка ${c.rating} з 5">${"★".repeat(c.rating)}</span>` : ""}</div>
+          <div class="cm-text">${esc(c.message)}</div>
+        </div>
+        ${c.can_delete ? `<button class="cm-del" data-del="${c.id}" title="Видалити коментар"
+          aria-label="Видалити коментар">×</button>` : ""}
+      </div>`).join("")
+      : `<p class="muted cm-empty">Коментарів ще немає — будьте першим.</p>`;
+    list.querySelectorAll("[data-del]").forEach(b => b.addEventListener("click", async () => {
+      if (!confirm("Видалити коментар?")) return;
+      try { await api(`/catalog/feedback/${b.dataset.del}`, { method: "DELETE" }); load(); }
+      catch (err) { toast(err.message, "err"); }
+    }));
+    if (onRated) onRated(data);
+  };
+  const load = async () => {
+    try { paint(await api(base)); }
+    catch (err) { list.innerHTML = `<p class="error">${esc(err.message)}</p>`; }
+  };
   stars.forEach((b, i) => {
-    b.addEventListener("mouseenter", () => paint(i + 1));
-    b.addEventListener("click", () => {
-      rating = rating === i + 1 ? 0 : i + 1;   // повторний клік знімає оцінку
-      paint(rating);
-      note.textContent = rating ? `Ваша оцінка: ${rating} з 5` : "Оцінка не обов'язкова";
+    b.addEventListener("mouseenter", () => paintStars(i + 1));
+    b.addEventListener("click", async () => {
+      try { await api(base, { method: "POST", body: { rating: i + 1 } }); toast("Дякуємо за оцінку"); load(); }
+      catch (err) { toast(err.message, "err"); }
     });
   });
-  overlay.querySelector(".fb-rate").addEventListener("mouseleave", () => paint(rating));
-
-  const sendBtn = overlay.querySelector("#sm-fb-send");
-  sendBtn.addEventListener("click", async () => {
-    const text = overlay.querySelector("#sm-fb-text").value.trim();
-    if (!text && !rating) { toast("Залиште оцінку або повідомлення", "err"); return; }
-    sendBtn.disabled = true;
-    try { await send(rating || null, text); }
-    catch (err) { toast(err.message, "err"); sendBtn.disabled = false; }
+  overlay.querySelector("#cm-stars").addEventListener("mouseleave", () => paintStars(mine));
+  const text = overlay.querySelector("#cm-text");
+  const send = overlay.querySelector("#cm-send");
+  send.addEventListener("click", async () => {
+    const message = text.value.trim();
+    if (!message) { text.focus(); return; }
+    send.disabled = true;
+    try { await api(base, { method: "POST", body: { message } }); text.value = ""; await load(); }
+    catch (err) { toast(err.message, "err"); }
+    finally { send.disabled = false; }
   });
+  load();
+}
+
+// Блок керування в картці: автор бачить «Ваш матеріал», менеджер чужого —
+// «Модерація». Стоїть першим у картці: менеджер, що прийшов зі сповіщення,
+// має одразу бачити дії, а не гортати до них. Ті самі дії, що й на сторінці
+// «Наповнення каталогу».
+function manageBarHtml(ref) {
+  if (!(isManager() || isOwnItem(ref))) return "";
+  return `<div class="sm-manage">
+      <span class="sm-manage-k">${isOwnItem(ref) ? "Ваш матеріал" : "Модерація"}</span>
+      <button class="ghost-act" data-m="edit">${gsvg("pen")}Редагувати</button>
+      ${itemPublic(ref)
+        ? `<button class="ghost-act" data-m="unpub">Зняти з публікації</button>`
+        : `<button class="ghost-act" data-m="pub">Опублікувати</button>`}
+      <button class="ghost-act danger-act" data-m="del">Видалити</button>
+    </div>`;
+}
+function bindManageBar(overlay, ref, close) {
+  const after = async () => { close(true); await ensureHubData(true); go(nav.dest); };
+  overlay.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => {
+    const m = b.dataset.m;
+    if (m === "edit") { close(true); editItem(ref, after); }
+    else if (m === "pub") setItemStatus(ref, "published", after);
+    else if (m === "unpub") setItemStatus(ref, "draft", after);
+    else if (m === "del") deleteItem(ref, after);
+  }));
 }
 
 // Спільний каркас модалки каталогу: повертає overlay і функцію закриття.
@@ -1907,10 +1994,10 @@ async function openMyContent() {
       </div>
       <div class="own-acts">
         <button class="small" data-confirm="${r.id}">Актуальний</button>
-        <select class="small own-status" data-st="${r.id}">
+        ${isManager() || r.created_by === state.user.id ? `<select class="small own-status" data-st="${r.id}">
           ${statusChoices(r.status).map(([v, m]) =>
             `<option value="${v}"${v === r.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
-        </select>
+        </select>` : ""}
       </div>
     </div>`;
 
@@ -1924,8 +2011,8 @@ async function openMyContent() {
         <div class="note-row${n.is_read ? "" : " unread"}">
           <b>${esc(n.title)}</b><span>${esc(n.body || "")}</span>
         </div>`).join("")}</div>` : ""}
-      <p class="muted">Підтвердьте актуальність, позначте «потребує оновлення»
-      або віддайте в архів — просто звідси.</p>
+      <p class="muted">Матеріали, за які ви відповідаєте. Підтвердьте, що вони актуальні,
+      або оновіть — просто звідси.</p>
       <div class="own-list">${data.items.map(row).join("")}</div>
       <hr class="md-hr">
       <label class="ind-toggle">
@@ -2068,8 +2155,8 @@ async function openContentWizard(opts = {}) {
   if (existing && !kinds.some(k => k.code === existing.resource_type)) {
     kinds.push(kindEntry(existing.resource_type));
   }
-  // Навичку створює пакет, а не форма, і лише менеджер — решті плитки не буде.
-  if (isManager() && !existing) {
+  // Навичку створює пакет, а не форма: її метадані беруться зі skill.md.
+  if (!existing) {
     kinds.push({ code: "skill", one: "Навичка", accent: "red", emoji: null,
                  hint: WIZ_HINTS.skill, pkg: true });
   }
@@ -2086,8 +2173,7 @@ async function openContentWizard(opts = {}) {
     folderId: existing && existing.folder_id ? String(existing.folder_id) : "",
     category: existing ? (existing.category || "") : "",
     tags: existing ? (existing.tags || []).join(", ") : "",
-    publish: false,
-    submit: !isManager(),   // користувач типово подає на розгляд, а не ховає чернетку
+    publish: true,  // матеріал одразу в каталозі; чернетка — свідомий вибір
     source: null,   // { file, kind, chars, truncated, keep } — файл, з якого взято текст
     files: [],      // вкладення до картки — завантажуються після її створення
     pkg: null,      // пакет навички (лише для виду skill)
@@ -2100,7 +2186,7 @@ async function openContentWizard(opts = {}) {
     <div class="modal wiz" role="dialog" aria-labelledby="wiz-title">
       <div class="wiz-head">
         <div class="modal-head">
-          <h2 id="wiz-title">${existing ? "Редагувати чернетку" : "Додати матеріал"}</h2>
+          <h2 id="wiz-title">${existing ? "Редагувати матеріал" : "Додати матеріал"}</h2>
           <button class="modal-x" aria-label="Закрити">×</button>
         </div>
         <ol class="wiz-steps" id="wiz-steps"></ol>
@@ -2180,12 +2266,14 @@ async function openContentWizard(opts = {}) {
           <div><b>${st.pkg ? esc(st.pkg.name) : "Перетягніть пакет навички або <u>оберіть</u>"}</b>
             <span>.zip або .skill зі SKILL.md — назва, версія, автор, опис і категорія беруться з нього</span></div>
           <input type="file" id="wiz-file" hidden accept=".zip,.skill"></div>
-        <p class="wiz-note">Навичка з'явиться у «Керування → Каталог навичок» зі статусом
-          <b>«Не опублікована»</b>: там можна додати іконку й опублікувати.</p>`;
+        ${publishSeg()}
+        <p class="wiz-hint">Іконку, інструкцію та інші деталі можна змінити згодом — з картки навички.</p>`;
       bindDrop(f => { st.pkg = f; paint(); });
+      const skillLabel = () => st.publish ? "Опублікувати навичку" : "Зберегти чернеткою";
+      bindPublishSeg(skillLabel);
       backBtn.classList.remove("hidden");
       nextBtn.classList.remove("hidden");
-      nextBtn.textContent = "Завантажити навичку";
+      nextBtn.textContent = skillLabel();
       nextBtn.disabled = !st.pkg;
       return;
     }
@@ -2341,16 +2429,29 @@ async function openContentWizard(opts = {}) {
   }
 
   // ---- крок 3: опис ----
-  const submitLabel = () => {
-    if (isManager()) return existing ? "Зберегти" : st.publish ? "Опублікувати" : "Створити матеріал";
-    if (existing) return st.submit ? "Зберегти й подати на розгляд" : "Зберегти";
-    return st.submit ? "Подати на розгляд" : "Зберегти чернеткою";
+  const submitLabel = () => existing ? "Зберегти"
+    : st.publish ? "Опублікувати" : "Зберегти чернеткою";
+  // Що станеться після натискання — одним реченням, без сюрпризів.
+  const flowNote = () => st.publish
+    ? (isManager() ? "<b>Матеріал одразу з'явиться в каталозі.</b>"
+       : "<b>Матеріал одразу з'явиться в каталозі.</b> Менеджер каталогу отримає "
+         + "сповіщення й за потреби відредагує його або зніме з публікації.")
+    : "<b>Чернетку бачите лише ви й менеджери каталогу.</b> Опублікувати можна будь-коли — "
+      + "з картки або з «Наповнення каталогу».";
+  const publishSeg = () => `
+        <div class="wiz-seg" id="wiz-pub">
+          <button data-v="1"${st.publish ? ' class="active"' : ""}>Опублікувати</button>
+          <button data-v="0"${st.publish ? "" : ' class="active"'}>Зберегти чернеткою</button>
+        </div>
+        <p class="wiz-note" id="wiz-flow-note">${flowNote()}</p>`;
+  const bindPublishSeg = (label) => {
+    body.querySelectorAll("#wiz-pub button").forEach(bt => bt.addEventListener("click", () => {
+      st.publish = bt.dataset.v === "1";
+      body.querySelectorAll("#wiz-pub button").forEach(x => x.classList.toggle("active", x === bt));
+      body.querySelector("#wiz-flow-note").innerHTML = flowNote();
+      nextBtn.textContent = label();
+    }));
   };
-  const flowNote = () => st.submit
-    ? "<b>Менеджери каталогу отримають сповіщення</b>, перевірять матеріал і опублікують "
-      + "його або повернуть з коментарем. Поки триває розгляд, редагувати не можна."
-    : "<b>Чернетку бачите лише ви й команда хабу.</b> Подати на розгляд можна пізніше — "
-      + "з «Наповнення каталогу».";
 
   function paintDescribe() {
     const opt = (v, label, cur) =>
@@ -2376,19 +2477,7 @@ async function openContentWizard(opts = {}) {
         <label class="wiz-label">Теги <i>через кому</i>
           <input id="wiz-tags" type="text" value="${esc(st.tags)}" placeholder="RAG, закупівлі"></label>
       </div>
-      ${isManager() ? (existing ? "" : `
-        <div class="wiz-seg" id="wiz-pub">
-          <button data-v="0"${st.publish ? "" : ' class="active"'}>Зберегти чернеткою</button>
-          <button data-v="1"${st.publish ? ' class="active"' : ""}>Опублікувати одразу</button>
-        </div>
-        <p class="wiz-hint">Власника, дати перегляду та інші метадані можна додати згодом
-          у повному редакторі — «Наповнення каталогу».</p>`)
-      : `
-        <div class="wiz-seg" id="wiz-flow">
-          <button data-v="draft"${st.submit ? "" : ' class="active"'}>Зберегти чернеткою</button>
-          <button data-v="submit"${st.submit ? ' class="active"' : ""}>Подати на розгляд</button>
-        </div>
-        <p class="wiz-note" id="wiz-flow-note">${flowNote()}</p>`}`;
+      ${existing ? "" : publishSeg()}`;
 
     const sectionSel = body.querySelector("#wiz-section");
     const folderSel = body.querySelector("#wiz-folder");
@@ -2400,17 +2489,7 @@ async function openContentWizard(opts = {}) {
     };
     syncFolders(st.folderId);
     sectionSel.addEventListener("change", () => syncFolders(""));
-    body.querySelectorAll("#wiz-pub button").forEach(bt => bt.addEventListener("click", () => {
-      st.publish = bt.dataset.v === "1";
-      body.querySelectorAll("#wiz-pub button").forEach(x => x.classList.toggle("active", x === bt));
-      nextBtn.textContent = submitLabel();
-    }));
-    body.querySelectorAll("#wiz-flow button").forEach(bt => bt.addEventListener("click", () => {
-      st.submit = bt.dataset.v === "submit";
-      body.querySelectorAll("#wiz-flow button").forEach(x => x.classList.toggle("active", x === bt));
-      body.querySelector("#wiz-flow-note").innerHTML = flowNote();
-      nextBtn.textContent = submitLabel();
-    }));
+    bindPublishSeg(submitLabel);
     backBtn.classList.remove("hidden");
     nextBtn.classList.remove("hidden");
     nextBtn.textContent = submitLabel();
@@ -2482,10 +2561,13 @@ async function openContentWizard(opts = {}) {
   async function submitSkill() {
     nextBtn.disabled = true;
     try {
-      const data = await uploadSkillPackage(st.pkg, null);
-      toast(`Навичку «${data.name}» завантажено — не опублікована`);
+      const data = await uploadSkillPackage(st.pkg, null, st.publish ? "published" : "draft");
+      toast(st.publish ? `Навичку «${data.name}» опубліковано`
+                       : `Навичку «${data.name}» збережено чернеткою`);
       close(true);
-      go("admin:skills");
+      await ensureHubData(true);
+      await go(st.publish ? nav.dest : "hub:contrib");
+      openSkillModal(data.id);
     } catch (e) {
       setErr(e.message);
       nextBtn.disabled = false;
@@ -2502,12 +2584,10 @@ async function openContentWizard(opts = {}) {
     };
     nextBtn.disabled = true; backBtn.disabled = true;
     try {
-      const submitting = !isManager() && st.submit;
       const r = existing
         ? await api(`/catalog/resources/${existing.id}`, { method: "PATCH", body: payload })
         : await api("/catalog/resources", { method: "POST",
-            body: { ...payload, status: st.publish ? "published" : "draft",
-                    submit: submitting } });
+            body: { ...payload, status: st.publish ? "published" : "draft" } });
       // Вкладення — після картки: їм потрібен її id. Помилка одного файлу не
       // скасовує вже створений матеріал — про неї просто кажемо.
       const uploads = (st.source && st.source.keep ? [st.source.file] : []).concat(st.files);
@@ -2515,26 +2595,17 @@ async function openContentWizard(opts = {}) {
       for (const f of uploads) {
         try { await uploadResourceFile(r.id, f); } catch (e) { failed++; }
       }
-      // Відредаговану чернетку подаємо окремим запитом — уже після файлів.
-      let submitError = "";
-      if (existing && submitting) {
-        try { await api(`/catalog/resources/${r.id}/submit`, { method: "POST" }); }
-        catch (e) { submitError = e.message; }
-      }
       close(true);
       await ensureHubData(true);
       if (failed) {
         toast(`Матеріал збережено, але ${failed} ${plural(failed, "файл", "файли", "файлів")} не завантажилось`, "err");
-      } else if (submitError) {
-        toast(`Збережено, але подати не вдалося: ${submitError}`, "err");
       } else {
-        toast(existing ? (submitting ? "Збережено й подано на розгляд" : "Чернетку оновлено")
-              : st.publish ? "Матеріал опубліковано"
-              : submitting ? "Подано на розгляд — менеджери отримають сповіщення"
-              : "Чернетку створено");
+        toast(existing ? "Зміни збережено"
+              : st.publish ? "Матеріал опубліковано" : "Чернетку збережено");
       }
-      if (!existing && st.publish) { await go(nav.dest); openResourceModal(r.id); }
-      else go("hub:contrib");
+      // Опубліковане — одразу показуємо картку; чернетку — серед своїх.
+      await go(existing || !st.publish ? "hub:contrib" : nav.dest);
+      openResourceModal(r.id);
     } catch (e) {
       setErr(e.message);
       nextBtn.disabled = false; backBtn.disabled = false;
@@ -2546,167 +2617,232 @@ async function openContentWizard(opts = {}) {
 
 // ---------- «Наповнення каталогу»: усе, що додають у базу знань ----------
 //
-// Одна сторінка для всіх, але різна за роллю. Автор бачить власні матеріали
-// й керує їхнім поданням: подати на розгляд, відкликати, виправити повернуте.
-// Менеджер бачить чергу на розгляд (опублікувати або повернути з коментарем
-// — автор отримує сповіщення), увесь каталог із фільтрами стану, повний
-// редактор і налаштування публікації. Раніше цей список жив у «Керуванні» —
-// тепер він тут, бо наповнення каталогу стосується не лише менеджерів.
+// Одна сторінка для всіх, але різна за роллю. Користувач публікує сам і
+// бачить тут усе своє — матеріали й навички — з діями: редагувати, зняти з
+// публікації, опублікувати знову, видалити. Менеджер каталогу бачить угорі
+// публікації користувачів, які ще не переглянув (про кожну він отримав
+// сповіщення), а нижче — увесь каталог матеріалів із фільтрами стану.
 
 let contribKind = "all";
 let contribFilter = "all";   // all | needs_update | no_owner | overdue | draft
 
-// --- Дії розгляду: спільні для сторінки й для картки матеріалу ---
+// --- Спільні дії з матеріалом чи навичкою: для сторінки й для карток ---
 
-async function submitForReview(r, onDone) {
-  try {
-    await api(`/catalog/resources/${r.id}/submit`, { method: "POST" });
-    toast("Подано на розгляд — менеджери отримають сповіщення");
-    onDone();
-  } catch (err) { toast(err.message, "err"); }
+// Елемент, з яким працюють дії: матеріал (resource) або навичка (skill).
+function itemRef(type, raw) {
+  return { type, id: raw.id, name: raw.name, status: raw.status,
+           createdBy: raw.created_by, raw };
+}
+function isOwnItem(ref) { return !!(state.user && ref.createdBy === state.user.id); }
+function itemPublic(ref) { return ref.status === "published" || ref.status === "needs_update"; }
+function itemUrl(ref) {
+  return ref.type === "skill" ? `/skills/${ref.id}` : `/catalog/resources/${ref.id}`;
 }
 
-async function withdrawFromReview(r, onDone) {
-  try {
-    await api(`/catalog/resources/${r.id}/withdraw`, { method: "POST" });
-    toast("Відкликано — матеріал знову чернетка");
-    onDone();
-  } catch (err) { toast(err.message, "err"); }
-}
-
-async function publishMaterial(r, onDone) {
-  try {
-    await api(`/catalog/resources/${r.id}/status`, { method: "POST", body: { status: "published" } });
-    toast(r.status === "review" ? "Опубліковано — автор отримає сповіщення" : "Опубліковано");
-    onDone();
-  } catch (err) { toast(err.message, "err"); }
-}
-
-// Повернення без причини лишає автора здогадуватися — тому коментар
-// обов'язковий і йде йому сповіщенням.
-function openRejectDialog(r, onDone) {
-  const { overlay, close } = catalogModal(`
-    <div class="modal res-editor">
-      <div class="modal-head">
-        <h2>Повернути на доопрацювання</h2>
-        <button class="modal-x" aria-label="Закрити">×</button>
-      </div>
-      <p class="muted">«${esc(r.name)}» повернеться авторові як чернетка. Коментар
-        обов'язковий — автор отримає його сповіщенням і зможе виправити й подати знову.</p>
-      <label class="wiz-label">Що виправити
-        <textarea id="rej-note" rows="4" maxlength="2000"
-          placeholder="Напр.: додайте приклад вхідних даних і вкажіть розділ «Toolbox»"></textarea></label>
-      <p class="error" id="rej-err"></p>
-      <div class="row">
-        <button id="rej-ok">Повернути з коментарем</button>
-        <button class="ghost" id="rej-cancel">Скасувати</button>
-      </div>
-    </div>`);
-  const ta = overlay.querySelector("#rej-note");
-  ta.focus();
-  overlay.querySelector("#rej-cancel").addEventListener("click", () => close());
-  const ok = overlay.querySelector("#rej-ok");
-  ok.addEventListener("click", async () => {
-    const note = ta.value.trim();
-    if (!note) { overlay.querySelector("#rej-err").textContent = "Напишіть, що саме виправити"; return; }
-    ok.disabled = true;
-    try {
-      await api(`/catalog/resources/${r.id}/reject`, { method: "POST", body: { note } });
-      toast("Повернуто авторові — він отримає сповіщення");
-      close();
-      onDone();
-    } catch (err) {
-      overlay.querySelector("#rej-err").textContent = err.message;
-      ok.disabled = false;
-    }
+// Рішення менеджера щодо чужого матеріалу: причина необов'язкова, але автор
+// отримає її сповіщенням — і зрозуміє, що виправити. null — передумали.
+function askReason({ title, text, confirm, danger = false }) {
+  return new Promise(resolve => {
+    const { overlay, close } = catalogModal(`
+      <div class="modal res-editor reason-dlg">
+        <div class="modal-head"><h2>${esc(title)}</h2>
+          <button class="modal-x" aria-label="Закрити">×</button></div>
+        <p class="muted">${text}</p>
+        <label class="wiz-label">Причина для автора <i>необов'язково</i>
+          <textarea id="rsn-note" rows="3" maxlength="2000"
+            placeholder="Напр.: дублює наявний матеріал — доповніть його замість нового"></textarea></label>
+        <div class="row">
+          <button id="rsn-ok"${danger ? ' class="danger"' : ""}>${esc(confirm)}</button>
+          <button class="ghost" id="rsn-cancel">Скасувати</button>
+        </div>
+      </div>`, { beforeClose: () => { resolve(null); return true; } });
+    const note = overlay.querySelector("#rsn-note");
+    note.focus();
+    overlay.querySelector("#rsn-cancel").addEventListener("click", () => close());
+    overlay.querySelector("#rsn-ok").addEventListener("click", () => {
+      resolve(note.value.trim());
+      close(true);
+    });
   });
+}
+
+// Опублікувати або зняти з публікації. Менеджер, знімаючи чужий матеріал,
+// може пояснити причину; автор робить це зі своїм без зайвих питань.
+async function setItemStatus(ref, status, onDone) {
+  const foreign = isManager() && !isOwnItem(ref);
+  let note = "";
+  if (status !== "published" && foreign) {
+    const archive = status === "archived";
+    note = await askReason({
+      title: archive ? "Перенести в архів" : status === "needs_update"
+        ? "Позначити: потребує оновлення" : "Зняти з публікації",
+      text: `«${esc(ref.name)}» ${status === "needs_update"
+        ? "лишиться в каталозі з позначкою «потребує оновлення»"
+        : "зникне з каталогу"}. Автор отримає сповіщення${archive || status === "needs_update"
+        ? "" : " й зможе виправити матеріал і опублікувати знову"}.`,
+      confirm: archive ? "Перенести в архів" : status === "needs_update"
+        ? "Позначити" : "Зняти з публікації" });
+    if (note === null) return false;
+  }
+  try {
+    await api(`${itemUrl(ref)}/status`, { method: "POST", body: { status, note } });
+    toast(status === "published"
+      ? (isManager() ? "Опубліковано" : "Опубліковано — менеджер каталогу отримає сповіщення")
+      : status === "archived" ? "Перенесено в архів"
+      : status === "needs_update" ? "Позначено: потребує оновлення"
+      : foreign ? "Знято з публікації — автор отримає сповіщення" : "Знято з публікації");
+    if (onDone) await onDone();
+    return true;
+  } catch (err) { toast(err.message, "err"); return false; }
+}
+
+async function deleteItem(ref, onDone) {
+  let note = "";
+  if (isManager() && !isOwnItem(ref)) {
+    note = await askReason({ title: "Видалити назавжди",
+      text: `«${esc(ref.name)}» буде видалено разом із файлами — дію не можна скасувати.
+        Автор отримає сповіщення.`,
+      confirm: "Видалити", danger: true });
+    if (note === null) return false;
+  } else if (!confirm(`Видалити «${ref.name}»? Дію не можна скасувати.`)) return false;
+  try {
+    await api(itemUrl(ref), { method: "DELETE", body: { note } });
+    toast("Видалено");
+    if (onDone) await onDone();
+    return true;
+  } catch (err) { toast(err.message, "err"); return false; }
+}
+
+// Редагування: автор — у тому ж майстрі, де створював; менеджер — у повному
+// редакторі з усіма метаданими. Навичку обоє правлять у редакторі навички.
+async function editItem(ref, onDone) {
+  if (ref.type === "skill") return openSkillEditor(ref.id, { onSaved: onDone });
+  if (isManager()) return openResourceEditor(ref.id, { onSaved: onDone });
+  try { openContentWizard({ resource: await api(`/catalog/resources/${ref.id}`) }); }
+  catch (err) { toast(err.message, "err"); }
+}
+
+// Публікації користувачів, які менеджер ще не переглянув: кожна прийшла
+// сповіщенням, і доки воно не прочитане, матеріал стоїть у черзі.
+const REVIEW_KINDS = ["content_published", "content_updated"];
+function reviewQueue() {
+  const map = new Map();
+  (notifState.items || []).forEach(n => {
+    if (n.is_read || !REVIEW_KINDS.includes(n.kind)) return;
+    const type = n.skill_id ? "skill" : n.resource_id ? "resource" : null;
+    if (!type) return;
+    const id = n.skill_id || n.resource_id;
+    const key = `${type}:${id}`;
+    const entry = map.get(key) || { type, id, kind: n.kind, at: n.created_at, ids: [] };
+    entry.ids.push(n.id);
+    map.set(key, entry);
+  });
+  return [...map.values()];
+}
+
+// Відкрив картку — отже переглянув: сповіщення про неї більше не висять.
+function markItemSeen(type, id) {
+  const field = type === "skill" ? "skill_id" : "resource_id";
+  const fresh = (notifState.items || []).filter(n => !n.is_read && n[field] === id);
+  if (!fresh.length) return;
+  fresh.forEach(n => { n.is_read = true; });
+  notifState.unread = Math.max(0, notifState.unread - fresh.length);
+  paintNotifBadge();
+  syncReviewCount();
+  api("/catalog/notifications/read", { method: "POST",
+    body: { ids: fresh.map(n => n.id) } }).catch(() => {});
+}
+
+const SKILL_STATUS_META = {
+  published: { label: "Опублікована", cls: "published" },
+  draft: { label: "Чернетка", cls: "draft" },
+};
+function itemStatusMeta(ref) {
+  return ref.type === "skill"
+    ? SKILL_STATUS_META[ref.status] || SKILL_STATUS_META.draft
+    : RES_STATUS_META[ref.status] || RES_STATUS_META.draft;
 }
 
 async function viewContributions() {
   const manager = isManager();
-  let items = [], settings = { strict_publish: false };
+  let resources = [], skills = [], settings = { strict_publish: false };
   try {
-    [items, settings] = await Promise.all([
+    [resources, skills, settings] = await Promise.all([
       api(manager ? "/catalog/resources" : "/catalog/resources?mine=1"),
+      api(manager ? "/skills" : "/skills?mine=1"),
       manager ? api("/catalog/settings").catch(() => ({ strict_publish: false }))
               : Promise.resolve({ strict_publish: false }),
+      refreshNotifications(),
     ]);
-  } catch (e) { items = []; }
-  if (!manager) catalogState.mine = items;
-  catalogState.reviewCount = manager ? items.filter(i => i.status === "review").length : 0;
+  } catch (e) { resources = resources || []; skills = skills || []; }
+  if (!manager) { catalogState.mine = resources; catalogState.mineSkills = skills; }
   buildSidebar();   // лічильник у панелі міг змінитися
 
   const view = $("#view");
-  const n = (st) => items.filter(i => i.status === st).length;
-  const queue = items.filter(i => i.status === "review");
   const reload = async () => { await ensureHubData(true); go("hub:contrib"); };
+  const refs = resources.map(r => itemRef("resource", r))
+    .concat(skills.map(s => itemRef("skill", s)));
+  const refOf = (type, id) => refs.find(x => x.type === type && x.id === Number(id));
+  const queue = manager
+    ? reviewQueue().map(q => ({ q, ref: refOf(q.type, q.id) })).filter(x => x.ref) : [];
 
-  const row = (r, acts) => {
-    const it = normResource(r);
-    const kind = kindMeta(r.resource_type);
-    const stMeta = RES_STATUS_META[r.status] || RES_STATUS_META.draft;
+  const row = (ref, { q = null, statusSelect = false } = {}) => {
+    const raw = ref.raw;
+    const it = ref.type === "skill" ? normSkill(raw) : normResource(raw);
+    const kindName = ref.type === "skill" ? "Навичка" : (kindMeta(raw.resource_type).one || raw.resource_type);
+    const st = itemStatusMeta(ref);
     const warn = [];
-    if (manager && r.status === "published" && !r.owner) warn.push("без власника");
-    if (manager && r.review_overdue) warn.push(`перегляд прострочено (${dateUa(r.next_review_at)})`);
-    const when = r.status === "review" && r.submitted_at
-      ? `подано ${dateUa(r.submitted_at)}` : `змінено ${dateUa(r.updated_at)}`;
-    return `<div class="res-row" data-id="${r.id}">
+    if (manager && ref.type === "resource" && raw.status === "published" && !raw.owner) warn.push("без власника");
+    if (manager && raw.review_overdue) warn.push(`перегляд прострочено (${dateUa(raw.next_review_at)})`);
+    const when = q ? `${q.kind === "content_updated" ? "змінено" : "опубліковано"} ${timeAgo(q.at)}`
+                   : `змінено ${dateUa(raw.updated_at)}`;
+    const author = manager && raw.author ? ` · ${esc(raw.author)}` : "";
+    const note = ref.type === "resource" && raw.review_note && !itemPublic(ref)
+      ? `<div class="res-note">${raw.status === "archived" ? "В архіві" : "Знято з публікації"}: ${esc(raw.review_note)}</div>` : "";
+    const statusCtl = statusSelect
+      ? `<select class="small res-status" data-st="${ref.id}" title="Стан матеріалу">
+          ${statusChoices(raw.status).map(([v, m]) =>
+            `<option value="${v}"${v === raw.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
+        </select>`
+      : itemPublic(ref)
+        ? `<button class="small ghost" data-act="unpub">Зняти з публікації</button>`
+        : `<button class="small accent" data-act="pub">Опублікувати</button>`;
+    return `<div class="res-row" data-type="${ref.type}" data-id="${ref.id}">
       ${catTile(it, "mdc-tile")}
       <div class="res-main">
-        <div class="res-name">${esc(r.name)}${r.is_featured ? ` <span class="res-star" title="Рекомендований">★</span>` : ""}</div>
-        <div class="res-sub">${esc(kind.one || r.resource_type)}${
-          r.section_name ? ` · ${esc(r.section_name)}` : ""}${
-          r.folder_name ? ` → ${esc(r.folder_name)}` : ""}${
-          manager && r.author && r.status !== "published" ? ` · ${esc(r.author)}` : ""} · ${when}${
+        <div class="res-name">${esc(raw.name)}${raw.is_featured ? ` <span class="res-star" title="Рекомендований">★</span>` : ""}</div>
+        <div class="res-sub">${esc(kindName)}${
+          raw.section_name ? ` · ${esc(raw.section_name)}` : ""}${author} · ${when}${
           warn.length ? ` · <span class="res-warn">${esc(warn.join(", "))}</span>` : ""}</div>
-        ${r.status === "draft" && r.review_note
-          ? `<div class="res-note">Повернуто з коментарем: ${esc(r.review_note)}</div>` : ""}
+        ${note}
       </div>
-      <span class="badge ${stMeta.cls}">${esc(stMeta.label)}</span>
-      <div class="res-acts">${acts}</div>
+      <span class="badge ${st.cls}">${esc(st.label)}</span>
+      <div class="res-acts">
+        <button class="small" data-act="open">Відкрити</button>
+        <button class="small ghost" data-act="edit">Редагувати</button>
+        ${statusCtl}
+        <button class="small danger" data-act="del">Видалити</button>
+        ${q ? `<button class="small ghost" data-act="seen" title="Прибрати з черги без змін">Переглянуто</button>` : ""}
+      </div>
     </div>`;
   };
-  const openBtn = (r) => `<button class="small" data-open="${r.id}">Відкрити</button>`;
-
-  // Дії автора залежать від стану його матеріалу.
-  const authorActs = (r) => openBtn(r) + (
-    r.status === "draft"
-      ? `<button class="small ghost" data-edit="${r.id}">Редагувати</button>
-         <button class="small accent" data-submit="${r.id}">Подати на розгляд</button>
-         <button class="small danger" data-del="${r.id}">Видалити</button>`
-    : r.status === "review"
-      ? `<button class="small ghost" data-withdraw="${r.id}">Відкликати</button>` : "");
-  // Менеджер: у черзі — рішення, у списку — повний редактор і статус.
-  const queueActs = (r) => openBtn(r)
-    + `<button class="small accent" data-publish="${r.id}">Опублікувати</button>
-       <button class="small ghost" data-reject="${r.id}">Повернути…</button>`;
-  const managerActs = (r) => openBtn(r)
-    + `<button class="small ghost" data-medit="${r.id}">Редагувати</button>
-       <select class="small res-status" data-st="${r.id}" title="Статус життєвого циклу">
-         ${statusChoices(r.status).map(([v, m]) =>
-           `<option value="${v}"${v === r.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
-       </select>
-       <button class="small danger" data-del="${r.id}">Видалити</button>`;
 
   let bodyHtml;
   if (manager) {
-    // Чипи рахують лише список під ними — черга на розгляд показана вище.
-    const rest = items.filter(i => i.status !== "review");
-    const counts = { all: rest.length };
-    CAT_ORDER.filter(k => k !== "skill").forEach(k =>
-      counts[k] = rest.filter(i => i.resource_type === k).length);
-    const chips = [["all", "Усі"]].concat(
-      CAT_ORDER.filter(k => k !== "skill").map(k => [k, CAT_KINDS[k].label]));
+    const all = resources;
+    const counts = { all: all.length };
+    const kinds = CAT_ORDER.filter(k => k !== "skill");
+    kinds.forEach(k => counts[k] = all.filter(i => i.resource_type === k).length);
+    const chips = [["all", "Усі"]].concat(kinds.map(k => [k, CAT_KINDS[k].label]));
     const health = {
-      needs_update: n("needs_update"),
-      no_owner: rest.filter(i => i.status === "published" && !i.owner).length,
-      overdue: rest.filter(i => i.review_overdue).length,
-      draft: n("draft"),
+      needs_update: all.filter(i => i.status === "needs_update").length,
+      no_owner: all.filter(i => i.status === "published" && !i.owner).length,
+      overdue: all.filter(i => i.review_overdue).length,
+      draft: all.filter(i => i.status === "draft").length,
     };
     const healthChip = (key, label, cnt) =>
       `<button class="cat-chipf${contribFilter === key ? " active" : ""}${cnt ? " warn" : ""}" data-f="${key}">${esc(label)} <b>${cnt}</b></button>`;
-    const shown = items.filter(i => {
-      if (i.status === "review") return false;   // черга — окремим блоком вище
+    const shown = all.filter(i => {
       if (contribKind !== "all" && i.resource_type !== contribKind) return false;
       if (contribFilter === "needs_update") return i.status === "needs_update";
       if (contribFilter === "no_owner") return i.status === "published" && !i.owner;
@@ -2716,59 +2852,65 @@ async function viewContributions() {
     });
     bodyHtml = `
       <section class="contrib-sec">
-        <h2 class="contrib-h2">На розгляді <b>${queue.length}</b></h2>
+        <h2 class="contrib-h2">Потребують перегляду <b>${queue.length}</b></h2>
         ${queue.length ? `
-          <p class="contrib-sub">Подані користувачами матеріали. Перегляньте й опублікуйте
-            або поверніть з коментарем — автор отримає сповіщення.</p>
-          <div class="mine-list">${queue.map(r => row(r, queueActs(r))).join("")}</div>`
-        : `<p class="contrib-empty">Нових подань немає. Коли хтось подасть матеріал, ви
-            отримаєте сповіщення, а він з'явиться тут.</p>`}
+          <p class="contrib-sub">Користувачі опублікували або змінили ці матеріали — вони вже
+            в каталозі. Перегляньте; за потреби відредагуйте, зніміть з публікації чи видаліть —
+            автор отримає сповіщення. Відкрита картка вважається переглянутою.</p>
+          <div class="mine-list">${queue.map(({ q, ref }) => row(ref, { q })).join("")}</div>`
+        : `<p class="contrib-empty">Усе переглянуто. Коли користувач опублікує матеріал, ви
+            отримаєте сповіщення, а матеріал з'явиться тут.</p>`}
       </section>
       <section class="contrib-sec">
-        <h2 class="contrib-h2">Усі матеріали <b>${rest.length}</b></h2>
+        <h2 class="contrib-h2">Усі матеріали <b>${all.length}</b></h2>
         <div class="fb-tabs res-tabs">${chips.map(([k, label]) =>
           `<button class="fb-tab${contribKind === k ? " active" : ""}" data-k="${k}">${esc(label)} <b>${counts[k] || 0}</b></button>`).join("")}</div>
         <div class="res-health">
-          ${healthChip("all", "Усі", rest.length)}
+          ${healthChip("all", "Усі", all.length)}
           ${healthChip("needs_update", "Потребують оновлення", health.needs_update)}
           ${healthChip("no_owner", "Без власника", health.no_owner)}
           ${healthChip("overdue", "Перегляд прострочено", health.overdue)}
           ${healthChip("draft", "Чернетки", health.draft)}
         </div>
-        <div class="mine-list">${shown.map(r => row(r, managerActs(r))).join("")
+        <div class="mine-list">${shown.map(r => row(itemRef("resource", r), { statusSelect: true })).join("")
           || `<p class="muted">За цим фільтром матеріалів немає.</p>`}</div>
+        <p class="mine-foot">Навички — у «Керування → Каталог навичок».</p>
         <label class="ind-toggle contrib-strict">
           <input type="checkbox" id="strict-publish" ${settings.strict_publish ? "checked" : ""}>
           <span><b>Сувора публікація</b> — не публікувати матеріал без розділу, категорії,
-          опису, власника та дати наступного перегляду. Чернеток не стосується.</span>
+          опису, власника та дати наступного перегляду. Коли публікує користувач, власником
+          стає він сам, а перегляд призначається через пів року.</span>
         </label>
       </section>`;
   } else {
-    bodyHtml = items.length ? `
-      <div class="mine-list">${items.map(r => row(r, authorActs(r))).join("")}</div>
-      <p class="mine-foot">Чернетку бачите лише ви й команда хабу. Подана на розгляд —
-        чекає рішення менеджера: він опублікує її або поверне з коментарем, і ви
-        отримаєте сповіщення. Опублікований матеріал змінює менеджер каталогу.</p>`
+    const mine = refs.slice().sort((a, b) =>
+      String(b.raw.updated_at || "").localeCompare(String(a.raw.updated_at || "")));
+    bodyHtml = mine.length ? `
+      <div class="mine-list">${mine.map(ref => row(ref)).join("")}</div>
+      <p class="mine-foot">Опублікований матеріал одразу бачать усі. Менеджер каталогу
+        отримує сповіщення про кожну публікацію й може відредагувати матеріал або зняти
+        його з публікації — тоді ви отримаєте сповіщення з причиною. Чернетку бачите лише
+        ви й менеджери.</p>`
     : `
       <div class="mine-empty">${gsvg("pen")}
-        <h2>Ви ще нічого не додавали</h2>
-        <p>Промпт, інструкція, кейс, агент, MCP-сервер чи корисне посилання —
-          три кроки, і матеріал на розгляді в команди хабу.</p>
+        <h2>Поділіться тим, що працює</h2>
+        <p>Промпт, інструкція, кейс, агент, навичка, MCP-сервер чи корисне посилання —
+          три кроки, і матеріал одразу в каталозі.</p>
         <div class="mine-steps">
           <span><b>1</b>Оберіть вид</span>
           <span><b>2</b>Вставте текст або файл</span>
-          <span><b>3</b>Назвіть і подайте</span>
+          <span><b>3</b>Назвіть і опублікуйте</span>
         </div>
         <button id="contrib-add-first">Додати перший матеріал</button>
       </div>`;
   }
 
+  const published = refs.filter(itemPublic).length;
   const sub = manager
-    ? `На розгляді: ${queue.length} · усього: ${items.length}`
-    : items.length
-      ? [`чернеток: ${n("draft")}`, `на розгляді: ${n("review")}`,
-         `опубліковано: ${n("published") + n("needs_update")}`].join(" · ")
-      : "Усе, що ви додаєте до бази знань, і стан розгляду.";
+    ? `Потребують перегляду: ${queue.length} · матеріалів: ${resources.length} · навичок: ${skills.length}`
+    : refs.length
+      ? `опубліковано: ${published} · чернеток: ${refs.length - published}`
+      : "Усе, що ви публікуєте в базі знань.";
 
   view.innerHTML = `
     <div class="page-head">
@@ -2780,44 +2922,31 @@ async function viewContributions() {
     </div>
     ${bodyHtml}`;
 
-  const byId = (id) => items.find(i => i.id === Number(id));
-  const bind = (sel, fn) => view.querySelectorAll(sel).forEach(b =>
-    b.addEventListener("click", () => fn(byId(b.dataset[Object.keys(b.dataset)[0]]), b)));
-
   view.querySelectorAll("#contrib-add, #contrib-add-first").forEach(b =>
     b.addEventListener("click", () => openContentWizard()));
-  bind("[data-open]", r => openResourceModal(r.id));
-  bind("[data-edit]", async r => {
-    try { openContentWizard({ resource: await api(`/catalog/resources/${r.id}`) }); }
-    catch (err) { toast(err.message, "err"); }
-  });
-  bind("[data-medit]", r => openResourceEditor(r.id, { onSaved: reload }));
-  bind("[data-submit]", r => submitForReview(r, reload));
-  bind("[data-withdraw]", r => withdrawFromReview(r, reload));
-  bind("[data-publish]", r => publishMaterial(r, reload));
-  bind("[data-reject]", r => openRejectDialog(r, reload));
-  bind("[data-del]", async r => {
-    if (!confirm(`Видалити «${r.name}»? Дію не можна скасувати.`)) return;
-    try {
-      await api(`/catalog/resources/${r.id}`, { method: "DELETE" });
-      toast("Матеріал видалено");
-      reload();
-    } catch (err) { toast(err.message, "err"); }
-  });
-
+  view.querySelectorAll(".res-row [data-act]").forEach(b =>
+    b.addEventListener("click", () => {
+      const rowEl = b.closest(".res-row");
+      const ref = refOf(rowEl.dataset.type, rowEl.dataset.id);
+      if (!ref) return;
+      const act = b.dataset.act;
+      if (act === "open") (ref.type === "skill" ? openSkillModal : openResourceModal)(ref.id);
+      else if (act === "edit") editItem(ref, reload);
+      else if (act === "pub") setItemStatus(ref, "published", reload);
+      else if (act === "unpub") setItemStatus(ref, "draft", reload);
+      else if (act === "del") deleteItem(ref, reload);
+      else if (act === "seen") { markItemSeen(ref.type, ref.id); viewContributions(); }
+    }));
   view.querySelectorAll(".fb-tab[data-k]").forEach(b =>
     b.addEventListener("click", () => { contribKind = b.dataset.k; viewContributions(); }));
   view.querySelectorAll("[data-f]").forEach(b =>
     b.addEventListener("click", () => { contribFilter = b.dataset.f; viewContributions(); }));
   view.querySelectorAll(".res-status").forEach(sel =>
     sel.addEventListener("change", async () => {
-      const r = byId(sel.dataset.st);
+      const ref = refOf("resource", sel.dataset.st);
       sel.disabled = true;
-      try {
-        await api(`/catalog/resources/${r.id}/status`, { method: "POST", body: { status: sel.value } });
-        toast(`Статус: ${RES_STATUS_META[sel.value].label.toLowerCase()}`);
-        reload();
-      } catch (err) { sel.value = r.status; toast(err.message, "err"); sel.disabled = false; }
+      const ok = await setItemStatus(ref, sel.value, reload);
+      if (!ok) { sel.value = ref.status; sel.disabled = false; }
     }));
   const strict = view.querySelector("#strict-publish");
   if (strict) strict.addEventListener("change", async () => {
@@ -3324,34 +3453,20 @@ async function openResourceModal(resourceId) {
     + attr("Наступний перегляд", dateUa(r.next_review_at));
   const reuseBlock = reuseBlockHtml(r);
   const own = !!(state.user && r.created_by === state.user.id);
-  const manager = isManager();
+  const ref = itemRef("resource", r);
   const staleNote = r.status === "needs_update"
     ? `<p class="sm-stale">Матеріал очікує актуалізації — звірте його з поточними правилами
        перед використанням${r.owner ? ` або зверніться до відповідального: ${esc(r.owner)}` : ""}.</p>`
     : r.status === "draft" && r.review_note
-    ? `<p class="sm-draft returned"><b>Повернуто на доопрацювання:</b> ${esc(r.review_note)}</p>`
+    ? `<p class="sm-draft returned"><b>Знято з публікації:</b> ${esc(r.review_note)}${
+        own ? " Виправте й опублікуйте знову." : ""}</p>`
     : r.status === "draft"
-    ? `<p class="sm-draft">Чернетка — її бачите лише автор і команда хабу.${
-        manager ? "" : " Подайте на розгляд, коли матеріал готовий."}</p>`
-    : r.status === "review"
-    ? `<p class="sm-draft">На розгляді${r.submitted_at ? ` з ${dateUa(r.submitted_at)}` : ""}${
-        r.author ? ` · подав(ла) ${esc(r.author)}` : ""}. ${
-        manager ? "Опублікуйте або поверніть з коментарем — автор отримає сповіщення."
-                : "Команда хабу перевірить матеріал і опублікує або поверне з коментарем."}</p>`
+    ? `<p class="sm-draft">Чернетка — у каталозі її не видно${
+        own ? ". Опублікуйте, коли матеріал готовий." : ": бачать лише автор і менеджери."}</p>`
+    : r.status === "archived"
+    ? `<p class="sm-draft">В архіві — користувачі матеріал не бачать${
+        r.review_note ? `. Причина: ${esc(r.review_note)}` : ""}.</p>`
     : "";
-  // Дії розгляду: автор подає/відкликає, менеджер публікує/повертає;
-  // чернетку править автор (у тому ж майстрі, де створював) або менеджер.
-  const mayEditDraft = r.status === "draft" && (manager || own);
-  const reviewActs = [
-    r.status === "draft" && own && !manager
-      ? `<button class="mdc-act" id="res-submit">Подати на розгляд</button>` : "",
-    r.status === "review" && own && !manager
-      ? `<button class="ghost-act" id="res-withdraw">Відкликати</button>` : "",
-    manager && (r.status === "draft" || r.status === "review")
-      ? `<button class="mdc-act" id="res-publish">Опублікувати</button>` : "",
-    manager && r.status === "review"
-      ? `<button class="ghost-act" id="res-reject">Повернути з коментарем</button>` : "",
-  ].join("");
 
   const { overlay, close } = catalogModal(`
     <div class="modal sm-modal md-modal">
@@ -3365,7 +3480,7 @@ async function openResourceModal(resourceId) {
               ${it.category ? `<span class="mdc-tag primary"><i class="md-dot"></i>${esc(it.category)}</span>` : ""}
               ${tags}
               <span class="muted">Версія: <b>${esc(it.version)}</b>${it.author ? ` · Автор: <b>${esc(it.author)}</b>` : ""}</span>
-              ${it.ratingCount ? `<span class="muted">Оцінка: <b>${it.ratingAvg}</b> з 5 (${it.ratingCount})</span>` : ""}
+              <span class="muted" id="res-rating">${it.ratingCount ? `Оцінка: <b>${it.ratingAvg}</b> з 5 (${it.ratingCount})` : ""}</span>
               ${r.section_name ? `<span class="muted">Розділ: <b>${esc(r.section_name)}</b>${
                 r.folder_name ? ` → <b>${esc(r.folder_name)}</b>` : ""}</span>` : ""}
             </div>
@@ -3377,6 +3492,7 @@ async function openResourceModal(resourceId) {
         </div>
       </div>
       <div class="sm-body">
+        ${manageBarHtml(ref)}
         ${staleNote}
         ${it.description ? `<p class="sm-desc">${esc(it.description)}</p>` : ""}
         ${it.kind === "mcp" ? linkBlock + bodyBlock : bodyBlock + linkBlock}
@@ -3385,21 +3501,18 @@ async function openResourceModal(resourceId) {
         <div class="sm-files" id="res-files"></div>
       </div>
       <div class="sm-actions" id="res-actions">
-        ${reviewActs}
-        ${mayEditDraft ? `<button class="${reviewActs ? "ghost-act" : "mdc-act"}" id="res-edit">Редагувати</button>` : ""}
         <button class="ghost-act" id="res-idea">Поділитися ідеєю</button>
       </div>
       <hr class="md-hr">
-      ${feedbackBlockHtml("Наскільки матеріал був корисним? Оцінка й коментар допомагають "
-                          + "команді хабу тримати контент актуальним.")}
+      ${commentsBlockHtml()}
     </div>`);
 
-  bindFeedbackBlock(overlay, async (rating, text) => {
-    await api(`/catalog/resources/${it.id}/feedback`, { method: "POST",
-      body: { rating, message: text } });
-    toast("Дякуємо! Відгук надіслано.");
-    close();
-  });
+  bindComments(overlay, `/catalog/resources/${it.id}/feedback`, { onRated: (d) => {
+    overlay.querySelector("#res-rating").innerHTML = d.rating_count
+      ? `Оцінка: <b>${d.rating_avg}</b> з 5 (${d.rating_count})` : "";
+  } });
+  bindManageBar(overlay, ref, close);
+  markItemSeen("resource", r.id);
 
   const favBtn = overlay.querySelector("#res-fav");
   favBtn.addEventListener("click", async () => {
@@ -3432,19 +3545,6 @@ async function openResourceModal(resourceId) {
     close();
     openIdeaForm({ id: it.id, name: it.name });
   });
-  const editBtn = overlay.querySelector("#res-edit");
-  if (editBtn) editBtn.addEventListener("click", () => {
-    close();
-    openContentWizard({ resource: r });
-  });
-  // Після рішення картка закривається, а сторінка під нею перемальовується:
-  // список чи лічильник у панелі вже інші.
-  const afterReview = async () => { close(); await ensureHubData(true); go(nav.dest); };
-  const bindAct = (sel, fn) => { const b = overlay.querySelector(sel); if (b) b.addEventListener("click", fn); };
-  bindAct("#res-submit", () => submitForReview(r, afterReview));
-  bindAct("#res-withdraw", () => withdrawFromReview(r, afterReview));
-  bindAct("#res-publish", () => publishMaterial(r, afterReview));
-  bindAct("#res-reject", () => openRejectDialog(r, afterReview));
 
   const act = cardAction(it);
   // Інструкції та кейси читають у самій модалці; в MCP кнопка копіювання
@@ -3486,8 +3586,10 @@ async function openSkillModal(skillId) {
                 `<div class="md-doc">${renderMarkdown(s.instructions)}</div>`)
     : "";
   const downloadsText = n => `${n} ${plural(n, "завантаження", "завантаження", "завантажень")}`;
-  const draftNote = s.status !== "published"
-    ? `<p class="sm-draft">Не опублікована — навичку бачить лише команда хабу.</p>` : "";
+  const ref = itemRef("skill", s);
+  const draftNote = s.status === "published" ? ""
+    : isOwnItem(ref) ? `<p class="sm-draft">Чернетка — у каталозі її не видно. Опублікуйте, коли навичка готова.</p>`
+    : `<p class="sm-draft">Не опублікована — бачать лише автор і менеджери каталогу.</p>`;
 
   const { overlay, close } = catalogModal(`
     <div class="modal sm-modal md-modal" id="skill-modal">
@@ -3501,6 +3603,7 @@ async function openSkillModal(skillId) {
               <span class="mdc-tag primary"><i class="md-dot"></i>${esc(s.category || "Загальне")}</span>
               <span class="muted">Версія: <b>${esc(s.version)}</b> · Автор: <b>${esc(s.author || "—")}</b></span>
               ${pkg ? `<span class="muted" id="sm-downloads">${downloadsText(s.downloads_count || 0)}</span>` : ""}
+              <span class="muted" id="sm-rating"></span>
             </div>
           </div>
         </div>
@@ -3510,6 +3613,7 @@ async function openSkillModal(skillId) {
         </div>
       </div>
       <div class="sm-body">
+        ${manageBarHtml(ref)}
         ${draftNote}
         ${s.description ? `<p class="sm-desc">${esc(s.description)}</p>` : ""}
         ${attr("Вхідні дані", s.input_spec)}
@@ -3526,16 +3630,15 @@ async function openSkillModal(skillId) {
         </div>` : ""}
       </div>
       <hr class="md-hr">
-      ${feedbackBlockHtml("Знайшли проблему чи маєте пропозицію? Напишіть — повідомлення "
-                          + "отримає команда навичок.")}
+      ${commentsBlockHtml()}
     </div>`);
 
-  bindFeedbackBlock(overlay, async (rating, text) => {
-    await api(`/skills/${s.id}/feedback`, { method: "POST",
-      body: { rating, message: text } });
-    toast("Дякуємо! Повідомлення надіслано.");
-    close();
-  });
+  bindComments(overlay, `/skills/${s.id}/feedback`, { onRated: (d) => {
+    overlay.querySelector("#sm-rating").innerHTML = d.rating_count
+      ? `Оцінка: <b>${d.rating_avg}</b> з 5 (${d.rating_count})` : "";
+  } });
+  bindManageBar(overlay, ref, close);
+  markItemSeen("skill", s.id);
 
   const favBtn = overlay.querySelector("#sm-fav");
   favBtn.addEventListener("click", async () => {
@@ -3589,10 +3692,12 @@ async function openSkillModal(skillId) {
 
 // ---------- Управління навичками (каталог) ----------
 
-// Завантаження пакета: без skillId — НОВА навичка; зі skillId — нова ВЕРСІЯ наявної.
-async function uploadSkillPackage(file, skillId) {
+// Завантаження пакета: без skillId — НОВА навичка (status: published | draft);
+// зі skillId — нова ВЕРСІЯ наявної.
+async function uploadSkillPackage(file, skillId, status) {
   const form = new FormData();
   form.append("file", file);
+  if (status) form.append("status", status);
   const url = skillId ? `${API}/skills/${skillId}/upload` : `${API}/skills/upload`;
   const res = await fetch(url, {
     method: "POST",
@@ -3681,7 +3786,7 @@ async function renderFeedback() {
 
   if (!data.items.length) {
     listEl.innerHTML = `<p class="muted">${manageFbFilter === "new"
-      ? "Нових повідомлень немає." : "Повідомлень ще немає."}</p>`;
+      ? "Нових коментарів немає." : "Коментарів ще немає."}</p>`;
     return;
   }
   listEl.innerHTML = "";
@@ -3691,11 +3796,25 @@ async function renderFeedback() {
         <span class="fb-dt">${esc(fmtFeedbackDate(f.created_at))}</span>
         ${f.is_read ? "" : `<span class="fb-tag">Нове</span>`}
       </div>
-      <div class="fb-sub">Навичка: <b>${esc(f.skill_name)}</b>. Версія: ${esc(f.skill_version || "—")}</div>
-      <div class="fb-sub">Користувач: ${esc(f.username || "—")}</div>
-      <div class="fb-text">${esc(f.message)}</div>
-      ${f.is_read ? "" : `<div class="fb-item-actions"><button class="small ghost fb-mark">Позначити прочитаним</button></div>`}
+      <div class="fb-sub">${f.item_type === "resource" ? "Матеріал" : "Навичка"}: <b>${esc(f.skill_name)}</b></div>
+      <div class="fb-sub">${esc(f.username || "—")}${f.rating ? ` · оцінка ${f.rating} з 5` : ""}${
+        f.is_public ? "" : ` · <span class="fb-private">приватний відгук</span>`}</div>
+      <div class="fb-text">${f.message && f.message !== "(без коментаря)" ? esc(f.message) : "<i>лише оцінка</i>"}</div>
+      <div class="fb-item-actions">
+        ${f.resource_id || f.skill_id ? `<button class="small ghost fb-open">Відкрити</button>` : ""}
+        ${f.is_read ? "" : `<button class="small ghost fb-mark">Позначити прочитаним</button>`}
+        ${f.message && f.message !== "(без коментаря)" ? `<button class="small danger fb-del">Видалити</button>` : ""}
+      </div>
     </div>`);
+    const openBtn = item.querySelector(".fb-open");
+    if (openBtn) openBtn.addEventListener("click", () =>
+      f.skill_id ? openSkillModal(f.skill_id) : openResourceModal(f.resource_id));
+    const delBtn = item.querySelector(".fb-del");
+    if (delBtn) delBtn.addEventListener("click", async () => {
+      if (!confirm("Видалити коментар? Оцінка, якщо була, збережеться.")) return;
+      try { await api(`/catalog/feedback/${f.id}`, { method: "DELETE" }); renderFeedback(); }
+      catch (err) { toast(err.message, "err"); }
+    });
     const mark = item.querySelector(".fb-mark");
     if (mark) mark.addEventListener("click", async () => {
       try { await api(`/skills/feedback/${f.id}/read`, { method: "POST" }); renderFeedback(); }
@@ -4035,16 +4154,18 @@ async function downloadKpiCsv() {
 }
 
 // ---------- Наповнення каталогу: розділи, матеріали, життєвий цикл ----------
-// «На розгляді» — не вибір зі списку, а наслідок подання: вручну в нього не
-// переводять, лише з нього — кнопками «Опублікувати» / «Повернути».
-function statusChoices(current) {
+// Статуси, які може обрати поточний користувач: менеджер — будь-який,
+// автор — опублікувати або зняти з публікації. Новий матеріал буває лише
+// опублікованим або чернеткою.
+function statusChoices(current, { creating = false } = {}) {
+  const allowed = creating || !isManager() ? ["draft", "published"]
+                                          : Object.keys(RES_STATUS_META);
   return Object.entries(RES_STATUS_META)
-    .filter(([v]) => v !== "review" || v === current);
+    .filter(([v]) => allowed.includes(v) || v === current);
 }
 
 const RES_STATUS_META = {
   draft: { label: "Чернетка", cls: "draft" },
-  review: { label: "На розгляді", cls: "review" },
   published: { label: "Опублікований", cls: "published" },
   needs_update: { label: "Потребує оновлення", cls: "stale" },
   archived: { label: "Архів", cls: "delisted" },
@@ -4072,10 +4193,11 @@ async function renderResourcesManage() {
         <h2>Наповнення каталогу</h2>
         <button class="mdc-act" id="res-goto">Відкрити</button>
       </div>
-      <p class="muted">Матеріали, черга на розгляд, повний редактор і сувора публікація живуть
-      у базі знань — пункт «Наповнення каталогу» в бічній панелі. Там само користувачі
-      подають власні матеріали, а менеджери їх публікують або повертають з коментарем.
-      Тут — структура каталогу: розділи, колекції, довідники та словник формулювань.</p>
+      <p class="muted">Матеріали, публікації користувачів, що чекають перегляду, повний
+      редактор і сувора публікація живуть у базі знань — пункт «Наповнення каталогу» в
+      бічній панелі. Користувачі публікують самі, а менеджер каталогу отримує сповіщення
+      й модерує вже опубліковане. Тут — структура каталогу: розділи, колекції, довідники
+      та словник формулювань.</p>
     </div>
 
     <div class="card">
@@ -5009,7 +5131,7 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
   const accentOpts = ACCENT_OPTIONS.map(([v, l]) => opt(v, l, r.accent || "")).join("");
   const sectionOpts = opt("", "— не вказано —", r.section_id || "")
     + sections.map(s => opt(s.id, s.name, r.section_id || "")).join("");
-  const statusOpts = statusChoices(r.status)
+  const statusOpts = statusChoices(r.status, { creating: !resourceId })
     .map(([v, m]) => opt(v, m.label, r.status)).join("");
   const reuseOpts = REUSE_OPTIONS.map(([v, l]) => opt(v, l, r.reuse_level || "")).join("");
   const termOpts = (kind, cur) => opt("", "— не вказано —", cur || "")
@@ -5183,7 +5305,7 @@ async function renderSkillsConfig() {
   view.innerHTML = `
     <div class="card" id="fb-card">
       <div class="fb-head">
-        <h2>Зворотний зв'язок <span id="fb-unread" class="fb-badge hidden"></span></h2>
+        <h2>Коментарі й оцінки <span id="fb-unread" class="fb-badge hidden"></span></h2>
         <div class="fb-controls">
           <div class="fb-tabs">
             <button class="fb-tab" data-f="new">Нові</button>
@@ -5258,12 +5380,8 @@ async function renderSkillsConfig() {
         <button class="small danger" data-act="del">Видалити</button>
       </td>
     </tr>`);
-    const setStatus = async (status) => {
-      try { await api(`/skills/${s.id}/status`, { method: "POST", body: { status } });
-        toast(status === "published" ? "Навичку опубліковано" : "Публікацію скасовано");
-        openTab("manage-skills"); }
-      catch (err) { toast(err.message, "err"); }
-    };
+    const sref = itemRef("skill", s);
+    const setStatus = (status) => setItemStatus(sref, status, () => openTab("manage-skills"));
     const pb = tr.querySelector("[data-act='pub']");
     if (pb) pb.addEventListener("click", () => setStatus("published"));
     const upb = tr.querySelector("[data-act='unpub']");
@@ -5271,12 +5389,8 @@ async function renderSkillsConfig() {
     tr.querySelector("[data-act='edit']").addEventListener("click", () => openSkillEditor(s.id));
     const dlb = tr.querySelector("[data-act='dl']");
     if (dlb) dlb.addEventListener("click", () => downloadSkillPackage(s));
-    tr.querySelector("[data-act='del']").addEventListener("click", async () => {
-      if (!confirm(`Видалити навичку «${s.name}»?\n\nПакет та іконку буде видалено, навичка зникне з каталогу й обраного. Відгуки збережуться.`)) return;
-      try { await api(`/skills/${s.id}`, { method: "DELETE" });
-        toast("Навичку видалено"); openTab("manage-skills"); }
-      catch (err) { toast(err.message, "err"); }
-    });
+    tr.querySelector("[data-act='del']").addEventListener("click", () =>
+      deleteItem(sref, () => openTab("manage-skills")));
     body.appendChild(tr);
   });
 }
@@ -5295,8 +5409,10 @@ async function uploadSkillIcon(file, skillId) {
   return data;
 }
 
-// Контекст навички: редагування атрибутів + іконка + завантаження нової версії.
-async function openSkillEditor(skillId) {
+// Редактор навички: атрибути, інструкція, іконка, нова версія пакета.
+// У «Керуванні» відкривається на сторінці під таблицею; з картки навички
+// (автор чи менеджер у базі знань) — у модальному вікні.
+async function openSkillEditor(skillId, { onSaved } = {}) {
   const [s, cats] = await Promise.all([
     api(`/skills/${skillId}`), api("/categories").catch(() => []),
   ]);
@@ -5309,9 +5425,21 @@ async function openSkillEditor(skillId) {
       `<option value="${esc(n)}" ${n === s.category ? "selected" : ""}>${esc(n)}</option>`))
     .join("");
 
-  const box = $("#sk-edit");
+  const panelBox = document.getElementById("sk-edit");
+  let box, closeBox;
+  if (panelBox) {
+    box = panelBox;
+    closeBox = () => { box.innerHTML = ""; };
+  } else {
+    const m = catalogModal(`<div class="modal res-editor sk-editor-modal"><div id="sk-edit-m"></div></div>`);
+    box = m.overlay.querySelector("#sk-edit-m");
+    closeBox = () => m.close(true);
+  }
+  // Після збереження: у «Керуванні» перемальовуємо таблицю, з картки —
+  // те, що передав виклик.
+  const saved = () => { closeBox(); if (onSaved) onSaved(); else openTab("manage-skills"); };
   box.innerHTML = `
-    <div class="card">
+    <div class="${panelBox ? "card" : "sk-edit-in"}">
       <h2>Навичка: ${esc(s.name)} <span class="muted">v${esc(s.version)}</span></h2>
       <div class="editor-top">
         <div class="editor-icon">
@@ -5352,7 +5480,7 @@ async function openSkillEditor(skillId) {
       </div>
       <div id="se-files" class="muted" style="margin-top:10px"></div>
     </div>`;
-  box.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (panelBox) box.scrollIntoView({ behavior: "smooth", block: "start" });
 
   // Прев'ю іконки: власна (якщо є) або стандартна.
   function paintIcon(skill) {
@@ -5404,10 +5532,10 @@ async function openSkillEditor(skillId) {
         // Інструкцію пакетної навички бере зі skill.md — тут її не правлять.
         ...(s.has_package ? {} : { instructions: $("#se-instr").value }),
       }});
-      toast("Атрибути навички збережено"); openTab("manage-skills");
+      toast("Зміни збережено"); saved();
     } catch (err) { toast(err.message, "err"); }
   });
-  $("#se-close").addEventListener("click", () => { box.innerHTML = ""; });
+  $("#se-close").addEventListener("click", () => closeBox());
   $("#se-upload").addEventListener("click", async () => {
     const file = $("#se-file").files[0];
     if (!file) { toast("Оберіть файл архіву", "err"); return; }
@@ -5415,7 +5543,7 @@ async function openSkillEditor(skillId) {
     try {
       const data = await uploadSkillPackage(file, s.id);
       toast(`Нову версію «${data.name}» v${data.version} завантажено`);
-      openTab("manage-skills");
+      saved();
     } catch (err) { toast(err.message, "err"); }
     finally { $("#se-upload").disabled = false; }
   });
@@ -5423,9 +5551,9 @@ async function openSkillEditor(skillId) {
 
 // ---------- Користувачі (Admin) ----------
 const USER_ROLE_OPTS = [
-  { v: "", label: "member (звичайний)" },
-  { v: "skill_manager", label: "skill_manager" },
-  { v: "admin", label: "admin" },
+  { v: "", label: "Користувач" },
+  { v: "skill_manager", label: "Менеджер каталогу" },
+  { v: "admin", label: "Адміністратор" },
 ];
 function primaryRole(u) {
   if (u.roles.includes("admin")) return "admin";
@@ -5478,7 +5606,7 @@ async function viewUsers() {
           u.is_active ? "" : ` <span class="badge delisted">вимкнений</span>`}</div>
         <div class="u-who-login">${esc(u.username)}${mail ? " · " + esc(mail) : ""}</div>
       </td>
-      <td>${u.roles.join(", ") || "member"}</td>
+      <td>${esc(roleLabel(u))}</td>
       <td class="actions">
         <button class="small ghost" data-act="edit">Редагувати</button>
         <button class="small" data-act="reset">Пароль</button>

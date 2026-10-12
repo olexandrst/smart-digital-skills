@@ -57,6 +57,7 @@ class Skill(db.Model):
             "section_id": self.section_id,
             "folder_id": self.folder_id,
             "owner": self.owner,
+            "created_by": self.created_by,
             "skill_kind": self.skill_kind or "prompt",
             "instructions": self.prompt_template,
             "package_filename": self.package_filename,
@@ -78,7 +79,7 @@ class Skill(db.Model):
 
 
 class SkillCategory(db.Model):
-    """Керований довідник категорій навичок (Admin/Skill Manager)."""
+    """Керований довідник категорій навичок (адміністратор і менеджер каталогу)."""
     __tablename__ = "skill_categories"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -113,6 +114,9 @@ class SkillFeedback(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
     username = db.Column(db.String)
     message = db.Column(db.Text, nullable=False)
+    # Публічний коментар бачать усі під карткою. Відгуки, залишені до появи
+    # коментарів, писалися лише для команди — вони лишаються приватними.
+    is_public = db.Column(db.Boolean, nullable=False, default=True)
     is_read = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
@@ -128,6 +132,7 @@ class SkillFeedback(db.Model):
             "user_id": self.user_id,
             "username": self.username,
             "message": self.message,
+            "is_public": self.is_public,
             "is_read": self.is_read,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
