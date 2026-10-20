@@ -111,22 +111,31 @@ function sanitizeHtml(html) {
 }
 
 // ---------- Markdown (+ безпечний HTML) → HTML ----------
-function mdInline(s) {
+// opts.html === false — текст без HTML (промпти): «<документ>» лишається
+// текстом, а не тегом, який санітайзер викинув би.
+function mdInline(s, opts = {}) {
+  // Екрановані символи (\*, \#, \`…) — літерали: їх ставить редактор, щоб
+  // зірочка в тексті не стала курсивом.
+  const escs = [];
+  s = s.replace(/\\([\\`*_{}\[\]()#+\-.!|>~<])/g, (m, c) => { escs.push(c); return `\u0001${escs.length - 1}\u0001`; });
   // Інлайн-код виймаємо у плейсхолдери, щоб розмітка його не чіпала.
   const codes = [];
   s = s.replace(/`([^`]+)`/g, (m, c) => { codes.push(esc(c)); return `\u0000${codes.length - 1}\u0000`; });
   // Екрануємо «голі» & та < (сутності й HTML-теги лишаємо — їх санітизує sanitizeHtml).
   s = s.replace(/&(?![a-zA-Z]+;|#\d+;|#x[0-9a-fA-F]+;)/g, "&amp;")
-       .replace(/<(?![a-zA-Z/!])/g, "&lt;");
+       .replace(opts.html === false ? /</g : /<(?![a-zA-Z/!])/g, "&lt;");
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
     (m, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
+  // Усередині жирного може бути курсив: «**текст *курсив* текст**».
+  s = s.replace(/\*\*(?=\S)((?:[^*]|\*(?!\*))+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
   // Автопосилання «голих» URL (не всередині href="…" чи текст-посилання).
   s = s.replace(/(^|[^"'>=\](])((?:https?:\/\/)[^\s<>()"']+)/g,
     (m, pre, u) => `${pre}<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
   s = s.replace(/\u0000(\d+)\u0000/g, (m, idx) => `<code>${codes[+idx]}</code>`);
+  s = s.replace(/\u0001(\d+)\u0001/g, (m, idx) => esc(escs[+idx]));
   return s;
 }
 function _mdRow(line) {
@@ -134,7 +143,8 @@ function _mdRow(line) {
 }
 function _mdTableSep(l) { return l && /\|/.test(l) && /^[\s:|-]+$/.test(l.trim()) && /-/.test(l); }
 function _mdBlockStart(l) { return /^\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>|```)/.test(l) || /^\s*---+\s*$/.test(l); }
-function renderMarkdown(md) {
+function renderMarkdown(md, opts = {}) {
+  const inl = (t) => mdInline(t, opts);
   const lines = String(md || "").split(/\r?\n/);
   const out = [];
   let i = 0;
@@ -152,24 +162,30 @@ function renderMarkdown(md) {
       const header = _mdRow(line); i += 2;
       const rows = [];
       while (i < lines.length && /\|/.test(lines[i]) && lines[i].trim() !== "") { rows.push(_mdRow(lines[i])); i++; }
-      let t = '<table class="md-table"><thead><tr>' + header.map(h => `<th>${mdInline(h)}</th>`).join("") + "</tr></thead><tbody>";
-      rows.forEach(r => { t += "<tr>" + r.map(c => `<td>${mdInline(c)}</td>`).join("") + "</tr>"; });
+      let t = '<table class="md-table"><thead><tr>' + header.map(h => `<th>${inl(h)}</th>`).join("") + "</tr></thead><tbody>";
+      rows.forEach(r => { t += "<tr>" + r.map(c => `<td>${inl(c)}</td>`).join("") + "</tr>"; });
       out.push(t + "</tbody></table>");
       continue;
     }
+    if (/^\s*>/.test(line)) {
+      const quote = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) { quote.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
+      out.push(`<blockquote class="md-quote">${quote.map(inl).join("<br>")}</blockquote>`);
+      continue;
+    }
     const h = line.match(/^\s*(#{1,6})\s+(.*)$/);
-    if (h) { const lvl = Math.min(h[1].length + 1, 4); out.push(`<h${lvl} class="md-h">${mdInline(h[2])}</h${lvl}>`); i++; continue; }
+    if (h) { const lvl = Math.min(h[1].length + 1, 4); out.push(`<h${lvl} class="md-h">${inl(h[2])}</h${lvl}>`); i++; continue; }
     if (/^\s*---+\s*$/.test(line)) { out.push("<hr class='md-hr'>"); i++; continue; }
     if (/^\s*[-*+]\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*[-*+]\s+/, "")); i++; }
-      out.push('<ul class="md-ul">' + items.map(it => `<li>${mdInline(it)}</li>`).join("") + "</ul>");
+      out.push('<ul class="md-ul">' + items.map(it => `<li>${inl(it)}</li>`).join("") + "</ul>");
       continue;
     }
     if (/^\s*\d+\.\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { items.push(lines[i].replace(/^\s*\d+\.\s+/, "")); i++; }
-      out.push('<ol class="md-ol">' + items.map(it => `<li>${mdInline(it)}</li>`).join("") + "</ol>");
+      out.push('<ol class="md-ol">' + items.map(it => `<li>${inl(it)}</li>`).join("") + "</ol>");
       continue;
     }
     if (line.trim() === "") { i++; continue; }
@@ -178,7 +194,7 @@ function renderMarkdown(md) {
            !(/\|/.test(lines[i]) && _mdTableSep(lines[i + 1]))) {
       para.push(lines[i]); i++;
     }
-    if (para.length) out.push(`<p class="md-p">${para.map(mdInline).join("<br>")}</p>`);
+    if (para.length) out.push(`<p class="md-p">${para.map(inl).join("<br>")}</p>`);
     else i++;
   }
   return sanitizeHtml(out.join(""));
@@ -2255,6 +2271,7 @@ async function openContentWizard(opts = {}) {
     pkg: null,      // пакет навички (лише для виду skill)
   };
   const kindOf = () => kinds.find(k => k.code === st.kind) || null;
+  let bodyEditor = null;   // візуальний редактор тексту на кроці «Зміст»
   const dirty = () => !!(st.body.trim() || st.url.trim() || st.name.trim()
                          || st.desc.trim() || st.files.length || st.pkg);
 
@@ -2359,7 +2376,7 @@ async function openContentWizard(opts = {}) {
       ? "Вставте текст промпту. Місця для підстановки позначайте так: {текст документа}"
       : k.code === "mcp"
       ? "Які інструменти надає сервер і як додати його в Copilot Studio чи іншого клієнта"
-      : "Вставте текст або перетягніть файл вище — він стане Markdown-документом картки";
+      : "Пишіть або вставляйте текст: оформлення з Word чи сайту збережеться. Файл можна перетягнути в рамку вище";
     const urlBlock = !b.requires_url ? "" : `
       <label class="wiz-label">${esc(b.url_label || "Посилання")}
         <input id="wiz-url" type="url" placeholder="https://… або /внутрішній/шлях" value="${esc(st.url)}"></label>
@@ -2370,13 +2387,12 @@ async function openContentWizard(opts = {}) {
     const bodyBlock = !showBody ? "" : `
       <div class="wiz-drop" id="wiz-drop" tabindex="0">${gsvg("doc")}
         <div><b>Перетягніть файл сюди або <u>оберіть</u></b>
-          <span>.md, .txt, .docx, .pdf — текст з'явиться в полі нижче, його можна правити</span></div>
+          <span>.docx, .pdf, .md, .txt — текст з'явиться в редакторі нижче разом з оформленням</span></div>
         <input type="file" id="wiz-file" hidden accept="${WIZ_TEXT_ACCEPT}"></div>
       <div class="wiz-source" id="wiz-source"></div>
-      <label class="wiz-label">${esc(b.body_label || "Текст")}${b.requires_body ? "" : " <i>необов'язково</i>"}
-        <textarea id="wiz-text" rows="11"${k.code === "prompt" ? ' class="mono"' : ""}
-          placeholder="${esc(bodyPh)}">${esc(st.body)}</textarea>
-        <span class="wiz-count" id="wiz-count"></span></label>`;
+      <div class="wiz-label">${esc(b.body_label || "Текст")}${b.requires_body ? "" : " <i>необов'язково</i>"}
+        <div id="wiz-editor"></div>
+        <span class="wiz-count" id="wiz-count"></span></div>`;
     // MCP: спершу адреса, потім «як підключити»; текстові види — спершу текст.
     body.innerHTML = kindLine()
       + (k.code === "mcp" ? urlBlock + bodyBlock : bodyBlock + urlBlock)
@@ -2384,15 +2400,22 @@ async function openContentWizard(opts = {}) {
 
     const rekind = body.querySelector("#wiz-rekind");
     if (rekind) rekind.addEventListener("click", () => { collect(); st.step = 1; paint(); });
-    const ta = body.querySelector("#wiz-text");
-    if (ta) {
+    const holder = body.querySelector("#wiz-editor");
+    if (holder) {
+      // Візуальний редактор: оформлений текст, зберігається Markdown.
       const count = body.querySelector("#wiz-count");
-      const upd = () => {
-        count.textContent = ta.value.length
-          ? `${ta.value.length.toLocaleString("uk-UA")} симв.` : "";
+      const upd = (md) => {
+        count.textContent = md.length ? `${md.length.toLocaleString("uk-UA")} симв.` : "";
       };
-      ta.addEventListener("input", upd);
-      upd();
+      bodyEditor = RichEditor.create({
+        value: st.body, kind: k.code === "prompt" ? "prompt" : "doc",
+        placeholder: bodyPh, label: b.body_label || "Текст",
+        onChange: (md) => { st.body = md; upd(md); },
+        onFiles: (files) => takeTextFile(files[0]),
+      });
+      bodyEditor.el.id = "wiz-editor";
+      holder.replaceWith(bodyEditor.el);
+      upd(st.body);
       bindDrop(takeTextFile);
       paintSource();
     }
@@ -2449,16 +2472,15 @@ async function openContentWizard(opts = {}) {
     drop.classList.add("busy");
     try {
       const data = await extractTextFromFile(file);
-      const ta = body.querySelector("#wiz-text");
       if (!data.text) {
         st.files.push(file);
         paintFiles();
         setErr("У файлі не знайдено тексту (можливо, це скан) — додано як вкладення.");
         return;
       }
-      if (ta.value.trim() && !confirm("У полі вже є текст. Замінити його текстом із файлу?")) return;
-      ta.value = data.text;
-      ta.dispatchEvent(new Event("input"));
+      if (bodyEditor.getValue().trim()
+          && !confirm("У редакторі вже є текст. Замінити його текстом із файлу?")) return;
+      bodyEditor.setValue(data.text);
       st.body = data.text;
       // Оригінал Word/PDF лишаємо при картці: витягнутий текст втрачає оформлення.
       st.source = { file, kind: data.kind, chars: data.chars, truncated: data.truncated,
@@ -2568,7 +2590,7 @@ async function openContentWizard(opts = {}) {
   function collect() {
     const v = (sel) => { const e = body.querySelector(sel); return e ? e.value : null; };
     if (st.step === 2) {
-      if (v("#wiz-text") !== null) st.body = v("#wiz-text");
+      if (bodyEditor) st.body = bodyEditor.getValue();
       if (v("#wiz-url") !== null) st.url = v("#wiz-url");
     } else if (st.step === 3) {
       st.name = v("#wiz-name") || ""; st.desc = v("#wiz-desc") || "";
@@ -2601,6 +2623,7 @@ async function openContentWizard(opts = {}) {
 
   function paint() {
     setErr("");
+    bodyEditor = null;
     paintSteps();
     if (st.step === 1) paintKinds();
     else if (st.step === 2) paintContent();
@@ -3638,7 +3661,7 @@ async function openResourceModal(resourceId) {
     bodyBlock = `<div class="md-block">
         <div class="md-block-head"><span class="md-eyebrow">Текст промпту</span>
           <button class="md-mini" id="res-copy">${ICO_COPY}Копіювати</button></div>
-        <pre class="md-pre">${esc(it.body)}</pre>
+        <div class="md-doc md-prompt">${renderMarkdown(it.body, { html: false })}</div>
       </div>`;
   } else if ((it.kind === "instruction" || it.kind === "case" || it.kind === "mcp") && it.body) {
     const bodyTitle = { case: "Опис кейсу", mcp: "Як підключити" }[it.kind] || "Інструкція";
@@ -5373,8 +5396,8 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
         <label>Дата наступного перегляду<input id="re-next-review" type="date" value="${dateInputValue(r.next_review_at)}"></label>
         <label>Інструменти та платформи<input id="re-tools" type="text" value="${esc(r.tools || "")}" placeholder="Copilot Studio, SharePoint"></label>
         <label>Повторне використання<select id="re-reuse">${reuseOpts}</select></label>
-        <label class="wide">Як повторити рішення (Markdown)
-          <textarea id="re-reuse-guidance" rows="4" placeholder="Передумови, кроки, до кого звертатися — щоб колега міг застосувати це у себе">${esc(r.reuse_guidance || "")}</textarea></label>
+        <div class="wide re-body-row"><span>Як повторити рішення</span>
+          <div id="re-reuse-guidance"></div></div>
         <label>Теги (через кому)<input id="re-tags" type="text" list="re-taglist"
           value="${esc((r.tags || []).join(", "))}" placeholder="RAG, аналітика">
           <datalist id="re-taglist">${termsOf("tag")
@@ -5388,8 +5411,8 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
           ${opt("external", "Зовнішній сервіс", r.link_scope || "external")}
           ${opt("internal", "Внутрішній ресурс", r.link_scope || "external")}
         </select></label>
-        <label class="wide" id="re-body-row"><span id="re-body-label">Текст (Markdown)</span>
-          <textarea id="re-body" rows="9" placeholder="Текст промпту, інструкції або опис кейсу…">${esc(r.body || "")}</textarea></label>
+        <div class="wide re-body-row" id="re-body-row"><span id="re-body-label">Текст</span>
+          <div id="re-body"></div></div>
         <label class="check wide"><input type="checkbox" id="re-featured"${r.is_featured ? " checked" : ""}>
           <span>Рекомендований — показувати першим у каталозі</span></label>
       </div>
@@ -5415,6 +5438,14 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
   sectionSel.addEventListener("change", () => syncFolders(null));
 
   const typeSel = overlay.querySelector("#re-type");
+  // Текст — у візуальному редакторі; промпт і документ відрізняються тим, чи
+  // екранується розмітка (див. editor.js).
+  const bodyEd = RichEditor.create({ value: r.body || "", label: "Текст",
+    kind: typeSel.value === "prompt" ? "prompt" : "doc" });
+  overlay.querySelector("#re-body").replaceWith(bodyEd.el);
+  const reuseEd = RichEditor.create({ value: r.reuse_guidance || "", label: "Як повторити рішення",
+    placeholder: "Передумови, кроки, до кого звертатися — щоб колега міг застосувати це у себе" });
+  overlay.querySelector("#re-reuse-guidance").replaceWith(reuseEd.el);
   const behaviourOf = (code) => {
     const term = typeTerms.find(t => t.code === code);
     if (term) return term;
@@ -5440,11 +5471,11 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
 
     // Підписи полів теж із довідника — новий вид одразу має свої формулювання.
     overlay.querySelector("#re-url-label").textContent = b.url_label || "Посилання";
-    overlay.querySelector("#re-body-label").textContent =
-      `${b.body_label || "Текст"} (Markdown)`;
-    overlay.querySelector("#re-body").placeholder = kind === "mcp"
+    overlay.querySelector("#re-body-label").textContent = b.body_label || "Текст";
+    bodyEd.setPlaceholder(kind === "mcp"
       ? "Які інструменти надає сервер і як додати його в Copilot Studio чи іншого клієнта…"
-      : "Текст промпту, інструкції або опис кейсу…";
+      : "Текст промпту, інструкції або опис кейсу…");
+    bodyEd.setKind(kind === "prompt" ? "prompt" : "doc");
   };
   typeSel.addEventListener("change", syncFields);
   syncFields();
@@ -5469,7 +5500,7 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
       author: overlay.querySelector("#re-author").value,
       owner: overlay.querySelector("#re-owner").value,
       owner_contact: overlay.querySelector("#re-owner-contact").value,
-      reuse_guidance: overlay.querySelector("#re-reuse-guidance").value,
+      reuse_guidance: reuseEd.getValue(),
       reviewed_at: overlay.querySelector("#re-reviewed").value,
       next_review_at: overlay.querySelector("#re-next-review").value,
       tools: overlay.querySelector("#re-tools").value,
@@ -5480,7 +5511,7 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
       accent: overlay.querySelector("#re-accent").value,
       url: overlay.querySelector("#re-url").value,
       link_scope: overlay.querySelector("#re-scope").value,
-      body: overlay.querySelector("#re-body").value,
+      body: bodyEd.getValue(),
       is_featured: overlay.querySelector("#re-featured").checked,
     };
     saveBtn.disabled = true;
@@ -5568,7 +5599,7 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
       <div class="field"><label>Вхідні дані</label><textarea id="se-input" placeholder="Що подавати на вхід навички">${esc(s.input_spec || "")}</textarea></div>
       <div class="field"><label>Результат роботи</label><textarea id="se-output" placeholder="Що навичка повертає на виході">${esc(s.output_spec || "")}</textarea></div>
       <div class="field"><label>Стартовий промпт</label><textarea id="se-starter" placeholder="Приклад стартового промпту для користувача">${esc(s.starter_prompt || "")}</textarea></div>
-      ${s.has_package ? "" : `<div class="field"><label>Інструкція (Markdown)</label><textarea id="se-instr" rows="10" placeholder="Як користуватися навичкою: кроки, приклади, обмеження">${esc(s.instructions || "")}</textarea></div>`}
+      ${s.has_package ? "" : `<div class="field"><span class="field-k">Інструкція</span><div id="se-instr"></div></div>`}
       <div class="row">
         <button id="se-save">Зберегти</button>
         <button id="se-close" class="ghost">Закрити</button>
@@ -5582,6 +5613,11 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
       </div>
       <div id="se-files" class="muted" style="margin-top:10px"></div>
     </div>`;
+
+  // Інструкція навички без пакета — у візуальному редакторі.
+  const instrEd = s.has_package ? null : RichEditor.create({ value: s.instructions || "",
+    label: "Інструкція", placeholder: "Як користуватися навичкою: кроки, приклади, обмеження" });
+  if (instrEd) $("#se-instr").replaceWith(instrEd.el);
 
   // Прев'ю іконки: власна (якщо є) або стандартна.
   function paintIcon(skill) {
@@ -5631,7 +5667,7 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
         input_spec: $("#se-input").value, output_spec: $("#se-output").value,
         starter_prompt: $("#se-starter").value,
         // Інструкцію пакетної навички бере зі skill.md — тут її не правлять.
-        ...(s.has_package ? {} : { instructions: $("#se-instr").value }),
+        ...(s.has_package ? {} : { instructions: instrEd.getValue() }),
       }});
       toast("Зміни збережено"); saved();
     } catch (err) { toast(err.message, "err"); }

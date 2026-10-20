@@ -1,4 +1,7 @@
-"""Браузерні перевірки сценаріїв із фідбеку тестування (пункти 1, 2, 5, 13).
+"""Браузерні перевірки сценаріїв із фідбеку тестування (пункти 1, 2, 3, 5, 13).
+
+П. 3 — візуальний редактор тексту (app/static/editor.js): він зберігає той самий
+Markdown, тож перевіряємо, що оформлення доходить до картки без змін.
 
 Логіка цих сценаріїв живе у фронтенді (app/static/app.js), тож перевірити її
 можна лише в браузері. Тести піднімають застосунок на тимчасовій базі й
@@ -137,7 +140,7 @@ def login(page, base, username="tester"):
 def open_wizard_at_describe(page, kind, text):
     page.click("#cat-add")
     page.click(f'.wiz-kind[data-kind="{kind}"]')
-    page.fill("#wiz-text", text)
+    page.fill("#wiz-editor .rte-area", text)
     page.click("#wiz-next")
     page.wait_for_selector("#wiz-name")
 
@@ -167,7 +170,7 @@ def test_wizard_finishes_with_two_explicit_buttons(page, live_url):
     login(page, live_url)
     page.click("#cat-add")
     page.click('.wiz-kind[data-kind="prompt"]')
-    page.fill("#wiz-text", "Склади тижневий звіт за даними: {дані}")
+    page.fill("#wiz-editor .rte-area", "Склади тижневий звіт за даними: {дані}")
     expect(page.locator("#wiz-draft")).to_be_hidden()   # ще не останній крок
     page.click("#wiz-next")
     page.fill("#wiz-name", "Тижневий звіт")
@@ -242,3 +245,92 @@ def test_login_page_explains_how_to_sign_in(page, live_url):
     expect(steps.locator("li").first).to_contain_text("логін і пароль")
     # Кнопки корпоративного входу тут немає — і кроку про неї теж.
     expect(steps).not_to_contain_text("корпоративний акаунт")
+
+
+# ---- П. 3: візуальний редактор зберігає оформлення як Markdown ----
+
+def test_editor_toolbar_formatting_reaches_the_card(page, live_url):
+    login(page, live_url)
+    page.click("#cat-add")
+    page.click('.wiz-kind[data-kind="instruction"]')
+    area = page.locator("#wiz-editor .rte-area")
+    area.click()
+    page.click('#wiz-editor [data-cmd="h2"]')
+    page.keyboard.type("Як подати заявку")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Заповніть форму ")
+    page.click('#wiz-editor [data-cmd="bold"]')
+    page.keyboard.type("до п’ятниці")
+    page.click('#wiz-editor [data-cmd="bold"]')
+    page.keyboard.type(".")
+    page.keyboard.press("Enter")
+    page.click('#wiz-editor [data-cmd="ol"]')
+    page.keyboard.type("Відкрийте портал")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Натисніть «Нова заявка»")
+
+    # Вкладка Markdown показує те, що буде збережено, і правки в ній видно в оформленні.
+    page.click('#wiz-editor [data-mode="source"]')
+    src = page.locator("#wiz-editor .rte-src")
+    assert src.input_value() == (
+        "# Як подати заявку\n\nЗаповніть форму **до п’ятниці**.\n\n"
+        "1. Відкрийте портал\n2. Натисніть «Нова заявка»")
+    src.fill(src.input_value() + "\n\n> Строк — 5 днів")
+    page.click('#wiz-editor [data-mode="visual"]')
+    expect(area.locator("blockquote")).to_have_text("Строк — 5 днів")
+
+    page.click("#wiz-next")
+    page.fill("#wiz-name", "Заявка через портал")
+    page.fill("#wiz-desc", "Покроково, як подати заявку.")
+    page.click("#wiz-draft")
+    doc = page.locator(".md-modal .md-doc").first
+    expect(doc.locator("h2")).to_have_text("Як подати заявку")
+    expect(doc.locator("strong")).to_have_text("до п’ятниці")
+    expect(doc.locator("ol li")).to_have_count(2)
+    expect(doc.locator("blockquote")).to_be_visible()
+
+
+def test_editor_cleans_text_pasted_from_word(page, live_url):
+    login(page, live_url)
+    page.click("#cat-add")
+    page.click('.wiz-kind[data-kind="instruction"]')
+    page.click("#wiz-editor .rte-area")
+    page.evaluate("""() => {
+        const html = `<p class=MsoNormal><b>Важливо:</b> перевірте <i>кошторис</i>.<o:p></o:p></p>
+          <p style='mso-list:l0 level1 lfo1'><span style='mso-list:Ignore'>·<span>&nbsp;</span></span>Перший</p>
+          <p style='mso-list:l0 level1 lfo1'><span style='mso-list:Ignore'>·<span>&nbsp;</span></span>Другий</p>
+          <p><span style="color:red;font-family:Calibri">Звичайний</span> <img src="data:image/png;base64,AAAA"></p>
+          <script>window.__pasted = 1</script>`;
+        const dt = new DataTransfer();
+        dt.setData("text/html", html);
+        dt.setData("text/plain", "Важливо: перевірте кошторис.");
+        document.querySelector("#wiz-editor .rte-area").dispatchEvent(
+            new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    }""")
+    page.click('#wiz-editor [data-mode="source"]')
+    assert page.locator("#wiz-editor .rte-src").input_value() == (
+        "**Важливо:** перевірте *кошторис*.\n\n- Перший\n- Другий\n\nЗвичайний")
+    assert page.evaluate("() => window.__pasted") is None
+    expect(page.locator(".toast")).to_contain_text("Зображ")
+
+
+def test_prompt_keeps_angle_brackets_and_copies_raw_text(page, live_url):
+    login(page, live_url)
+    text = "Ти аналітик.\nДокумент: <документ>{текст}</документ>\n\n1. Вимоги\n2. Ризики"
+    page.click("#cat-add")
+    page.click('.wiz-kind[data-kind="prompt"]')
+    page.click('#wiz-editor [data-mode="source"]')
+    page.fill("#wiz-editor .rte-src", text)
+    page.click('#wiz-editor [data-mode="visual"]')
+    expect(page.locator("#wiz-editor .rte-area")).to_contain_text("<документ>{текст}</документ>")
+    page.click("#wiz-next")
+    page.fill("#wiz-name", "Аналіз документа")
+    page.fill("#wiz-desc", "Вимоги й ризики з документа.")
+    page.click("#wiz-draft")
+    prompt = page.locator(".md-modal .md-prompt")
+    expect(prompt).to_contain_text("<документ>{текст}</документ>")
+    expect(prompt.locator("ol li")).to_have_count(2)
+    saved = page.evaluate(
+        "async () => (await api('/catalog/resources?mine=1')).find(r => r.name === 'Аналіз документа').id")
+    body = page.evaluate(f"async () => (await api('/catalog/resources/{saved}')).body")
+    assert body == text

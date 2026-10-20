@@ -9,19 +9,23 @@ from tests.conftest import login, auth
 URL = "/api/catalog/resources/extract-text"
 
 
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
 def _send(client, token, name, data):
     return client.post(URL, headers=auth(token),
                        data={"file": (io.BytesIO(data), name)},
                        content_type="multipart/form-data")
 
 
-def _docx(paragraphs):
-    """Мінімальний .docx: лише word/document.xml і типи вмісту.
+def _docx(paragraphs, parts=None):
+    """Мінімальний .docx: word/document.xml, типи вмісту й додаткові parts.
 
     paragraphs — список (текст, стиль|None, список?). Таблиця додається окремо
-    рядком-кортежем ("table", [[...], [...]]).
+    рядком-кортежем ("table", [[...], [...]]), готовий XML абзацу — ("xml", "<w:p>…").
     """
-    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    w = W
 
     def para(text, style=None, bullet=False):
         ppr = ""
@@ -38,9 +42,11 @@ def _docx(paragraphs):
                 "<w:tr>" + "".join(f"<w:tc>{para(c)}</w:tc>" for c in row) + "</w:tr>"
                 for row in item[1])
             body.append(f"<w:tbl>{rows}</w:tbl>")
+        elif item[0] == "xml":
+            body.append(item[1])
         else:
             body.append(para(*item))
-    xml = (f'<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="{w}">'
+    xml = (f'<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="{w}" xmlns:r="{R}">'
            f'<w:body>{"".join(body)}</w:body></w:document>')
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -48,6 +54,8 @@ def _docx(paragraphs):
                     '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/'
                     'package/2006/content-types"/>')
         zf.writestr("word/document.xml", xml)
+        for name, content in (parts or {}).items():
+            zf.writestr(name, content)
     return buf.getvalue()
 
 
@@ -113,8 +121,50 @@ def test_docx_headings_lists_tables(client):
     assert res.status_code == 200, res.get_json()
     assert res.get_json()["kind"] == "docx"
     assert res.get_json()["text"] == (
-        "# Інструкція\n## Вступ\nЗвичайний абзац\n- Перший пункт\n- Другий пункт\n"
-        "Поле | Значення\nМодель | gpt-4o")
+        "# Інструкція\n\n## Вступ\n\nЗвичайний абзац\n\n- Перший пункт\n- Другий пункт\n\n"
+        "| Поле | Значення |\n| --- | --- |\n| Модель | gpt-4o |")
+
+
+def test_docx_keeps_formatting(client):
+    """Жирний і курсив, посилання, нумерований список і локалізовані заголовки
+    переходять у Markdown, тож у редакторі текст виглядає як у Word."""
+    token = login(client, "u1", "pass")
+    styles = (f'<w:styles xmlns:w="{W}"><w:style w:styleId="1"><w:name w:val="heading 1"/>'
+              f'</w:style><w:style w:styleId="a3"><w:name w:val="Заголовок 2"/></w:style></w:styles>')
+    numbering = (f'<w:numbering xmlns:w="{W}">'
+                 f'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum>'
+                 f'<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>'
+                 f'<w:num w:numId="5"><w:abstractNumId w:val="0"/></w:num>'
+                 f'<w:num w:numId="6"><w:abstractNumId w:val="1"/></w:num></w:numbering>')
+    rels = ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            'relationships/hyperlink" Target="https://example.com/doc" TargetMode="External"/>'
+            '</Relationships>')
+
+    def item(text, num):
+        return ("xml", f'<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="{num}"/>'
+                       f'</w:numPr></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>')
+
+    data = _docx([
+        ("Регламент", "1"),
+        ("Кроки", "a3"),
+        ("xml", '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Важливо: </w:t></w:r>'
+                '<w:r><w:t xml:space="preserve">перевірте </w:t></w:r>'
+                '<w:r><w:rPr><w:i/></w:rPr><w:t>кошторис</w:t></w:r>'
+                '<w:r><w:rPr><w:b w:val="0"/></w:rPr><w:t xml:space="preserve"> і 2*2.</w:t></w:r></w:p>'),
+        item("Відкрийте портал", 5),
+        item("Подайте заявку", 5),
+        item("Окремий маркер", 6),
+        ("xml", '<w:p><w:r><w:t xml:space="preserve">Див. </w:t></w:r><w:hyperlink r:id="rId9">'
+                '<w:r><w:t>повний регламент</w:t></w:r></w:hyperlink></w:p>'),
+    ], parts={"word/styles.xml": styles, "word/numbering.xml": numbering,
+              "word/_rels/document.xml.rels": rels})
+    res = _send(client, token, "регламент.docx", data)
+    assert res.status_code == 200, res.get_json()
+    assert res.get_json()["text"] == (
+        "# Регламент\n\n## Кроки\n\n**Важливо:** перевірте *кошторис* і 2\\*2.\n\n"
+        "1. Відкрийте портал\n1. Подайте заявку\n\n- Окремий маркер\n\n"
+        "Див. [повний регламент](https://example.com/doc)")
 
 
 def test_docx_that_is_not_a_zip(client):
