@@ -292,6 +292,27 @@ async function paintAuthOptions() {
     // Парольний вхід вимкнено — поля мають зникнути, а не стояти неробочими.
     form.querySelectorAll(".input-wrap, .btn-primary").forEach(el => el.classList.add("hidden"));
   }
+  paintLoginHelp(cfg);
+}
+
+// «Як увійти до «AI Knowledge Hub»» — кроки саме для тих способів входу,
+// що ввімкнені. Без конфігурації лишається типовий текст із розмітки.
+function paintLoginHelp(cfg) {
+  const box = $("#login-help-steps");
+  if (!box) return;
+  const steps = [];
+  if (cfg.entra_enabled) {
+    steps.push("Натисніть «Увійти через корпоративний акаунт» і увійдіть робочим обліковим "
+      + "записом Microsoft, тим самим, що для Outlook і Teams.");
+  }
+  if (cfg.password_enabled) {
+    steps.push((cfg.entra_enabled ? "Якщо адміністратор хабу видав вам окремі логін і пароль, "
+      + "введіть їх у поля нижче й натисніть «Увійти»." : "Введіть логін і пароль, які видав "
+      + "адміністратор хабу, і натисніть «Увійти».")
+      + " Логіном може бути робоча пошта або ім'я користувача; великі й малі літери не важливі.");
+  }
+  steps.push("Після входу відкриється сторінка «Для вас» з рекомендаціями.");
+  box.innerHTML = steps.map(t => `<li>${esc(t)}</li>`).join("");
 }
 
 // Повернення з каталогу: токени приходять фрагментом URL, щоб не потрапити
@@ -1030,8 +1051,8 @@ async function ensureHubData(force = false) {
 function applyHubScope(dest) {
   const parts = String(dest).split(":");   // hub : (home|all|fav|recent|sec|fol) : id
   const what = parts[1] || "home";
-  // Скидання — першим: resetCatFilters() знімає й «лише обране», тож
-  // виклик після встановлення favOnly зносив би сам зріз «Обране».
+  // Скидання — першим, ще за старим зрізом; позначку «лише обране» далі
+  // ставимо явно за новим.
   resetCatFilters();
   catalogState.scope = (what === "sec" || what === "fol") ? "catalog" : what;
   catalogState.favOnly = what === "fav";
@@ -1406,11 +1427,18 @@ function renderPersonal() {
       <div class="show-row" id="rec-row"></div>
     </section>`;
 
+  // Порядок — як шлях людини: де я (рівень), куди далі (наступний крок — у
+  // блоці рівня), як туди дійти (маршрути), і лише потім добірка. Сусідні
+  // підказки стають в один рядок, але порядку не змінюють (фідбек, п. 5).
   const isNudge = x => !!x && x.indexOf('class="nudge') > -1;
-  const nudges = [levelCard, startCard].filter(isNudge);
-  const blocks = [levelCard, pathCard, startCard, recCard].filter(x => x && !isNudge(x));
-  box.innerHTML = (nudges.length ? `<div class="nudges">${nudges.join("")}</div>` : "")
-    + blocks.join("");
+  const parts = [];
+  [levelCard, pathCard || startCard, recCard].filter(Boolean).forEach(x => {
+    const prev = parts[parts.length - 1];
+    if (isNudge(x) && prev && prev.nudge) prev.html.push(x);
+    else parts.push({ nudge: isNudge(x), html: [x] });
+  });
+  box.innerHTML = parts.map(p => p.nudge
+    ? `<div class="nudges">${p.html.join("")}</div>` : p.html.join("")).join("");
 
   if (m && m.current && m.items.length) {
     const row = box.querySelector("#lvl-row");
@@ -1526,7 +1554,10 @@ function renderShowcase() {
 
 function resetCatFilters() {
   Object.keys(catalogState.filters).forEach(k => catalogState.filters[k] = "");
-  catalogState.favOnly = false;
+  // У «Обраному» позначка «лише обране» — це сама сторінка, а не фільтр:
+  // вибір виду чи «Скинути всі» звужують обране, а не відкривають увесь
+  // каталог (фідбек тестування, п. 2).
+  catalogState.favOnly = catalogState.scope === "fav";
 }
 
 // Доступні фільтри: менеджерські показуємо лише менеджерам.
@@ -2156,6 +2187,21 @@ function suggestName(body, filename) {
   return (filename && nameFromFile(filename)) || nameFromBody(body);
 }
 
+// Матеріал із тією самою назвою (без огляду на регістр, лапки й розділові
+// знаки) серед опублікованих і власних чернеток. Дубль «Питання та відповіді
+// (FAQ)» у тестуванні з'явився саме так (фідбек, п. 2).
+function sameNameMaterial(name, exceptId) {
+  const norm = (v) => String(v || "").toLowerCase()
+    .replace(/[«»"'„“”‘’`.,:;!?()\[\]{}\-–—_/]/g, " ").replace(/\s+/g, " ").trim();
+  const key = norm(name);
+  if (!key) return null;
+  const pool = catalogState.items.filter(i => i.item_type === "resource")
+    .map(i => ({ id: i.id, name: i.name, author: i.author, draft: false }))
+    .concat((catalogState.mine || []).filter(r => r.status === "draft")
+      .map(r => ({ id: r.id, name: r.name, author: r.author || "", draft: true })));
+  return pool.find(x => x.id !== exceptId && norm(x.name) === key) || null;
+}
+
 async function openContentWizard(opts = {}) {
   const existing = opts.resource || null;
   let terms = [], sections = [], folders = [], cats = [];
@@ -2203,7 +2249,7 @@ async function openContentWizard(opts = {}) {
     folderId: existing && existing.folder_id ? String(existing.folder_id) : "",
     category: existing ? (existing.category || "") : "",
     tags: existing ? (existing.tags || []).join(", ") : "",
-    publish: true,  // матеріал одразу в каталозі; чернетка — свідомий вибір
+    publish: true,  // яку з двох кнопок натиснули на останньому кроці
     source: null,   // { file, kind, chars, truncated, keep } — файл, з якого взято текст
     files: [],      // вкладення до картки — завантажуються після її створення
     pkg: null,      // пакет навички (лише для виду skill)
@@ -2225,6 +2271,8 @@ async function openContentWizard(opts = {}) {
       <div class="wiz-foot">
         <button class="ghost" id="wiz-back">Назад</button>
         <p class="error" id="wiz-err"></p>
+        <button class="ghost hidden" id="wiz-draft"
+                title="Чернетку бачите лише ви й менеджери каталогу">Зберегти чернетку</button>
         <button id="wiz-next">Далі</button>
       </div>
     </div>`, { beforeClose: () => !dirty()
@@ -2234,6 +2282,7 @@ async function openContentWizard(opts = {}) {
   const err = overlay.querySelector("#wiz-err");
   const backBtn = overlay.querySelector("#wiz-back");
   const nextBtn = overlay.querySelector("#wiz-next");
+  const draftBtn = overlay.querySelector("#wiz-draft");
   const setErr = (m) => { err.textContent = m || ""; };
   const tileOf = (k, cls) =>
     catTile({ kind: k.code, accent: k.accent, emoji: k.emoji, iconUrl: null }, cls);
@@ -2296,15 +2345,12 @@ async function openContentWizard(opts = {}) {
           <div><b>${st.pkg ? esc(st.pkg.name) : "Перетягніть пакет навички або <u>оберіть</u>"}</b>
             <span>.zip або .skill зі SKILL.md — назва, версія, автор, опис і категорія беруться з нього</span></div>
           <input type="file" id="wiz-file" hidden accept=".zip,.skill"></div>
-        ${publishSeg()}
         <p class="wiz-hint">Іконку, інструкцію та інші деталі можна змінити згодом — з картки навички.</p>`;
       bindDrop(f => { st.pkg = f; paint(); });
-      const skillLabel = () => st.publish ? "Опублікувати навичку" : "Зберегти чернеткою";
-      bindPublishSeg(skillLabel);
       backBtn.classList.remove("hidden");
       nextBtn.classList.remove("hidden");
-      nextBtn.textContent = skillLabel();
-      nextBtn.disabled = !st.pkg;
+      nextBtn.textContent = "Опублікувати";
+      nextBtn.disabled = draftBtn.disabled = !st.pkg;
       return;
     }
     const b = wizBehaviour(k.term, k.code);
@@ -2459,30 +2505,9 @@ async function openContentWizard(opts = {}) {
   }
 
   // ---- крок 3: опис ----
-  const submitLabel = () => existing ? "Зберегти"
-    : st.publish ? "Опублікувати" : "Зберегти чернеткою";
-  // Що станеться після натискання — одним реченням, без сюрпризів.
-  const flowNote = () => st.publish
-    ? (isManager() ? "<b>Матеріал одразу з'явиться в каталозі.</b>"
-       : "<b>Матеріал одразу з'явиться в каталозі.</b> Менеджер каталогу отримає "
-         + "сповіщення й за потреби відредагує його або зніме з публікації.")
-    : "<b>Чернетку бачите лише ви й менеджери каталогу.</b> Опублікувати можна будь-коли — "
-      + "з картки або з «Наповнення каталогу».";
-  const publishSeg = () => `
-        <div class="wiz-seg" id="wiz-pub">
-          <button data-v="1"${st.publish ? ' class="active"' : ""}>Опублікувати</button>
-          <button data-v="0"${st.publish ? "" : ' class="active"'}>Зберегти чернеткою</button>
-        </div>
-        <p class="wiz-note" id="wiz-flow-note">${flowNote()}</p>`;
-  const bindPublishSeg = (label) => {
-    body.querySelectorAll("#wiz-pub button").forEach(bt => bt.addEventListener("click", () => {
-      st.publish = bt.dataset.v === "1";
-      body.querySelectorAll("#wiz-pub button").forEach(x => x.classList.toggle("active", x === bt));
-      body.querySelector("#wiz-flow-note").innerHTML = flowNote();
-      nextBtn.textContent = label();
-    }));
-  };
-
+  // Останній крок завершують дві кнопки внизу: «Зберегти чернетку» й
+  // «Опублікувати». Перемикача режиму з тими самими назвами більше немає:
+  // його приймали за кнопку, яка «нічого не робить» (фідбек тестування, п. 1).
   function paintDescribe() {
     const opt = (v, label, cur) =>
       `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(label)}</option>`;
@@ -2491,6 +2516,7 @@ async function openContentWizard(opts = {}) {
       <label class="wiz-label">Назва
         <input id="wiz-name" type="text" maxlength="200" value="${esc(st.name)}"
           placeholder="Описує задачу, а не інструмент: «Аналіз тендерної документації»"></label>
+      <p class="wiz-dup hidden" id="wiz-dup" role="status"></p>
       <label class="wiz-label">Короткий опис
         <textarea id="wiz-desc" rows="2" class="short"
           placeholder="Одне-два речення: що це і кому корисне">${esc(st.desc)}</textarea></label>
@@ -2506,8 +2532,7 @@ async function openContentWizard(opts = {}) {
           <datalist id="wiz-cats">${cats.map(c => `<option value="${esc(c.name)}">`).join("")}</datalist></label>
         <label class="wiz-label">Теги <i>через кому</i>
           <input id="wiz-tags" type="text" value="${esc(st.tags)}" placeholder="RAG, закупівлі"></label>
-      </div>
-      ${existing ? "" : publishSeg()}`;
+      </div>`;
 
     const sectionSel = body.querySelector("#wiz-section");
     const folderSel = body.querySelector("#wiz-folder");
@@ -2519,11 +2544,23 @@ async function openContentWizard(opts = {}) {
     };
     syncFolders(st.folderId);
     sectionSel.addEventListener("change", () => syncFolders(""));
-    bindPublishSeg(submitLabel);
+    const nameInput = body.querySelector("#wiz-name");
+    const paintDup = () => {
+      const box = body.querySelector("#wiz-dup");
+      const twin = sameNameMaterial(nameInput.value, existing && existing.id);
+      box.classList.toggle("hidden", !twin);
+      if (!twin) return;
+      box.innerHTML = `У каталозі вже є матеріал <b>«${esc(twin.name)}»</b>${
+        twin.author ? ` (автор: ${esc(twin.author)})` : ""}${
+        twin.draft ? ", це ваша чернетка" : ""}. Якщо це його нова версія, краще
+        оновити наявний матеріал, ніж створювати другий із тією самою назвою.`;
+    };
+    nameInput.addEventListener("input", paintDup);
+    paintDup();
     backBtn.classList.remove("hidden");
     nextBtn.classList.remove("hidden");
-    nextBtn.textContent = submitLabel();
-    nextBtn.disabled = false;
+    nextBtn.textContent = existing ? "Зберегти" : "Опублікувати";
+    nextBtn.disabled = draftBtn.disabled = false;
     body.querySelector("#wiz-name").focus();
   }
 
@@ -2570,6 +2607,11 @@ async function openContentWizard(opts = {}) {
     else paintDescribe();
     // На кроці вибору виду кнопок немає — порожній футер лише забирав би місце.
     overlay.querySelector(".wiz-foot").classList.toggle("hidden", st.step === 1);
+    // «Зберегти чернетку» — лише на останньому кроці нового матеріалу; у
+    // навички останній крок — пакет.
+    const k = kindOf();
+    const lastStep = st.step === 3 || (st.step === 2 && !!k && !!k.pkg);
+    draftBtn.classList.toggle("hidden", !lastStep || !!existing);
     body.scrollTop = 0;
   }
 
@@ -2578,18 +2620,29 @@ async function openContentWizard(opts = {}) {
     st.step = Math.max(existing ? 2 : 1, st.step - 1);
     paint();
   });
-  nextBtn.addEventListener("click", async () => {
+  // Завершення майстра: publish — яку з двох кнопок натиснули.
+  async function finish(publish) {
     collect();
     const problem = validate();
     if (problem) { setErr(problem); return; }
-    if (st.step === 1) { st.step = 2; paint(); return; }
-    if (st.step === 2 && kindOf().pkg) return submitSkill();
-    if (st.step === 2) { st.step = 3; paint(); return; }
-    await submit();
+    st.publish = publish;
+    await (kindOf().pkg ? submitSkill() : submit());
+  }
+  nextBtn.addEventListener("click", async () => {
+    if (st.step === 1 || (st.step === 2 && !kindOf().pkg)) {
+      collect();
+      const problem = validate();
+      if (problem) { setErr(problem); return; }
+      st.step += 1;
+      paint();
+      return;
+    }
+    await finish(true);
   });
+  draftBtn.addEventListener("click", () => finish(false));
 
   async function submitSkill() {
-    nextBtn.disabled = true;
+    nextBtn.disabled = draftBtn.disabled = true;
     try {
       const data = await uploadSkillPackage(st.pkg, null, st.publish ? "published" : "draft");
       toast(st.publish ? `Навичку «${data.name}» опубліковано`
@@ -2600,7 +2653,7 @@ async function openContentWizard(opts = {}) {
       openSkillModal(data.id);
     } catch (e) {
       setErr(e.message);
-      nextBtn.disabled = false;
+      nextBtn.disabled = draftBtn.disabled = false;
     }
   }
 
@@ -2612,7 +2665,7 @@ async function openContentWizard(opts = {}) {
       category: st.category, tags: st.tags,
       body: st.body, url: st.url, link_scope: st.scope,
     };
-    nextBtn.disabled = true; backBtn.disabled = true;
+    nextBtn.disabled = draftBtn.disabled = backBtn.disabled = true;
     try {
       const r = existing
         ? await api(`/catalog/resources/${existing.id}`, { method: "PATCH", body: payload })
@@ -2638,7 +2691,7 @@ async function openContentWizard(opts = {}) {
       openResourceModal(r.id);
     } catch (e) {
       setErr(e.message);
-      nextBtn.disabled = false; backBtn.disabled = false;
+      nextBtn.disabled = draftBtn.disabled = backBtn.disabled = false;
     }
   }
 
@@ -5775,8 +5828,8 @@ function tourSteps() {
       text: "Клацніть картку, щоб відкрити опис. Кнопка внизу копіює промпт чи завантажує "
         + "навичку, а зірочка зберігає матеріал в «Обране»." },
     { at: () => tourPick("#cat-add"), title: "Додати матеріал",
-      text: "Поділіться своїм промптом, інструкцією чи навичкою: три кроки, і матеріал одразу "
-        + "в каталозі. Власником стаєте ви." },
+      text: "Додайте свій промпт, інструкцію чи навичку за три кроки. Власником матеріалу "
+        + "стаєте ви." },
     { at: () => tourPick('#sidebar [data-dest="hub:contrib"]'), side: "right",
       title: "Наповнення каталогу",
       text: "Усе, що ви опублікували: редагуйте, знімайте з публікації або видаляйте." },

@@ -39,8 +39,6 @@
   --blue: #0071e3; --purple: #7b4fd1; --green: #2a9d57;
   --orange: #c86a00; --teal: #0f8fa8; --pink: #c2317c;
   --shot-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
-  /* Маркери лежать на світлих знімках у будь-якій темі */
-  --mk-bg: #e30613; --mk-ink: #ffffff; --mk-ring: #ffffff;
   --font: "Inter var", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
   --fs-cap: 11px; --fs-foot: 13px; --fs-call: 14px; --fs-body: 16px;
@@ -179,8 +177,6 @@ th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-botto
 tr:last-child td { border-bottom: none; }
 th { font-size: var(--fs-cap); letter-spacing: .07em; text-transform: uppercase; color: var(--faint); font-weight: 600; background: var(--panel-2); }
 td:first-child { font-weight: 600; white-space: nowrap; }
-.kind { display: inline-flex; align-items: center; gap: 8px; }
-.kind i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
 
 /* Примітка */
 .note {
@@ -200,21 +196,6 @@ figure.shot.phone { max-width: 290px; margin: 0; }
 }
 .zoom img { display: block; width: 100%; height: auto; max-width: 100%; }
 figcaption { font-size: var(--fs-foot); color: var(--muted); margin-top: 8px; }
-
-/* Маркери на головному екрані */
-.mk {
-  position: absolute; left: var(--x); top: var(--y); transform: translate(-50%, -50%);
-  width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--mk-bg); color: var(--mk-ink); font-size: 12px; font-weight: 700;
-  box-shadow: 0 0 0 3px var(--mk-ring), 0 2px 8px rgba(0,0,0,.35); pointer-events: none;
-  font-variant-numeric: tabular-nums;
-}
-ol.legend { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; }
-ol.legend li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; font-size: 15px; line-height: 1.45; }
-ol.legend li > i {
-  font-style: normal; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--mk-bg); color: var(--mk-ink); font-size: 12px; font-weight: 700; margin-top: 1px;
-}
 
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 28px; align-items: start; }
 
@@ -250,14 +231,12 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
 @media (max-width: 720px) {
   .hero h1 { font-size: 32px; }
   .facts { grid-template-columns: minmax(0, 1fr); }
-  ol.legend { grid-template-columns: minmax(0, 1fr); }
   .split { grid-template-columns: minmax(0, 1fr); }
   figure.shot.phone { max-width: 240px; }
   h2 { font-size: 23px; }
   .staff { padding: 4px 16px 14px; }
 }
 @media (max-width: 560px) {
-  .mk { width: 18px; height: 18px; font-size: 10px; box-shadow: 0 0 0 2px var(--mk-ring), 0 1px 4px rgba(0,0,0,.35); }
   td:first-child { white-space: normal; }
 }
 </style>
@@ -288,9 +267,6 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
     <nav class="toc" aria-label="Зміст">
       <b>Знайомство</b>
       <a href="#about">Що таке хаб</a>
-      <a href="#screen">Екран за хвилину</a>
-      <a href="#login">Увійти</a>
-      <a href="#tour">Знайомство з інтерфейсом</a>
       <b>Знайти й використати</b>
       <a href="#find">Знайти потрібне</a>
       <a href="#use">Скористатися матеріалом</a>
@@ -319,21 +295,8 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         <div class="facts">
           <div class="fact"><b>Знаходьте готове</b><span>Не починайте з нуля: імовірно, хтось уже розв’язав схожу задачу.</span></div>
           <div class="fact"><b>Хаб нічого не запускає</b><span>Ви берете матеріал і використовуєте у своєму інструменті: Claude, ChatGPT, Copilot, корпоративному агенті.</span></div>
-          <div class="fact"><b>Публікує кожен</b><span>Ваш матеріал одразу в каталозі, а менеджер каталогу стежить за якістю.</span></div>
+          <div class="fact"><b>Діліться своїм</b><span>Додавайте власні промпти, інструкції й навички, щоб колеги могли ними скористатися.</span></div>
         </div>
-
-        <h3>Що з чим робити</h3>
-        <div class="tbl"><table>
-          <thead><tr><th>Вид</th><th>Головна кнопка</th><th>Що далі</th></tr></thead>
-          <tbody>
-            <tr><td><span class="kind" style="--c:var(--accent)"><i></i>Навичка</span></td><td><span class="ui">Завантажити</span></td><td>Додайте пакет у свій AI-інструмент або агента</td></tr>
-            <tr><td><span class="kind" style="--c:var(--blue)"><i></i>Промпт</span></td><td><span class="ui">Копіювати</span></td><td>Вставте в чат із моделлю й замініть місця в <code>{дужках}</code></td></tr>
-            <tr><td><span class="kind" style="--c:var(--purple)"><i></i>Інструкція, кейс</span></td><td><span class="ui">Читати</span></td><td>Текст відкривається просто в картці</td></tr>
-            <tr><td><span class="kind" style="--c:var(--orange)"><i></i>Агент</span></td><td><span class="ui">Відкрити агента</span></td><td>Агент відкривається в новій вкладці</td></tr>
-            <tr><td><span class="kind" style="--c:var(--teal)"><i></i>MCP-сервер</span></td><td><span class="ui">Копіювати endpoint</span></td><td>Вставте адресу в налаштування свого клієнта</td></tr>
-            <tr><td><span class="kind" style="--c:var(--pink)"><i></i>Посилання</span></td><td><span class="ui">Перейти</span></td><td>Сайт відкривається в новій вкладці</td></tr>
-          </tbody>
-        </table></div>
 
         <h3>Ролі</h3>
         <div class="tbl"><table>
@@ -343,60 +306,6 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
             <tr><td>Адміністратор</td><td>Усе, що й менеджер, а також керує користувачами й ролями.</td></tr>
           </tbody>
         </table></div>
-      </section>
-
-      <section id="screen">
-        <h2>Екран за хвилину</h2>
-        <figure class="shot">
-          <button class="zoom" type="button" data-full="img/01-home.jpg" aria-label="Збільшити знімок головного екрана">
-            <img src="img/01-home.jpg" width="1920" height="1200" alt="Головний екран хабу: верхня панель, бічна панель і сторінка «Для вас»">
-            <span class="mk" style="--x:53.8%;--y:3.3%">1</span>
-            <span class="mk" style="--x:89.8%;--y:8.9%">2</span>
-            <span class="mk" style="--x:93.3%;--y:8.9%">3</span>
-            <span class="mk" style="--x:97.1%;--y:8.9%">4</span>
-            <span class="mk" style="--x:19.7%;--y:19.3%">5</span>
-            <span class="mk" style="--x:19.7%;--y:24.6%">6</span>
-            <span class="mk" style="--x:19.7%;--y:77.8%">7</span>
-            <span class="mk" style="--x:19.7%;--y:96.3%">8</span>
-            <span class="mk" style="--x:79.9%;--y:10.6%">9</span>
-            <span class="mk" style="--x:92.6%;--y:19.2%">10</span>
-          </button>
-        </figure>
-        <ol class="legend">
-          <li><i>1</i><span><b>Пошук</b> по всьому каталогу. Швидко: <kbd>Ctrl</kbd>+<kbd>K</kbd>, на Mac <kbd>⌘</kbd>+<kbd>K</kbd>.</span></li>
-          <li><i>2</i><span><b>Інструкція</b>: ця сторінка, у новій вкладці.</span></li>
-          <li><i>3</i><span><b>Сповіщення</b>: коментарі, рішення менеджера, нагадування.</span></li>
-          <li><i>4</i><span><b>Профіль</b>: обране, ідеї, ваш контент, знайомство з інтерфейсом, тема, вихід.</span></li>
-          <li><i>5</i><span><b>Матеріали</b>: увесь каталог з фільтрами. Головний вхід.</span></li>
-          <li><i>6</i><span><b>Розділи</b>: каталог за темами. Розділ зі стрілкою веде на зовнішній портал.</span></li>
-          <li><i>7</i><span><b>Наповнення каталогу</b>: усе, що ви опублікували.</span></li>
-          <li><i>8</i><span><b>Інструкція</b>: останній пункт бічної панелі.</span></li>
-          <li><i>9</i><span><b>Додати матеріал</b>: поділитися своїм.</span></li>
-          <li><i>10</i><span><b>Опишіть задачу</b>: помічник підбере матеріали.</span></li>
-        </ol>
-      </section>
-
-      <section id="login">
-        <h2>Увійти</h2>
-        <ol class="steps">
-          <li>Відкрийте адресу хабу в браузері.</li>
-          <li>Натисніть <span class="ui">Увійти через корпоративний акаунт</span>. Якщо такої кнопки немає, введіть логін і пароль, які видав адміністратор.</li>
-          <li>Відкриється сторінка <b>«Для вас»</b> з рекомендаціями.</li>
-        </ol>
-      </section>
-
-      <section id="tour">
-        <h2>Знайомство з інтерфейсом</h2>
-        <p>Під час першого входу хаб по черзі підсвітить головні елементи екрана й коротко пояснить кожен.</p>
-        <ol class="steps">
-          <li>Прочитайте підказку біля підсвіченого елемента.</li>
-          <li>Натисніть <span class="ui red">Далі</span> або клацніть сам підсвічений елемент.</li>
-          <li>Останній крок покаже, де відкрити цю інструкцію.</li>
-        </ol>
-        <p class="muted">Пропустити знайомство можна будь-коли кнопкою «Пропустити» або клавішею <kbd>Esc</kbd>. Повторити: меню профілю, пункт «Знайомство з інтерфейсом».</p>
-        <div class="note">
-          <p><b>Інструкція завжди під рукою:</b> значок <span class="ui">?</span> у правому верхньому куті або останній пункт бічної панелі «Інструкція». Вона відкривається в новій вкладці.</p>
-        </div>
       </section>
 
       <!-- ============ Знайти й використати ============ -->
@@ -494,7 +403,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
           <li><b>Вид.</b> Оберіть, що додаєте.</li>
           <li><b>Зміст.</b> Вставте текст або перетягніть файл <code>.docx</code>, <code>.pdf</code>, <code>.md</code>, <code>.txt</code>: текст з нього з’явиться в полі, його можна правити. Нижче додайте файли до картки: презентацію, таблицю, скриншоти, відео.</li>
           <li><b>Опис.</b> Дайте назву, яка описує задачу («Аналіз тендерної документації»), і короткий опис. Розділ, категорія й теги допоможуть колегам знайти матеріал.</li>
-          <li>Натисніть <span class="ui red">Опублікувати</span>. Якщо матеріал ще не готовий, оберіть <span class="ui">Зберегти чернеткою</span>: чернетку бачите лише ви й менеджери.</li>
+          <li>Натисніть <span class="ui red">Опублікувати</span> внизу праворуч. Якщо матеріал ще не готовий, натисніть <span class="ui">Зберегти чернетку</span> поруч: чернетку бачите лише ви й менеджери.</li>
         </ol>
         <div class="note">
           <p><b>Опублікований матеріал одразу бачать усі, а власником стаєте ви.</b> Менеджер каталогу отримує сповіщення й за потреби поправить матеріал.</p>
@@ -513,7 +422,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         </figure>
         <figure class="shot narrow">
           <button class="zoom" type="button" data-full="img/08-wizard-describe.jpg" aria-label="Збільшити знімок кроку «Опис»">
-            <img src="img/08-wizard-describe.jpg" width="1140" height="996" loading="lazy" alt="Майстер, крок 3: назва, опис, розділ, теги й кнопка «Опублікувати»">
+            <img src="img/08-wizard-describe.jpg" width="1140" height="828" loading="lazy" alt="Майстер, крок 3: назва, опис, розділ, теги й кнопки «Зберегти чернетку» та «Опублікувати»">
           </button>
           <figcaption>Крок 3. Назва, опис і публікація.</figcaption>
         </figure>
@@ -525,7 +434,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         <ol class="steps">
           <li>Натисніть <span class="ui">+ Додати матеріал</span> і оберіть <b>«Навичка»</b>.</li>
           <li>Перетягніть пакет у віконце або натисніть «оберіть».</li>
-          <li>Натисніть <span class="ui red">Опублікувати навичку</span>.</li>
+          <li>Натисніть <span class="ui red">Опублікувати</span> або <span class="ui">Зберегти чернетку</span>.</li>
         </ol>
         <p class="muted">Назва, опис, версія й автор беруться з <code>SKILL.md</code>. Іконку та інструкцію можна змінити згодом: відкрийте картку навички й натисніть «Редагувати».</p>
       </section>

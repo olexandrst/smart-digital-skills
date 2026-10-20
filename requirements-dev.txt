@@ -1,0 +1,5 @@
+# Залежності лише для розробки й перевірок; на сервер не потрапляють.
+-r requirements.txt
+pytest
+# Браузерні тести (tests/e2e). Браузер: python -m playwright install chromium
+playwright==1.56.0

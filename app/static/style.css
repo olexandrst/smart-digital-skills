@@ -208,13 +208,15 @@ table td, table th {
    Екран входу (самодостатній вигляд поверх hero-зображення)
    ===================================================================== */
 .auth {
-  height: 100vh;
+  /* min-height, а не height: розгорнута підказка «Як увійти» на невисокому
+     екрані подовжує сторінку, а не обрізається. */
+  min-height: 100vh;
   position: relative;
   display: flex;
   align-items: center;
-  overflow: hidden;
+  overflow-x: hidden;
   color: #eef2fb;
-  background: url("hero.jpg?v=5") center right / cover no-repeat, #0b1224;
+  background: url("hero.jpg?v=6") center right / cover no-repeat, #0b1224;
 }
 .auth::before {  /* вуаль лише під текстом зліва; зона бейджів — без затемнення */
   content: ""; position: absolute; inset: 0;
@@ -228,7 +230,7 @@ table td, table th {
   position: relative; z-index: 1;
   padding: clamp(20px, 5vh, 56px) clamp(28px, 6vw, 96px);
   display: flex; flex-direction: column; justify-content: center;
-  max-width: 680px; width: 100%; max-height: 100vh;
+  max-width: 680px; width: 100%;
 }
 .auth-brand { display: flex; align-items: center; gap: 12px; margin-bottom: clamp(16px, 4vh, 44px); }
 .brand-mark { width: 40px; height: 40px; }
@@ -257,6 +259,26 @@ table td, table th {
   box-shadow: 0 30px 60px rgba(0, 0, 0, 0.40);
 }
 .login-card h2 { margin: 0; font-size: clamp(20px, 2.6vh, 26px); }
+/* «Як увійти» — під формою й згорнуто: потрібне лише тим, хто входить уперше */
+.login-help {
+  border-top: 1px solid rgba(255, 255, 255, 0.10); padding-top: 12px;
+  font-size: var(--fs-foot); line-height: 1.5; color: #b9c4dd;
+}
+.login-help summary {
+  display: flex; align-items: center; gap: 9px; width: fit-content;
+  list-style: none; cursor: pointer; color: #eef2fb; font-weight: 560;
+}
+.login-help summary::-webkit-details-marker { display: none; }
+.login-help summary::before {
+  content: ""; width: 6px; height: 6px; margin-left: 2px;
+  border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg); transition: transform .15s ease;
+}
+.login-help[open] summary::before { transform: rotate(45deg); }
+.login-help summary:focus-visible { outline: 2px solid #ff5a63; outline-offset: 3px; border-radius: 4px; }
+.login-help ol { margin: 10px 0 8px; padding-left: 20px; display: grid; gap: 6px; }
+.login-help p { margin: 0; color: #9fb0d0; }
+@media (prefers-reduced-motion: reduce) { .login-help summary::before { transition: none; } }
 .card-sub { margin: -6px 0 8px; color: #9fb0d0; font-size: var(--fs-call); }
 .hint { color: var(--muted); font-size: var(--fs-foot); }
 .hint b { color: var(--text); }
@@ -1817,12 +1839,13 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.5); }
 .wiz-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .wiz-chips:empty { display: none; }
 .wiz-hint { margin: 8px 0 0; font-size: var(--fs-micro); color: var(--faint); line-height: 1.45; }
-.wiz-note {
-  margin: 4px 0 0; padding: 11px 14px; border-radius: var(--r-md);
-  background: var(--soft); border: 1px solid var(--border);
-  font-size: var(--fs-foot); color: var(--muted); line-height: 1.5;
+/* Матеріал із такою назвою вже є — попередження, а не заборона */
+.wiz-dup {
+  margin: -4px 0 12px; padding: 9px 12px; border-radius: var(--r-md);
+  background: var(--warn-soft); color: var(--text);
+  font-size: var(--fs-foot); line-height: 1.45;
 }
-.wiz-note b { color: var(--text); }
+.wiz-dup b { font-weight: 600; }
 @media (max-width: 640px) {
   .wiz-kinds, .wiz-two { grid-template-columns: 1fr; }
   .wiz-foot { flex-wrap: wrap; }

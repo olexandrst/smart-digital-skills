@@ -38,9 +38,9 @@ def test_guide_page_and_its_images_are_served(client):
     assert "no-cache" in res.headers["Cache-Control"]
     html = res.get_data(as_text=True)
     assert "Перші кроки в AI Knowledge Hub" in html
-    assert 'src="img/01-home.jpg"' in html
+    assert 'src="img/02-filters.jpg"' in html
     assert client.get("/guide").status_code in (301, 308)
-    img = client.get("/guide/img/01-home.jpg")
+    img = client.get("/guide/img/02-filters.jpg")
     assert img.status_code == 200 and img.mimetype == "image/jpeg"
 
 
@@ -54,3 +54,14 @@ def test_app_links_guide_and_favicon(client):
         assert res.status_code == 200, path
         if kind:
             assert res.mimetype == kind
+
+
+def test_guide_drops_sections_removed_after_feedback(client):
+    """Фідбек тестування, п. 10, 12, 13 і 11: очевидне з інструкції прибрано,
+    «Як увійти» живе на сторінці входу, без речення про миттєву публікацію."""
+    guide = client.get("/guide/").get_data(as_text=True)
+    for gone in ("Що з чим робити", "Екран за хвилину", 'id="tour"',
+                 'id="login"', "Ваш матеріал одразу в каталозі"):
+        assert gone not in guide, gone
+    index = client.get("/").get_data(as_text=True)
+    assert 'id="login-help"' in index and "Як увійти до «AI Knowledge Hub»" in index
