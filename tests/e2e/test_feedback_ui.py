@@ -1,4 +1,4 @@
-"""Браузерні перевірки сценаріїв із фідбеку тестування (пункти 1, 2, 3, 5, 13).
+"""Браузерні перевірки сценаріїв із фідбеку тестування (пункти 1, 2, 3, 5, 9, 13).
 
 П. 3 — візуальний редактор тексту (app/static/editor.js): він зберігає той самий
 Markdown, тож перевіряємо, що оформлення доходить до картки без змін.
@@ -334,3 +334,26 @@ def test_prompt_keeps_angle_brackets_and_copies_raw_text(page, live_url):
         "async () => (await api('/catalog/resources?mine=1')).find(r => r.name === 'Аналіз документа').id")
     body = page.evaluate(f"async () => (await api('/catalog/resources/{saved}')).body")
     assert body == text
+
+
+# ---- П. 9: замість прибраних написів на екрані входу — «Знання · Співпраця · Розвиток» ----
+
+def test_login_badges_fit_between_text_and_photo(page, live_url):
+    badges = page.locator("#auth-badges")
+    titles = badges.locator(".ab b")
+    for width, height, compact in ((1920, 1080, False), (1280, 720, True)):
+        page.set_viewport_size({"width": width, "height": height})
+        page.goto(live_url)
+        expect(badges).to_be_visible()
+        expect(titles).to_have_text(["Знання", "Співпраця", "Розвиток"])
+        assert ("compact" in badges.get_attribute("class")) is compact
+        # Не наїжджають на форму входу й тексти ліворуч.
+        card = page.locator(".login-card").bounding_box()
+        sub = page.evaluate("""() => { const r = document.createRange();
+            r.selectNodeContents(document.querySelector('.auth-sub'));
+            return r.getBoundingClientRect().right; }""")
+        first = min(badges.locator(".ab").nth(i).bounding_box()["x"] for i in range(3))
+        assert first > max(card["x"] + card["width"], sub), (width, first)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(live_url)
+    expect(badges).to_be_hidden()

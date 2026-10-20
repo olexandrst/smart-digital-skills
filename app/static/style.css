@@ -279,6 +279,44 @@ table td, table th {
 .login-help ol { margin: 10px 0 8px; padding-left: 20px; display: grid; gap: 6px; }
 .login-help p { margin: 0; color: #9fb0d0; }
 @media (prefers-reduced-motion: reduce) { .login-help summary::before { transition: none; } }
+/* Бейджі «Знання · Співпраця · Розвиток» — скло, як у макеті hero.
+   Сходинки повторюють макет: кожен наступний зсунутий ліворуч. */
+.auth-badges {
+  position: absolute; left: 0; top: 0; z-index: 1;
+  margin: 0; padding: 0; list-style: none;
+  width: 410px; height: 334px;
+  transform-origin: 0 0; display: none;
+}
+.auth-badges.on { display: block; }
+.ab {
+  position: absolute; display: flex; align-items: center; gap: 22px;
+  height: 96px; min-width: 300px; padding: 0 28px 0 25px; box-sizing: border-box;
+  border-radius: 15px; white-space: nowrap;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.045)),
+              rgba(18, 24, 58, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px);
+}
+.ab-1 { left: 81px; top: 0; }
+.ab-2 { left: 36px; top: 120px; }
+.ab-3 { left: 0; top: 236px; }
+.ab svg {
+  width: 44px; height: 44px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round;
+}
+.ab-1 svg { color: #1decff; }
+.ab-2 svg { color: #8539ff; }
+.ab-3 svg { color: #ff40a9; }
+.ab b { display: block; font-size: 18.5px; font-weight: 600; color: #fff; letter-spacing: 0; }
+.ab span { display: block; margin-top: 6px; font-size: 16px; color: #cdd3e8; }
+/* Компактно — на ноутбуках, де смуга між текстом і фото вужча: без підпису. */
+.auth-badges.compact { width: 270px; height: 224px; }
+.auth-badges.compact .ab { height: 64px; min-width: 0; gap: 16px; padding: 0 24px 0 18px; }
+.auth-badges.compact .ab span { display: none; }
+.auth-badges.compact .ab svg { width: 34px; height: 34px; }
+.auth-badges.compact .ab-1 { left: 52px; top: 0; }
+.auth-badges.compact .ab-2 { left: 26px; top: 80px; }
+.auth-badges.compact .ab-3 { left: 0; top: 160px; }
 .card-sub { margin: -6px 0 8px; color: #9fb0d0; font-size: var(--fs-call); }
 .hint { color: var(--muted); font-size: var(--fs-foot); }
 .hint b { color: var(--text); }

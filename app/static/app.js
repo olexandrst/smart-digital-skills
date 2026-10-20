@@ -348,7 +348,53 @@ function showLogin() {
   document.body.classList.remove("theme-dark");  // логін має власний вигляд
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");
+  placeAuthBadges();
 }
+
+// Бейджі на екрані входу стають у смугу між текстом ліворуч і фото праворуч.
+// Фото — фон із cover і прив'язкою праворуч, тож його масштаб і зсув рахуємо
+// так само, як браузер. Бракує місця — спершу компактний вигляд без підписів,
+// а якщо й так тісно, бейджі ховаємо.
+const HERO_W = 1672, HERO_H = 941;
+const HERO_PERSON_X = 1130;   // де на фото починається волосся
+const HERO_BADGES_X = 636, HERO_BADGES_Y = 251;   // місце бейджів у макеті
+function placeAuthBadges() {
+  const box = $("#auth-badges"), auth = $("#login-screen");
+  if (!box || auth.classList.contains("hidden")) return;
+  const W = auth.clientWidth, H = auth.clientHeight;
+  const s = Math.max(W / HERO_W, H / HERO_H);
+  const offX = W - HERO_W * s, offY = (H - HERO_H * s) / 2;
+  const base = auth.getBoundingClientRect();
+  const range = document.createRange();
+  let left = 0;
+  auth.querySelectorAll(".auth-brand, .auth-headline, .auth-sub, .login-card").forEach(el => {
+    range.selectNodeContents(el);
+    const r = el.classList.contains("login-card") ? el.getBoundingClientRect() : range.getBoundingClientRect();
+    left = Math.max(left, r.right - base.left);
+  });
+  left += 28;
+  const right = HERO_PERSON_X * s + offX - 16;
+  box.style.transform = "none";
+  box.classList.add("on");
+  const fit = (compact) => {
+    box.classList.toggle("compact", compact);
+    const w = Math.max(...[...box.children].map(li => li.offsetLeft + li.offsetWidth));
+    return { w, h: box.offsetHeight, k: Math.min(1, s * 1.05, (right - left) / w) };
+  };
+  let f = fit(false);
+  if (f.k < 0.9) f = fit(true);
+  const { w, h, k } = f;
+  if (W < 900 || k < 0.8) { box.classList.remove("on"); return; }
+  const x = Math.min(Math.max(left, HERO_BADGES_X * s + offX), right - w * k);
+  const y = Math.min(Math.max(16, HERO_BADGES_Y * s + offY), H - h * k - 16);
+  box.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) scale(${k.toFixed(3)})`;
+}
+window.addEventListener("resize", placeAuthBadges);
+document.addEventListener("DOMContentLoaded", () => {
+  const help = $("#login-help");
+  if (help) help.addEventListener("toggle", placeAuthBadges);
+  if (document.fonts) document.fonts.ready.then(placeAuthBadges);
+});
 
 async function showApp() {
   $("#login-screen").classList.add("hidden");
