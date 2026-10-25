@@ -218,3 +218,95 @@ def test_preview_refuses_files_without_preview(client, app):
         doc = UserFile.query.filter_by(resource_id=rid, filename="logo.svg").one()
         url = file_service.preview_url(doc, User.query.filter_by(username="admin").one())
     assert client.get(url).status_code == 415
+
+
+# ------------------ Зображення в тексті матеріалу (п. 3.2) ------------------
+
+PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00"
+       b"\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18"
+       b"\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
+
+
+def _image(client, token, name="screen.png", content=PNG):
+    return client.post("/api/catalog/images", headers=auth(token),
+                       data={"file": (io.BytesIO(content), name)},
+                       content_type="multipart/form-data")
+
+
+def test_inline_image_upload_and_pending_preview(client):
+    """Картинка для ще не збереженого матеріалу: постійне посилання для
+    тексту й підписане для показу, яке працює лише для автора."""
+    u1 = login(client, "u1", "pass")
+    res = _image(client, u1)
+    assert res.status_code == 201, res.get_json()
+    data = res.get_json()
+    assert data["ref"] == f"/api/catalog/files/{data['id']}/preview"
+    img = client.get(data["url"])
+    assert img.status_code == 200 and img.data == PNG
+    assert img.headers["Content-Type"] == "image/png"
+    # Чужий підпис на цей файл не підробити, а без підпису — відмова.
+    assert client.get(data["ref"]).status_code == 403
+
+
+def test_inline_image_must_really_be_an_image(client):
+    u1 = login(client, "u1", "pass")
+    res = _image(client, u1, name="fake.png", content=b"<svg onload=alert(1)>")
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "unsupported_media"
+
+
+def test_inline_image_attached_on_save_and_removed_with_text(client, app):
+    """Під час збереження картинка прив'язується до картки; прибрана з тексту —
+    видаляється разом із файлом. У вкладеннях вона позначена як inline."""
+    from app.models import UserFile
+    from app.services import file_service
+    u1 = login(client, "u1", "pass")
+    img = _image(client, u1).get_json()
+    body = f"## Як подати заявку\n\n![Форма заявки]({img['ref']})\n\nЗаповніть поля."
+    rid = _resource(client, u1, resource_type="instruction", body=body,
+                    status="draft").get_json()["id"]
+    uf = UserFile.query.get(img["id"])
+    assert uf.resource_id == rid and uf.source == "inline"
+    files = client.get(f"/api/catalog/resources/{rid}/files", headers=auth(u1)).get_json()
+    assert [(f["id"], f["source"], f["media"]) for f in files] == [(img["id"], "inline", "image")]
+    assert files[0]["preview_url"]
+
+    path = os.path.join(file_service.user_dir(uf.user), uf.stored_name)
+    assert os.path.exists(path)
+    upd = client.patch(f"/api/catalog/resources/{rid}", json={"body": "Без картинки"},
+                       headers=auth(u1))
+    assert upd.status_code == 200
+    assert UserFile.query.get(img["id"]) is None
+    assert not os.path.exists(path)
+
+
+def test_foreign_pending_image_not_claimed(client):
+    """Посилання на чужу картинку в тексті не прив'язує її до своєї картки."""
+    from app.models import UserFile
+    u1, u2 = login(client, "u1", "pass"), login(client, "u2", "pass")
+    img = _image(client, u1).get_json()
+    _resource(client, u2, resource_type="instruction", body=f"![]({img['ref']})", status="draft")
+    assert UserFile.query.get(img["id"]).resource_id is None
+
+
+def test_attached_image_follows_card_visibility(client):
+    """Картинку чернетки бачать лише ті, хто бачить саму чернетку."""
+    u1, u2 = login(client, "u1", "pass"), login(client, "u2", "pass")
+    img = _image(client, u1).get_json()
+    rid = _resource(client, u1, resource_type="instruction", body=f"![]({img['ref']})",
+                    status="draft").get_json()["id"]
+    assert client.get(f"/api/catalog/resources/{rid}/files", headers=auth(u2)).status_code == 403
+    assert client.get(img["url"]).status_code == 200      # автор
+
+
+def test_stale_pending_images_purged(client, app):
+    """Картинки з покинутого майстра прибираються через дві доби."""
+    from datetime import datetime, timedelta
+    from app.extensions import db
+    from app.models import UserFile
+    u1 = login(client, "u1", "pass")
+    old = _image(client, u1).get_json()
+    UserFile.query.get(old["id"]).created_at = datetime.utcnow() - timedelta(days=3)
+    db.session.commit()
+    _image(client, u1)
+    assert UserFile.query.get(old["id"]) is None

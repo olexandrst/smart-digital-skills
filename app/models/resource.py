@@ -382,7 +382,9 @@ class CatalogResource(db.Model):
     reviewed_at = db.Column(db.DateTime)      # дата останнього перегляду
     next_review_at = db.Column(db.DateTime)   # дата наступного перегляду
     icon_emoji = db.Column(db.String)    # емодзі-іконка у плитці
-    accent = db.Column(db.String)        # колір плитки; None = типовий для виду
+    # Колір плитки колись задавали вручну; тепер він завжди за видом (фідбек,
+    # п. 2.2), а колонка лишилася для сумісності й завжди порожня.
+    accent = db.Column(db.String)
     is_featured = db.Column(db.Boolean, nullable=False, default=False)
     status = db.Column(db.String, nullable=False, default="draft")  # RESOURCE_STATUSES
     # Причина, з якою менеджер зняв матеріал з публікації чи переніс в архів.

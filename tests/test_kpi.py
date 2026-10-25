@@ -318,9 +318,16 @@ def test_survey_score_validated(client):
                        headers=h).status_code == 201
 
 
+def _no_monthly_gap(client):
+    """Без місячної паузи між опитуваннями — щоб перевірити саму чергу типів."""
+    assert client.post("/api/catalog/settings", json={"survey_days_between": 0},
+                       headers=_admin(client)).status_code == 200
+
+
 def test_answered_survey_not_asked_again(client):
     h = _login(client, "u1")
     _make_eligible(client, h)
+    _no_monthly_gap(client)
     client.post("/api/catalog/survey", json={"kind": "nps", "score": 8}, headers=h)
     due = client.get("/api/catalog/survey/due", headers=h).get_json()["due"]
     assert due["kind"] == "csat"          # перейшли до наступного типу, не повторили
@@ -329,6 +336,7 @@ def test_answered_survey_not_asked_again(client):
 def test_dismissed_survey_not_returned_immediately(client):
     h = _login(client, "u1")
     _make_eligible(client, h)
+    _no_monthly_gap(client)
     client.post("/api/catalog/survey", json={"kind": "nps", "dismissed": True}, headers=h)
     assert client.get("/api/catalog/survey/due",
                       headers=h).get_json()["due"]["kind"] == "csat"
@@ -339,8 +347,9 @@ def test_survey_interval_configurable_without_code(client, app):
     _make_eligible(client, h)
     client.post("/api/catalog/survey", json={"kind": "nps", "dismissed": True}, headers=h)
 
-    # Нульовий інтервал очікування — питання повертається одразу.
-    assert client.post("/api/catalog/settings", json={"survey_days_after_dismiss": 0},
+    # Нульові інтервали очікування — питання повертається одразу.
+    assert client.post("/api/catalog/settings",
+                       json={"survey_days_after_dismiss": 0, "survey_days_between": 0},
                        headers=_admin(client)).status_code == 200
     assert client.get("/api/catalog/survey/due",
                       headers=h).get_json()["due"]["kind"] == "nps"
@@ -391,3 +400,22 @@ def test_survey_summary_in_kpi(client):
 def test_survey_rejects_unknown_kind(client):
     assert client.post("/api/catalog/survey", json={"kind": "mood", "score": 5},
                        headers=_login(client, "u1")).status_code == 400
+
+
+def test_survey_at_most_once_a_month(client, app):
+    """Фідбек, п. 6: опитування з'являється, коли людина закінчує роботу, —
+    але будь-яке з трьох щонайбільше раз на 30 днів, хоч би скільки сеансів."""
+    from datetime import datetime, timedelta
+    from app.models import SurveyPrompt
+    h = _login(client, "u1")
+    _make_eligible(client, h)
+    client.post("/api/catalog/survey",
+                json={"kind": "nps", "score": 9, "context": "logout"}, headers=h)
+    assert client.get("/api/catalog/survey/due", headers=h).get_json()["due"] is None
+    with app.app_context():
+        assert SurveyResponse.query.one().context == "logout"
+        prompt = SurveyPrompt.query.one()
+        prompt.shown_at = datetime.utcnow() - timedelta(days=31)
+        from app.extensions import db
+        db.session.commit()
+    assert client.get("/api/catalog/survey/due", headers=h).get_json()["due"]["kind"] == "csat"

@@ -9,6 +9,7 @@ import os
 import re
 import uuid
 import mimetypes
+from datetime import datetime, timedelta
 from flask import current_app
 
 from app.extensions import db
@@ -143,3 +144,99 @@ def read_preview_token(token):
         return _preview_signer().loads(token or "", max_age=PREVIEW_MAX_AGE)
     except BadSignature:   # SignatureExpired — теж BadSignature
         return None
+
+
+# -------------------------- Зображення в тексті --------------------------
+#
+# Картинка всередині тексту матеріалу — це файл картки з позначкою «inline»
+# (фідбек тестування, п. 3.2). У тексті (Markdown) лежить постійне посилання
+# `/api/catalog/files/<id>/preview`, а показує його інтерфейс через підписане
+# посилання — так само, як прев'ю вкладень. Поки картки ще немає (майстер
+# створення), картинка «чекає» без прив'язки й видна лише тому, хто її
+# завантажив; під час збереження матеріалу вона прив'язується до картки, а
+# прибрані з тексту картинки видаляються.
+
+INLINE_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif")
+INLINE_REF_RE = re.compile(r"/api/catalog/files/(\d+)/preview")
+# Скільки чекає картинка, вставлена в незбережений матеріал.
+INLINE_PENDING_TTL = timedelta(days=2)
+
+# Перші байти форматів: тип визначаємо за вмістом, а не лише за назвою.
+_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", ".png"), (b"\xff\xd8\xff", ".jpg"),
+    (b"GIF87a", ".gif"), (b"GIF89a", ".gif"),
+)
+
+
+def _image_ext(data):
+    for sig, ext in _MAGIC:
+        if data.startswith(sig):
+            return ext
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if data[4:12] in (b"ftypavif", b"ftypavis"):
+        return ".avif"
+    return None
+
+
+def inline_ref(uf):
+    return f"/api/catalog/files/{uf.id}/preview"
+
+
+def inline_ids(*texts):
+    """Номери файлів, на які посилаються тексти матеріалу."""
+    ids = set()
+    for text in texts:
+        ids.update(int(m) for m in INLINE_REF_RE.findall(text or ""))
+    return ids
+
+
+def save_inline_image(user, filename, data):
+    """Зберігає картинку для тексту матеріалу (ще без прив'язки до картки)."""
+    max_bytes = current_app.config.get("INLINE_IMAGE_MAX_BYTES", 10 * 1024 * 1024)
+    if len(data) > max_bytes:
+        raise ApiError(f"Зображення більше за {max_bytes // (1024 * 1024)} МБ — "
+                       "зменште його або додайте до картки файлом", 400, "file_too_large")
+    ext = _image_ext(data)
+    if ext is None:
+        raise ApiError("У текст можна вставити зображення PNG, JPEG, GIF, WebP або AVIF",
+                       400, "unsupported_media")
+    _purge_pending(user)
+    base = os.path.splitext(_safe_basename(filename or "image"))[0] or "image"
+    directory = user_dir(user)
+    stored = _unique_name(directory, f"{base}{'.jpg' if ext == '.jpeg' else ext}")
+    with open(os.path.join(directory, stored), "wb") as fh:
+        fh.write(data)
+    uf = UserFile(user_id=user.id, filename=stored, stored_name=stored,
+                  content_type=mimetypes.guess_type(stored)[0] or "application/octet-stream",
+                  size=len(data), source="inline", resource_id=None)
+    db.session.add(uf)
+    db.session.commit()
+    return uf
+
+
+def _purge_pending(user):
+    """Прибирає картинки з незбережених матеріалів, старші за дві доби."""
+    limit = datetime.utcnow() - INLINE_PENDING_TTL
+    stale = UserFile.query.filter(UserFile.user_id == user.id, UserFile.source == "inline",
+                                  UserFile.resource_id.is_(None),
+                                  UserFile.created_at < limit).all()
+    for uf in stale:
+        remove_stored_file(uf)
+        db.session.delete(uf)
+
+
+def sync_inline_images(res, user):
+    """Після збереження тексту: прив'язує до картки картинки, вставлені цим
+    користувачем, і видаляє картинки картки, яких у тексті більше немає."""
+    used = inline_ids(res.body)
+    if used:
+        pending = UserFile.query.filter(UserFile.id.in_(used), UserFile.source == "inline",
+                                        UserFile.resource_id.is_(None),
+                                        UserFile.user_id == user.id).all()
+        for uf in pending:
+            uf.resource_id = res.id
+    for uf in UserFile.query.filter_by(resource_id=res.id, source="inline").all():
+        if uf.id not in used:
+            remove_stored_file(uf)
+            db.session.delete(uf)

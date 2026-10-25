@@ -319,3 +319,17 @@ def test_deleting_skill_clears_its_favorites(client):
 def test_anonymous_access_denied(client):
     assert client.get("/api/catalog/resources").status_code == 401
     assert client.get("/api/catalog/favorites").status_code == 401
+
+
+# ------------------------------- Колір картки -------------------------------
+
+def test_card_colour_follows_kind_only(client):
+    """Фідбек, п. 2.2: ручний колір плитки більше не приймається."""
+    h = _admin(client)
+    res = _make(client, h, accent="amber")
+    assert res.status_code == 201, res.get_json()
+    rid = res.get_json()["id"]
+    assert res.get_json()["accent"] is None
+    upd = client.patch(f"/api/catalog/resources/{rid}", json={"accent": "red"}, headers=h)
+    assert upd.status_code == 200, upd.get_json()
+    assert upd.get_json()["accent"] is None

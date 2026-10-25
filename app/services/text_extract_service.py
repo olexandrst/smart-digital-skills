@@ -50,13 +50,17 @@ def supported(filename):
     return os.path.splitext(filename or "")[1].lower() in SUPPORTED_EXTENSIONS
 
 
-def extract(filename, data):
-    """Повертає {'text', 'kind', 'truncated'} або кидає ApiError."""
+def extract(filename, data, on_image=None):
+    """Повертає {'text', 'kind', 'truncated'} або кидає ApiError.
+
+    on_image(назва, байти) → посилання для Markdown або None: так картинки з
+    .docx потрапляють у текст на своє місце. Без нього картинки пропускаються.
+    """
     ext = os.path.splitext(filename or "")[1].lower()
     if ext in TEXT_EXTENSIONS:
         text, kind = _decode_text(data), "text"
     elif ext in DOCX_EXTENSIONS:
-        text, kind = _docx_text(data), "docx"
+        text, kind = _docx_text(data, on_image), "docx"
     elif ext in PDF_EXTENSIONS:
         text, kind = _pdf_text(data), "pdf"
     else:
@@ -90,11 +94,16 @@ def _tidy(text):
 # ------------------------------- DOCX -------------------------------
 #
 # Результат — Markdown, який редактор картки показує оформленим: заголовки
-# (за стилями з styles.xml, зокрема локалізованими), абзаци, жирний і
-# курсив, посилання, марковані й нумеровані списки (тип — із numbering.xml),
-# таблиці з рядком заголовка. Шрифти, кольори й відступи не переносимо.
+# (за стилями з styles.xml, зокрема локалізованими, або жирні рядки-заголовки
+# в документі без таких стилів), абзаци, жирний і курсив, посилання,
+# марковані й нумеровані списки (тип — із numbering.xml), таблиці з рядком
+# заголовка. Шрифти, кольори й відступи не переносимо.
 
 _R = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+_V = "{urn:schemas-microsoft-com:vml}"
+# Більше картинок із одного документа не беремо: решта лишається у файлі.
+MAX_DOCX_IMAGES = 50
 _REL = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 _OFF = {"0", "false", "off", "none"}
 
@@ -139,15 +148,36 @@ def _docx_numbering(zf):
     return out
 
 
-def _docx_links(zf):
-    """Id зв'язку → адреса для гіперпосилань документа."""
+def _docx_links(zf, kind="hyperlink"):
+    """Id зв'язку → адреса: гіперпосилання або (kind="image") файл картинки."""
     root = _docx_xml(zf, "word/_rels/document.xml.rels")
     out = {}
     if root is not None:
         for rel in root.iter(_REL + "Relationship"):
-            if (rel.get("Type") or "").endswith("/hyperlink"):
+            if (rel.get("Type") or "").endswith("/" + kind):
                 out[rel.get("Id")] = rel.get("Target") or ""
     return out
+
+
+def _docx_images(zf, on_image):
+    """Функція «id зв'язку → посилання на картинку в тексті» (з кешем)."""
+    media = _docx_links(zf, "image")
+    cache = {}
+
+    def image(rid):
+        if rid in cache:
+            return cache[rid]
+        ref = None
+        target = media.get(rid, "")
+        if on_image and target and len([v for v in cache.values() if v]) < MAX_DOCX_IMAGES:
+            path = os.path.normpath(os.path.join("word", target)).replace(os.sep, "/")
+            try:
+                ref = on_image(os.path.basename(path), zf.read(path))
+            except KeyError:
+                ref = None
+        cache[rid] = ref
+        return ref
+    return image
 
 
 def _flag(rpr, tag):
@@ -187,6 +217,14 @@ def _docx_runs(node, ctx, link=None, out=None):
                     out.append(("\n", False, False, None))
                 elif part.tag == _W + "noBreakHyphen":
                     out.append(("-", bold, italic, link))
+                elif part.tag in (_W + "drawing", _W + "pict"):
+                    # Картинка: сучасна (a:blip) або стара VML (v:imagedata).
+                    for el in part.iter():
+                        rid = (el.get(_R + "embed") if el.tag == _A + "blip"
+                               else el.get(_R + "id") if el.tag == _V + "imagedata" else None)
+                        ref = ctx["image"](rid) if rid else None
+                        if ref:
+                            out.append(("", False, False, ("img", ref, len(out))))
         elif tag == _W + "hyperlink":
             target = ctx["links"].get(ch.get(_R + "id"), "")
             _docx_runs(ch, ctx, target if re.match(r"(?i)^(https?:|mailto:)", target) else None, out)
@@ -211,6 +249,9 @@ def _docx_inline(p, ctx):
             merged.append((text, bold, italic, link))
     parts = []
     for text, bold, italic, link in merged:
+        if isinstance(link, tuple):        # картинка
+            parts.append(f"![]({link[1]})")
+            continue
         piece = _md_escape(text)
         if bold and italic:
             piece = _wrap(piece, "***")
@@ -231,8 +272,24 @@ def _docx_plain(p, ctx):
     return re.sub(r"\s+", " ", "".join(t for t, *_ in _docx_runs(p, ctx))).strip()
 
 
+def _docx_bold_only(p, ctx):
+    """Абзац, увесь текст якого жирний, — так у Word часто оформлюють
+    заголовки замість стилю «Заголовок»."""
+    runs = [(t, b) for t, b, _i, link in _docx_runs(p, ctx) if t.strip() and not link]
+    return bool(runs) and all(b for _t, b in runs)
+
+
+# Схожий на заголовок: короткий, з літерами, без крапки, коми чи двокрапки
+# в кінці («Спробуйте:» — це вступ до списку, а не заголовок).
+_HEADING_LIKE = re.compile(r"^(?=.*\w).{1,120}(?<![.,;:])$", re.S)
+
+
 def _docx_paragraph(p, ctx):
-    """(рядок Markdown, список) для абзацу Word: список — numId пункту або None."""
+    """(рядок Markdown, тип, список, чистий текст) для абзацу Word.
+
+    Тип — «heading», «item», «para» або «bold» (абзац лише з жирного тексту,
+    схожий на заголовок). Список — (numId, маркер) для пунктів, інакше None.
+    """
     ppr = p.find(_W + "pPr")
     style_id = ""
     num = None
@@ -246,20 +303,60 @@ def _docx_paragraph(p, ctx):
     if heading or name.strip().lower() in ("title", "назва"):
         text = _docx_plain(p, ctx)
         level = min(int(heading.group(1)), 3) if heading else 1
-        return ("#" * level + " " + text if text else ""), None
+        return ("#" * level + " " + text if text else ""), "heading", None, text
     text = _docx_inline(p, ctx)
     if not text:
-        return "", None
+        return "", "para", None, ""
     if num is not None:
         num_id = num.find(_W + "numId")
         ilvl = num.find(_W + "ilvl")
         num_id = num_id.get(_W + "val") if num_id is not None else None
-        if num_id == "0":      # нумерацію вимкнено вручну
-            return text, None
-        fmt = ctx["numbering"].get((num_id, ilvl.get(_W + "val") if ilvl is not None else "0"), "bullet")
-        marker = "- " if fmt in ("bullet", "none", "") else "1. "
-        return marker + text.replace("\n", " "), (num_id or "1", marker)
-    return text, None
+        if num_id != "0":      # «0» — нумерацію вимкнено вручну
+            fmt = ctx["numbering"].get((num_id, ilvl.get(_W + "val") if ilvl is not None else "0"),
+                                       "bullet")
+            marker = "- " if fmt in ("bullet", "none", "") else "1. "
+            return marker + text.replace("\n", " "), "item", (num_id or "1", marker), ""
+    plain = _docx_plain(p, ctx)
+    if _docx_bold_only(p, ctx) and _HEADING_LIKE.match(plain):
+        return text, "bold", None, plain
+    return text, "para", None, plain
+
+
+def _docx_headings_from_bold(blocks):
+    """Жирні рядки-заголовки → заголовки Markdown.
+
+    Лише для документа без стилів заголовків (інакше жирний рядок — це просто
+    виділення) і лише перед звичайним текстом: два жирні рядки поспіль або
+    жирний рядок у кінці (підпис) заголовками не стають. Перший рядок
+    документа — назва («#»), решта — розділи («##»); без назви розділи
+    отримують «#».
+    """
+    if any(b[1] == "heading" for b in blocks):
+        return blocks
+    picked = [i for i, b in enumerate(blocks)
+              if b[1] == "bold" and i + 1 < len(blocks) and blocks[i + 1][1] != "bold"]
+    titled = bool(picked) and picked[0] == 0 and len(picked) > 1
+    out = list(blocks)
+    for i in picked:
+        level = "##" if titled and i else "#"
+        out[i] = (f"{level} {blocks[i][3]}", "heading", None, blocks[i][3])
+    return out
+
+
+def _docx_join(blocks):
+    """Склеює блоки: пункти одного списку — рядок за рядком, решта — через
+    порожній рядок. Нумерований список отримує номери 1, 2, 3 замість
+    «1.» у кожному пункті: так його зручніше правити на вкладці Markdown."""
+    out, n = [], 0
+    for i, (line, _kind, lst, _plain) in enumerate(blocks):
+        same = bool(lst) and i > 0 and lst == blocks[i - 1][2]
+        if i:
+            out.append("\n" if same else "\n\n")
+        if lst and lst[1] == "1. ":
+            n = n + 1 if same else 1
+            line = f"{n}. " + line[3:]
+        out.append(line)
+    return "".join(out)
 
 
 def _docx_table(tbl, ctx):
@@ -280,7 +377,7 @@ def _docx_table(tbl, ctx):
     return "\n".join([line(rows[0]), line(["---"] * width)] + [line(r) for r in rows[1:]])
 
 
-def _docx_text(data):
+def _docx_text(data, on_image=None):
     try:
         zf = zipfile.ZipFile(io.BytesIO(data))
         xml = zf.read("word/document.xml")
@@ -291,29 +388,23 @@ def _docx_text(data):
         root = ET.fromstring(xml)
     except ET.ParseError:
         raise ApiError("Не вдалося прочитати документ Word", 400, "extract_bad_file")
-    ctx = {"styles": _docx_styles(zf), "numbering": _docx_numbering(zf), "links": _docx_links(zf)}
-    zf.close()
-
-    body = root.find(_W + "body")
-    if body is None:
-        return ""
-    blocks = []   # (рядок, список)
-    for node in body:
-        if node.tag == _W + "p":
-            line, item = _docx_paragraph(node, ctx)
-            if line:
-                blocks.append((line, item))
-        elif node.tag == _W + "tbl":
-            table = _docx_table(node, ctx)
-            if table:
-                blocks.append((table, None))
-    # Пункти одного списку — рядок за рядком; решта блоків — через порожній рядок.
-    out = []
-    for i, (line, item) in enumerate(blocks):
-        if i:
-            out.append("\n" if item and item == blocks[i - 1][1] else "\n\n")
-        out.append(line)
-    return "".join(out)
+    with zf:
+        ctx = {"styles": _docx_styles(zf), "numbering": _docx_numbering(zf),
+               "links": _docx_links(zf), "image": _docx_images(zf, on_image)}
+        body = root.find(_W + "body")
+        if body is None:
+            return ""
+        blocks = []   # (рядок, тип, список, чистий текст)
+        for node in body:
+            if node.tag == _W + "p":
+                block = _docx_paragraph(node, ctx)
+                if block[0]:
+                    blocks.append(block)
+            elif node.tag == _W + "tbl":
+                table = _docx_table(node, ctx)
+                if table:
+                    blocks.append((table, "table", None, ""))
+    return _docx_join(_docx_headings_from_bold(blocks))
 
 
 # -------------------------------- PDF --------------------------------

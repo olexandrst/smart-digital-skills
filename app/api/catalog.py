@@ -5,6 +5,7 @@
 колекції, довідники) і модерацію веде менеджер каталогу. Перегляд — усі.
 """
 import os
+import re
 from datetime import datetime, timedelta
 from flask import (Blueprint, request, jsonify, send_from_directory, Response,
                    current_app)
@@ -39,6 +40,9 @@ MAX_BODY = 100_000
 MAX_QUERY = 200
 # Ключ налаштування «сувора публікація» (BR-05): вимагати обов'язкові поля.
 STRICT_PUBLISH_KEY = "catalog_publish_strict"
+# Посилання на тест рівня AI-обізнаності: з'являється кнопкою на сторінці
+# «Мій розвиток», щойно адміністратор його вкаже (фідбек тестування, п. 4).
+MATURITY_TEST_KEY = "maturity_test_url"
 # Поля, без яких матеріал не публікується при увімкненій суворій публікації.
 REQUIRED_ON_PUBLISH = (
     ("description", "короткий опис"),
@@ -359,9 +363,8 @@ def _apply_fields(res, data, *, creating=False):
                            400, "validation_error")
         res.body = body.strip() or None
 
-    if "accent" in data:
-        accent = (data.get("accent") or "").strip()
-        res.accent = accent if accent in ACCENTS else None  # None = типовий для виду
+    # Колір картки визначає вид матеріалу (фідбек, п. 2.2): поле «accent»
+    # більше не приймаємо, щоб однаковий вид завжди виглядав однаково.
 
     if "is_featured" in data:
         res.is_featured = bool(data.get("is_featured"))
@@ -1027,8 +1030,9 @@ def _rating_map(item_type):
 def extract_text():
     """Текст із файлу для поля «зміст» майстра створення матеріалу.
 
-    Файл тут не зберігається: користувач ще нічого не створив, а чи лишати
-    оригінал вкладенням — вирішує він сам уже після створення картки.
+    Сам файл тут не зберігається: користувач ще нічого не створив, а чи
+    лишати оригінал вкладенням — вирішує він сам уже після створення картки.
+    Зберігаються лише картинки з .docx — вони стають картинками в тексті.
     """
     file = request.files.get("file")
     if file is None or not file.filename:
@@ -1037,8 +1041,20 @@ def extract_text():
     max_bytes = current_app.config.get("USER_FILE_MAX_BYTES", 25 * 1024 * 1024)
     if len(data) > max_bytes:
         raise ApiError("Файл завеликий", 400, "file_too_large")
-    result = text_extract_service.extract(file.filename, data)
-    return jsonify(dict(result, filename=file.filename))
+    user = current_user()
+    images = []
+
+    def keep_image(name, blob):
+        """Картинка з документа Word стає картинкою в тексті."""
+        try:
+            uf = file_service.save_inline_image(user, name, blob)
+        except ApiError:
+            return None        # формат, якого браузер не покаже (EMF, WMF), — пропускаємо
+        images.append({"id": uf.id, "url": file_service.preview_url(uf, user)})
+        return file_service.inline_ref(uf)
+
+    result = text_extract_service.extract(file.filename, data, on_image=keep_image)
+    return jsonify(dict(result, filename=file.filename, images=images))
 
 
 @bp.get("/resources/<int:resource_id>")
@@ -1078,6 +1094,7 @@ def create_resource():
     db.session.flush()
     _set_tags(res, data.get("tags"))
     _set_maturity(res, data.get("maturity_ids"))
+    file_service.sync_inline_images(res, user)
     if publish:
         _log_review("resource", res, None, "published")
         review_service.notify_published("resource", res, user)
@@ -1098,6 +1115,8 @@ def update_resource(resource_id):
     if not manager:
         data = {k: v for k, v in data.items() if k not in ("is_featured", "status")}
     _apply_fields(res, data)
+    if "body" in data:
+        file_service.sync_inline_images(res, user)
     if "tags" in data:
         _set_tags(res, data.get("tags"))
     if "maturity_ids" in data:
@@ -1279,6 +1298,25 @@ def upload_resource_file(resource_id):
     return jsonify(uf.to_dict()), 201
 
 
+@bp.post("/images")
+@require_auth
+def upload_inline_image():
+    """Зображення для тексту матеріалу (фідбек тестування, п. 3.2).
+
+    Повертає постійне посилання `ref` — його редактор пише в текст — і
+    підписане `url` для показу. До картки картинка прив'язується, коли
+    матеріал зберігають (див. file_service.sync_inline_images).
+    """
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
+    user = current_user()
+    uf = file_service.save_inline_image(user, file.filename, file.read())
+    return jsonify({"id": uf.id, "ref": file_service.inline_ref(uf),
+                    "url": file_service.preview_url(uf, user),
+                    "filename": uf.filename}), 201
+
+
 @bp.get("/resources/<int:resource_id>/files/<int:file_id>/download")
 @require_auth
 def download_resource_file(resource_id, file_id):
@@ -1307,11 +1345,18 @@ def preview_resource_file(file_id):
         raise ApiError("Посилання на перегляд недійсне або застаріло", 403, "forbidden")
     uf = db.session.get(UserFile, file_id)
     viewer = db.session.get(User, data.get("u"))
-    if uf is None or uf.resource_id is None:
+    if uf is None:
         raise ApiError("Файл не знайдено", 404, "not_found")
-    res = db.session.get(CatalogResource, uf.resource_id)
-    if viewer is None or not viewer.is_active or res is None or not _can_see(res, viewer):
+    if viewer is None or not viewer.is_active:
         raise ApiError("Файл недоступний", 403, "forbidden")
+    if uf.resource_id is None:
+        # Картинка в ще не збереженому матеріалі — бачить лише той, хто вставив.
+        if uf.source != "inline" or uf.user_id != viewer.id:
+            raise ApiError("Файл недоступний", 403, "forbidden")
+    else:
+        res = db.session.get(CatalogResource, uf.resource_id)
+        if res is None or not _can_see(res, viewer):
+            raise ApiError("Файл недоступний", 403, "forbidden")
     media = file_service.media_of(uf)
     if media is None:
         raise ApiError("Для цього файлу немає перегляду", 415, "unsupported_media")
@@ -1509,7 +1554,8 @@ def log_search_opened(log_id):
 @require_auth
 def catalog_settings():
     """Налаштування каталогу для UI (разом із частотою опитувань)."""
-    out = {"strict_publish": strict_publish_enabled()}
+    out = {"strict_publish": strict_publish_enabled(),
+           MATURITY_TEST_KEY: AppSetting.get(MATURITY_TEST_KEY, "") or ""}
     out.update({key: _survey_setting(key) for key in SURVEY_SETTINGS})
     return jsonify(out)
 
@@ -1519,13 +1565,19 @@ def catalog_settings():
 def set_catalog_settings():
     """Зміна налаштувань. Частота опитувань керується звідси, а не з коду."""
     data = request.get_json(silent=True) or {}
-    known = {"strict_publish", *SURVEY_SETTINGS}
+    known = {"strict_publish", MATURITY_TEST_KEY, *SURVEY_SETTINGS}
     if not known & set(data):
         raise ApiError("Вкажіть щонайменше одне налаштування: "
                        + ", ".join(sorted(known)), 400, "validation_error")
 
     if "strict_publish" in data:
         AppSetting.set(STRICT_PUBLISH_KEY, "1" if data["strict_publish"] else "0")
+    if MATURITY_TEST_KEY in data:
+        url = (data.get(MATURITY_TEST_KEY) or "").strip()
+        if url and not re.match(r"^https?://\S+$", url, re.I):
+            raise ApiError("Посилання на тест має починатися з https:// або http://",
+                           400, "validation_error")
+        AppSetting.set(MATURITY_TEST_KEY, url)
     for key in SURVEY_SETTINGS:
         if key not in data:
             continue
@@ -1875,6 +1927,9 @@ SURVEY_SETTINGS = {
     # Скільки днів не питати після відповіді / після закриття без відповіді.
     "survey_days_after_answer": "90",
     "survey_days_after_dismiss": "14",
+    # Скільки днів не питати нічого після будь-якого опитування: людина бачить
+    # щонайбільше одне питання на місяць (фідбек тестування, п. 6).
+    "survey_days_between": "30",
     # Скільки карток треба відкрити, перш ніж узагалі щось запитати.
     "survey_min_views": "5",
     # Глобальний вимикач опитувань.
@@ -1908,7 +1963,8 @@ def survey_due():
     """Чи час питати цього користувача — і про що саме.
 
     Повертає щонайбільше одне опитування за раз: показувати три підряд означає
-    гарантовано не отримати відповіді на жодне.
+    гарантовано не отримати відповіді на жодне. Питає інтерфейс тоді, коли
+    людина закінчує роботу: під час виходу або на початку наступного сеансу.
     """
     user = current_user()
     if _survey_setting("survey_enabled") != "1":
@@ -1922,6 +1978,9 @@ def survey_due():
     after_answer = timedelta(days=_survey_int("survey_days_after_answer"))
     after_dismiss = timedelta(days=_survey_int("survey_days_after_dismiss"))
     prompts = {p.kind: p for p in SurveyPrompt.query.filter_by(user_id=user.id)}
+    last = max((p.shown_at for p in prompts.values()), default=None)
+    if last is not None and now - last < timedelta(days=_survey_int("survey_days_between")):
+        return jsonify({"due": None})
 
     for kind in SURVEY_KINDS:
         prompt = prompts.get(kind)
@@ -2256,8 +2315,10 @@ def update_profile():
     data = request.get_json(silent=True) or {}
     user = current_user()
     if "maturity_level_id" in data:
-        user.maturity_level_id = _resolve_term(
-            "maturity", data.get("maturity_level_id"), "рівень зрілості")
+        level = _resolve_term("maturity", data.get("maturity_level_id"), "рівень зрілості")
+        if level != user.maturity_level_id:
+            user.maturity_assessed_at = datetime.utcnow() if level else None
+        user.maturity_level_id = level
     if "department" in data:
         value = (data.get("department") or "").strip()
         user.department = value[:200] or None
@@ -2308,6 +2369,8 @@ def maturity_overview():
         # Підказка «що дає наступний рівень» — з опису самого рівня, щоб текст
         # редагувався в довіднику, а не жив у коді.
         "next_hint": nxt.description if nxt else None,
+        "assessed_at": (user.maturity_assessed_at.isoformat()
+                        if current is not None and user.maturity_assessed_at else None),
         "items": items,
     })
 

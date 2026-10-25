@@ -163,8 +163,107 @@ def test_docx_keeps_formatting(client):
     assert res.status_code == 200, res.get_json()
     assert res.get_json()["text"] == (
         "# Регламент\n\n## Кроки\n\n**Важливо:** перевірте *кошторис* і 2\\*2.\n\n"
-        "1. Відкрийте портал\n1. Подайте заявку\n\n- Окремий маркер\n\n"
+        "1. Відкрийте портал\n2. Подайте заявку\n\n- Окремий маркер\n\n"
         "Див. [повний регламент](https://example.com/doc)")
+
+
+def _bold(text):
+    return ("xml", f'<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">{text}</w:t></w:r></w:p>')
+
+
+_DECIMAL = (f'<w:numbering xmlns:w="{W}">'
+            f'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl></w:abstractNum>'
+            f'<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/></w:lvl></w:abstractNum>'
+            f'<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>'
+            f'<w:num w:numId="2"><w:abstractNumId w:val="0"/></w:num></w:numbering>')
+
+
+def _item(text, num):
+    return ("xml", f'<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="{num}"/>'
+                   f'</w:numPr></w:pPr><w:r><w:t>{text}</w:t></w:r></w:p>')
+
+
+def test_docx_bold_lines_become_headings(client):
+    """Документ без стилів заголовків, як FAQ від колег (фідбек, п. 3): назва й
+    розділи — це просто жирні рядки. Вони мають стати заголовками, а
+    нумерований список — отримати номери 1, 2, 3."""
+    token = login(client, "u1", "pass")
+    data = _docx([
+        _bold("Питання та відповіді (FAQ)"),
+        ("Відповіді на поширені запитання.", None),
+        _bold("Не можу знайти матеріал"),
+        ("Спробуйте:", None),
+        _item("короткі ключові слова;", 1),
+        _item("фільтри.", 1),
+        _bold("Важливо:"),                       # двокрапка — вступ, не заголовок
+        ("Не додавайте паролі.", None),
+        _bold("Виявив неактуальну інформацію?"),
+        _item("Натисніть «Повідомити».", 2),
+        _item("Додайте посилання.", 2),
+        _item("Опишіть проблему.", 2),
+        _bold("Перший жирний рядок"),            # два поспіль — не заголовки
+        _bold("Другий жирний рядок"),
+        ("Текст.", None),
+        _bold("Команда хабу"),                   # підпис наприкінці
+    ], parts={"word/numbering.xml": _DECIMAL})
+    res = _send(client, token, "faq.docx", data)
+    assert res.status_code == 200, res.get_json()
+    assert res.get_json()["text"] == (
+        "# Питання та відповіді (FAQ)\n\n"
+        "Відповіді на поширені запитання.\n\n"
+        "## Не можу знайти матеріал\n\n"
+        "Спробуйте:\n\n"
+        "- короткі ключові слова;\n- фільтри.\n\n"
+        "**Важливо:**\n\n"
+        "Не додавайте паролі.\n\n"
+        "## Виявив неактуальну інформацію?\n\n"
+        "1. Натисніть «Повідомити».\n2. Додайте посилання.\n3. Опишіть проблему.\n\n"
+        "**Перший жирний рядок**\n\n"
+        "## Другий жирний рядок\n\n"
+        "Текст.\n\n"
+        "**Команда хабу**")
+
+
+def test_docx_with_heading_styles_keeps_bold_lines_bold(client):
+    """Якщо в документі є справжні заголовки, жирний рядок — це виділення."""
+    token = login(client, "u1", "pass")
+    data = _docx([
+        ("Регламент", "Heading1"),
+        _bold("Увага"),
+        ("Текст.", None),
+    ])
+    res = _send(client, token, "reg.docx", data)
+    assert res.get_json()["text"] == "# Регламент\n\n**Увага**\n\nТекст."
+
+
+def test_docx_images_land_in_text(client):
+    """Картинки з документа Word стають картинками в тексті на своєму місці;
+    формати, яких браузер не покаже (EMF), пропускаються."""
+    from tests.test_files import PNG
+    token = login(client, "u1", "pass")
+    a = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+    def picture(rid):
+        return ("xml", f'<w:p><w:r><w:drawing><a:graphic xmlns:a="{a}"><a:graphicData>'
+                       f'<a:blip r:embed="{rid}"/></a:graphicData></a:graphic></w:drawing></w:r></w:p>')
+
+    rels = ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            'relationships/image" Target="media/image1.png"/>'
+            '<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            'relationships/image" Target="media/image2.emf"/></Relationships>')
+    data = _docx([("Перед картинкою", None), picture("rId7"), picture("rId8"),
+                  ("Після картинки", None)],
+                 parts={"word/_rels/document.xml.rels": rels,
+                        "word/media/image1.png": PNG, "word/media/image2.emf": b"\x01\x00\x00\x00"})
+    res = _send(client, token, "з картинкою.docx", data)
+    assert res.status_code == 200, res.get_json()
+    body = res.get_json()
+    assert len(body["images"]) == 1
+    image = body["images"][0]
+    assert body["text"] == (f"Перед картинкою\n\n![](/api/catalog/files/{image['id']}/preview)"
+                            "\n\nПісля картинки")
+    assert client.get(image["url"]).status_code == 200
 
 
 def test_docx_that_is_not_a_zip(client):

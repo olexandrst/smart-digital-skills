@@ -8,8 +8,15 @@
 //
 // Вставка з Word, Google Docs чи сайту очищується до того, що вміє картка:
 // заголовки, абзаци, жирний і курсив, списки, посилання, цитати, код,
-// таблиці. Стилі, шрифти, кольори й зображення відкидаються (зображення
-// додають до картки файлами — вони там показуються).
+// таблиці. Стилі, шрифти й кольори відкидаються, щоб картки виглядали
+// однаково.
+//
+// Зображення в тексті (фідбек, п. 3.2) — це файли хабу: кнопка «Зображення»,
+// вставка знімка з буфера чи перетягнутий файл завантажуються через
+// onImage(file) → { id, url }, а в Markdown лягає постійне посилання
+// `/api/catalog/files/<id>/preview`. Картинки з документа, що вставляється
+// разом із текстом, переносяться під час імпорту файла .docx, а не з буфера:
+// браузер дає на них лише недоступні локальні шляхи.
 //
 // Два види тексту:
 //   doc    — інструкції, кейси, описи: безпечний HTML у розмітці дозволено,
@@ -17,8 +24,9 @@
 //   prompt — промпти: текст копіюють у модель як є, тож нічого не
 //            екрануємо, а «<документ>» лишається текстом.
 //
-// Залежить від renderMarkdown() і esc() з app.js (викликаються лише під час
-// роботи, тому порядок підключення скриптів не важливий).
+// Залежить від renderMarkdown(), hydrateImages() і esc() з app.js
+// (викликаються лише під час роботи, тому порядок підключення скриптів не
+// важливий).
 // =====================================================================
 (function () {
   "use strict";
@@ -31,7 +39,12 @@
     link: '<path d="M10.5 13.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1M13.5 10.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1"/>',
     table: '<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M3.5 10h17M3.5 14.5h17M9.5 5v14M15 5v14"/>',
     hr: '<path d="M4 12h16"/><path d="M8 7.5h8M8 16.5h8" opacity=".45"/>',
+    image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4.5 17.5 5-5 4 4 2.5-2.5 4 4"/>',
   };
+  // Своя картинка: постійне посилання на файл хабу (у src — ще й підпис).
+  const FILE_IMG_RE = /\/api\/catalog\/files\/(\d+)\/preview/;
+  const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|avif)$/i;
+  const isImageFile = (f) => /^image\/(png|jpeg|gif|webp|avif)$/i.test(f.type || "") || IMAGE_FILE_RE.test(f.name || "");
   const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON[name]}</svg>`;
 
   // ------------------------------------------------------------------
@@ -89,7 +102,14 @@
           if (!text || text === href || text === escapeText(href)) return href;
           return `[${text.replace(/\n/g, " ")}](${href})`;
         }
-        case "IMG": case "SCRIPT": case "STYLE": return "";
+        case "IMG": {
+          const id = ch.getAttribute("data-file")
+            || (String(ch.getAttribute("src") || "").match(FILE_IMG_RE) || [])[1];
+          if (!id || prompt) return "";
+          const alt = (ch.getAttribute("alt") || "").replace(/[[\]\n]/g, " ").trim();
+          return `![${alt}](/api/catalog/files/${id}/preview)`;
+        }
+        case "SCRIPT": case "STYLE": return "";
         default: return inline(ch);
       }
     }
@@ -302,13 +322,50 @@
     body.querySelectorAll("p, li, h1, h2, h3, h4, h5, h6").forEach(el => {
       if (!el.textContent.replace(/\u00a0/g, " ").trim() && !el.querySelector("br, hr, table")) el.remove();
     });
+    if (OFFICE_RE.test(html) && !body.querySelector("h1, h2, h3, h4, h5, h6")) boldHeadings(body);
     return { html: body.innerHTML, images };
+  }
+
+  // Документ Word чи Google Docs без стилів заголовків: заголовок там — короткий
+  // жирний рядок перед звичайним текстом. Правило те саме, що й під час
+  // імпорту .docx на сервері (text_extract_service): перший такий рядок на
+  // початку — назва, решта — розділи; два жирні рядки поспіль, рядок із
+  // двокрапкою чи крапкою в кінці або підпис наприкінці лишаються жирним
+  // текстом. Сайтів правило не стосується — там заголовки справжні.
+  const OFFICE_RE = /urn:schemas-microsoft-com:office|class="?Mso|mso-|docs-internal-guid/i;
+  const HEADING_LIKE = /^(?=[\s\S]*[\p{L}\p{N}])[\s\S]{1,120}(?<![.,;:])$/u;
+
+  function boldOnly(p) {
+    const walker = p.ownerDocument.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    let any = false;
+    while (walker.nextNode()) {
+      const t = walker.currentNode;
+      if (!t.nodeValue.replace(/ /g, " ").trim()) continue;
+      const strong = t.parentElement.closest("strong, b");
+      if (!strong || !p.contains(strong) || t.parentElement.closest("a")) return false;
+      any = true;
+    }
+    return any;
+  }
+
+  function boldHeadings(body) {
+    const blocks = [...body.children];
+    const text = (el) => el.textContent.replace(/ /g, " ").replace(/\s+/g, " ").trim();
+    const cand = blocks.map(el => el.tagName === "P" && boldOnly(el) && HEADING_LIKE.test(text(el)));
+    const picked = blocks.map((el, i) => i).filter(i => cand[i] && i + 1 < blocks.length && !cand[i + 1]);
+    const titled = picked.length > 1 && picked[0] === 0;
+    picked.forEach(i => {
+      const h = body.ownerDocument.createElement(titled && i ? "h3" : "h2");
+      h.textContent = text(blocks[i]);
+      blocks[i].replaceWith(h);
+    });
   }
 
   // ------------------------------------------------------------------
   // Компонент
   // ------------------------------------------------------------------
-  function create({ value = "", kind = "doc", placeholder = "", label = "Текст", onChange, onFiles } = {}) {
+  function create({ value = "", kind = "doc", placeholder = "", label = "Текст", onChange, onFiles,
+                   onImage } = {}) {
     let mode = "visual";
     let current = String(value || "");
     let dirty = false;
@@ -332,6 +389,7 @@
           <button type="button" class="rte-btn" data-cmd="quote" title="Цитата" aria-label="Цитата">${svg("quote")}</button>
           <span class="rte-sep"></span>
           <button type="button" class="rte-btn" data-cmd="link" title="Посилання (Ctrl+K)" aria-label="Посилання">${svg("link")}</button>
+          <button type="button" class="rte-btn rte-img-btn" data-cmd="image" title="Зображення" aria-label="Зображення">${svg("image")}</button>
           <button type="button" class="rte-btn" data-cmd="table" title="Таблиця" aria-label="Таблиця">${svg("table")}</button>
           <button type="button" class="rte-btn" data-cmd="hr" title="Розділювач" aria-label="Розділювач">${svg("hr")}</button>
           <span class="rte-tbl hidden">
@@ -346,8 +404,15 @@
       </div>
       <div class="rte-area md-doc" contenteditable="true" role="textbox" aria-multiline="true"
            spellcheck="true"></div>
-      <textarea class="rte-src hidden" spellcheck="false" aria-label="${esc(label)}: розмітка Markdown"></textarea>`;
+      <textarea class="rte-src hidden" spellcheck="false" aria-label="${esc(label)}: розмітка Markdown"></textarea>
+      <input type="file" class="rte-file" hidden multiple
+             accept="image/png,image/jpeg,image/gif,image/webp,image/avif">`;
     const area = root.querySelector(".rte-area");
+    const fileInput = root.querySelector(".rte-file");
+    const imgBtn = root.querySelector(".rte-img-btn");
+    const imagesOn = () => !!onImage && kind !== "prompt";
+    const paintImageBtn = () => imgBtn.classList.toggle("hidden", !imagesOn());
+    paintImageBtn();
     const src = root.querySelector(".rte-src");
     const tblTools = root.querySelector(".rte-tbl");
     area.setAttribute("aria-label", label);
@@ -370,6 +435,7 @@
 
     function render() {
       area.innerHTML = current.trim() ? renderMarkdown(current, opts) : "";
+      if (typeof hydrateImages === "function") hydrateImages(area);
       paintEmpty();
     }
 
@@ -499,7 +565,49 @@
       exec("insertHTML", `<code>${esc(text)}</code>`);
     }
 
+    // --- Зображення ---
+    let savedRange = null;
+    function saveRange() {
+      const sel = window.getSelection();
+      if (sel.rangeCount && area.contains(sel.getRangeAt(0).startContainer)) {
+        savedRange = sel.getRangeAt(0).cloneRange();
+      }
+    }
+    function restoreRange() {
+      area.focus();
+      if (!savedRange || !area.contains(savedRange.startContainer)) return;
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(savedRange);
+    }
+
+    async function insertImages(files) {
+      const images = [...files].filter(isImageFile);
+      if (!images.length || !imagesOn()) return;
+      saveRange();
+      for (const f of images) {
+        let img = null;
+        try { img = await onImage(f); }
+        catch (err) { if (typeof toast === "function") toast(err.message, "err"); }
+        if (!img) continue;
+        restoreRange();
+        // «image.png» зі знімка екрана — не підпис.
+        const name = (f.name || "").replace(/\.[^.]+$/, "");
+        const alt = /^(image|img|screenshot|знімок)[\s_-]*\d*$/i.test(name) ? "" : name;
+        exec("insertHTML", `<img class="md-img" data-file="${Number(img.id)}" src="${esc(img.url)}" alt="${esc(alt)}">`);
+        saveRange();
+        changed();
+      }
+    }
+
+    fileInput.addEventListener("change", () => {
+      const files = [...fileInput.files];
+      fileInput.value = "";
+      insertImages(files);
+    });
+
     const COMMANDS = {
+      image: () => { saveRange(); fileInput.click(); },
       bold: () => exec("bold"), italic: () => exec("italic"), code: inlineCode,
       h2: () => toggleBlock("h2"), h3: () => toggleBlock("h3"), quote: () => toggleBlock("blockquote"),
       ul: () => exec("insertUnorderedList"), ol: () => exec("insertOrderedList"),
@@ -567,7 +675,9 @@
         const cleaned = cleanPastedHtml(html);
         if (cleaned.html.trim()) exec("insertHTML", cleaned.html);
         if (cleaned.images && typeof toast === "function") {
-          toast("Зображення не вставляються в текст — додайте їх до картки файлами, там вони показуються");
+          toast(imagesOn()
+            ? "Зображення з документа разом із текстом не переносяться — вставте їх кнопкою «Зображення», перетягніть файл або завантажте документ .docx"
+            : "Зображення не вставляються в текст — додайте їх до картки файлами, там вони показуються");
         }
       } else if (text) {
         // Звичайний текст і Markdown (наприклад, відповідь ChatGPT) — як розмітку.
@@ -579,6 +689,12 @@
     area.addEventListener("paste", e => {
       if (!e.clipboardData) return;
       e.preventDefault();
+      // Знімок екрана чи скопійована картинка без тексту — це зображення.
+      const files = [...(e.clipboardData.files || [])].filter(isImageFile);
+      if (files.length && imagesOn() && !e.clipboardData.getData("text/plain").trim()) {
+        insertImages(files);
+        return;
+      }
       insertContent(e.clipboardData);
     });
     area.addEventListener("dragover", e => e.preventDefault());
@@ -586,9 +702,17 @@
       const dt = e.dataTransfer;
       if (!dt) return;
       e.preventDefault();
-      if (dt.files && dt.files.length) { if (onFiles) onFiles([...dt.files]); return; }
       const range = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
       if (range) { const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range); }
+      if (dt.files && dt.files.length) {
+        // Картинки — у текст на місце, куди їх кинули; документи — як і раніше.
+        const files = [...dt.files];
+        const images = imagesOn() ? files.filter(isImageFile) : [];
+        const rest = files.filter(f => !images.includes(f));
+        if (images.length) insertImages(images);
+        if (rest.length && onFiles) onFiles(rest);
+        return;
+      }
       insertContent(dt);
     });
 
@@ -598,12 +722,15 @@
       setValue,
       focus: () => (mode === "visual" ? area : src).focus(),
       setPlaceholder,
+      // Підписи картинок прийшли пізніше за текст — показуємо їх.
+      refreshImages: () => { if (typeof hydrateImages === "function") hydrateImages(area); },
       // Вид тексту змінюється разом із видом матеріалу в повному редакторі.
       setKind(next) {
         const md = getValue();
         kind = next;
         toMd = makeConverter(kind);
         opts = { html: kind !== "prompt" };
+        paintImageBtn();
         current = md;
         dirty = false;
         if (mode === "visual") render();

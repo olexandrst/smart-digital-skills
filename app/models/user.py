@@ -50,6 +50,8 @@ class User(db.Model):
     storage_uid = db.Column(db.String, unique=True, default=_uid)
     # Рівень AI-зрілості з довідника (BR-9): користувач вказує його сам.
     maturity_level_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
+    # Коли рівень визначено востаннє — сторінка «Мій розвиток» показує дату.
+    maturity_assessed_at = db.Column(db.DateTime)
     department = db.Column(db.String)     # підрозділ — розріз для рекомендацій
     # Коли людина пройшла (або пропустила) знайомство з інтерфейсом. Порожньо —
     # гайд покажеться під час наступного входу, на будь-якому пристрої.

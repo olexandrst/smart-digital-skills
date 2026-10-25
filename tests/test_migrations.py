@@ -140,3 +140,67 @@ def test_owner_backfill_takes_whoever_published(tmp_path):
         assert owners == {1: "Менеджер Петро", 2: "Олена Коваль", 3: "Іван",
                           4: None, 5: "Марія"}
         assert conn.execute(text("SELECT owner FROM skills WHERE id = 1")).scalar() == "Олена Коваль"
+
+
+def test_manual_card_colours_reset(tmp_path):
+    """Фідбек, п. 2.2: колір картки — лише за видом, ручні кольори скидаються."""
+    from sqlalchemy import text
+    path = tmp_path / "accents.db"
+    _alembic(path, "upgrade", "a8d0c2e4f6b9", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        _insert(conn, "catalog_resources", name="Помаранчевий FAQ", status="published",
+                accent="amber")
+        _insert(conn, "catalog_resources", name="Типовий", status="published", accent=None)
+    _alembic(path, "upgrade", "head", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT COUNT(*) FROM catalog_resources WHERE accent IS NOT NULL")).scalar() == 0
+
+
+def test_ai_coffee_retired(tmp_path):
+    """Фідбек, п. 7: матеріал AI Coffee — в архів із записом у журналі, крок
+    маршруту й позначки його проходження — геть, колекцію приховано, згадку
+    прибрано з опису розділу. Решту не чіпаємо; повторний запуск нічого не дублює."""
+    from sqlalchemy import text
+    path = tmp_path / "coffee.db"
+    _alembic(path, "upgrade", "b3d5f7a9c1e4", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        _insert(conn, "users", id=1, username="u1")
+        _insert(conn, "catalog_sections", id=9, name="AI Community", is_active=1,
+                description="AI Coffee, AI Hub Weekly та зустрічі спільноти.")
+        _insert(conn, "catalog_folders", id=7, section_id=9, name="AI Coffee", is_active=1)
+        _insert(conn, "catalog_folders", id=8, section_id=9, name="AI Hub Weekly", is_active=1)
+        _insert(conn, "catalog_resources", id=1, name="AI Coffee: як приєднатися та що це дає",
+                status="published", is_featured=1, section_id=9, folder_id=7)
+        _insert(conn, "catalog_resources", id=2, name="Підсумки зустрічі", status="published",
+                section_id=9, folder_id=7)
+        _insert(conn, "catalog_resources", id=3, name="Як писати промпти", status="published")
+        _insert(conn, "learning_paths", id=1, name="Старт з AI", is_active=1)
+        _insert(conn, "learning_path_steps", id=10, path_id=1, position=0, resource_id=3)
+        _insert(conn, "learning_path_steps", id=11, path_id=1, position=1, resource_id=1)
+        _insert(conn, "learning_progress", user_id=1, path_id=1, step_id=10)
+        _insert(conn, "learning_progress", user_id=1, path_id=1, step_id=11)
+    _alembic(path, "upgrade", "head", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        rows = {r[0]: r[1:] for r in conn.execute(text(
+            "SELECT id, status, folder_id, is_featured FROM catalog_resources"))}
+        assert rows[1] == ("archived", 7, 0)
+        assert rows[2] == ("published", None, 0)       # з прихованої колекції — у розділ
+        assert rows[3][0] == "published"
+        assert conn.execute(text(
+            "SELECT id FROM learning_path_steps ORDER BY id")).scalars().all() == [10]
+        assert conn.execute(text(
+            "SELECT step_id FROM learning_progress")).scalars().all() == [10]
+        assert dict(conn.execute(text("SELECT id, is_active FROM catalog_folders")).all()) \
+            == {7: 0, 8: 1}
+        assert conn.execute(text("SELECT description FROM catalog_sections")).scalar() \
+            == "AI Hub Weekly та зустрічі спільноти."
+        log = conn.execute(text(
+            "SELECT from_status, to_status, note FROM review_logs WHERE item_id = 1")).all()
+        assert len(log) == 1 and log[0][:2] == ("published", "archived")
+    _alembic(path, "downgrade", "b3d5f7a9c1e4", tmp_path=tmp_path)
+    _alembic(path, "upgrade", "head", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM review_logs")).scalar() == 1

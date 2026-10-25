@@ -103,6 +103,36 @@ def test_profile_level_saved_and_next_level_suggested(client, app):
     assert data["next_hint"]
 
 
+def test_level_date_shown_on_my_development(client, app):
+    """«Мій розвиток» показує рівень і дату, коли його визначено; повторне
+    збереження того самого рівня дату не зсуває."""
+    _seed_terms(app)
+    h = _admin(client)
+    lv = _levels(client, h)
+    assert client.get("/api/catalog/maturity", headers=h).get_json()["assessed_at"] is None
+    client.patch("/api/catalog/profile", json={"maturity_level_id": lv["User"]}, headers=h)
+    first = client.get("/api/catalog/maturity", headers=h).get_json()["assessed_at"]
+    assert first and first.startswith("20")
+    client.patch("/api/catalog/profile", json={"maturity_level_id": lv["User"]}, headers=h)
+    assert client.get("/api/catalog/maturity", headers=h).get_json()["assessed_at"] == first
+
+
+def test_maturity_test_link_set_by_manager_only(client):
+    """Посилання на тест рівня вказує адміністратор; бачать його всі."""
+    h = _admin(client)
+    assert client.get("/api/catalog/settings", headers=h).get_json()["maturity_test_url"] == ""
+    bad = client.post("/api/catalog/settings", json={"maturity_test_url": "test.html"}, headers=h)
+    assert bad.status_code == 400
+    ok = client.post("/api/catalog/settings",
+                     json={"maturity_test_url": " https://forms.office.com/r/abc "}, headers=h)
+    assert ok.status_code == 200 and ok.get_json()["maturity_test_url"] == "https://forms.office.com/r/abc"
+    user = _login(client, "u1")
+    assert client.get("/api/catalog/settings",
+                      headers=user).get_json()["maturity_test_url"] == "https://forms.office.com/r/abc"
+    assert client.post("/api/catalog/settings", json={"maturity_test_url": ""},
+                       headers=user).status_code == 403
+
+
 def test_top_level_has_no_next(client, app):
     _seed_terms(app)
     h = _admin(client)

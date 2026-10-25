@@ -65,6 +65,39 @@ function watchTableFit(table) {
 function esc(s) { return (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function fmtSize(n) { if (n < 1024) return `${n} Б`; if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`; return `${(n / 1024 / 1024).toFixed(1)} МБ`; }
 
+// ---------- Зображення в тексті матеріалу (фідбек, п. 3.2) ----------
+// У тексті лежить постійне посилання на файл хабу, а <img> потребує
+// підписаного (тег не передає JWT). Підписи приходять зі списку файлів
+// картки або з відповіді на завантаження; hydrateImages підставляє їх.
+const FILE_SIGS = new Map();
+
+function registerFileSigs(list) {
+  (list || []).forEach(f => {
+    const url = f.preview_url || f.url;
+    if (f && f.id && url) FILE_SIGS.set(Number(f.id), url);
+  });
+}
+
+function hydrateImages(root) {
+  if (!root) return;
+  root.querySelectorAll("img[data-file]").forEach(img => {
+    const url = FILE_SIGS.get(Number(img.dataset.file));
+    if (url) { if (img.getAttribute("src") !== url) img.src = url; img.classList.remove("md-img-missing"); }
+    else if (!img.getAttribute("src")) img.classList.add("md-img-missing");
+  });
+}
+
+async function uploadInlineImage(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${API}/catalog/images`, {
+    method: "POST", headers: { Authorization: `Bearer ${state.token}` }, body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || "Не вдалося завантажити зображення");
+  registerFileSigs([data]);
+  return data;
+}
+
 // ---------- Санітизація HTML (Markdown + безпечний HTML у картках) ----------
 const _HTML_ALLOWED = new Set(["a","abbr","b","blockquote","br","caption","code","col",
   "colgroup","del","div","em","h1","h2","h3","h4","h5","h6","hr","i","img","ins","kbd",
@@ -73,12 +106,12 @@ const _HTML_ALLOWED = new Set(["a","abbr","b","blockquote","br","caption","code"
 const _HTML_DANGEROUS = new Set(["script","style","iframe","object","embed","form","input",
   "button","textarea","select","option","link","meta","base","svg","math","noscript"]);
 const _HTML_ATTR = { a: ["href","title","target","rel"],
-  img: ["src","alt","title","width","height"], "*": ["class"] };
+  img: ["src","alt","title","width","height","data-file"], "*": ["class"] };
 function _safeUrl(name, val) {
   const v = (val || "").trim().toLowerCase();
   if (name === "src")
     return v.startsWith("https://") || v.startsWith("http://") ||
-           v.startsWith("data:image/");
+           v.startsWith("data:image/") || /^\/api\/catalog\/files\/\d+\/preview(\?|$)/.test(v);
   return v.startsWith("https://") || v.startsWith("http://") ||
          v.startsWith("mailto:") || v.startsWith("#");
 }
@@ -103,6 +136,7 @@ function sanitizeHtml(html) {
         ((_HTML_ATTR[tag] || []).includes(nm) || (_HTML_ATTR["*"] || []).includes(nm));
       if (!ok) { node.removeAttribute(a.name); return; }
       if ((nm === "href" || nm === "src") && !_safeUrl(nm, a.value)) node.removeAttribute(a.name);
+      if (nm === "data-file" && !/^\d+$/.test(a.value)) node.removeAttribute(a.name);
     });
     if (tag === "a") { node.setAttribute("target", "_blank"); node.setAttribute("rel", "noopener noreferrer"); }
   };
@@ -124,6 +158,24 @@ function mdInline(s, opts = {}) {
   // Екрануємо «голі» & та < (сутності й HTML-теги лишаємо — їх санітизує sanitizeHtml).
   s = s.replace(/&(?![a-zA-Z]+;|#\d+;|#x[0-9a-fA-F]+;)/g, "&amp;")
        .replace(opts.html === false ? /</g : /<(?![a-zA-Z/!])/g, "&lt;");
+  // Картинка: своя (файл хабу — показується через підписане посилання, див.
+  // hydrateImages) або зовнішня за https. Готовий тег ховаємо в плейсхолдер,
+  // щоб «__» чи «*» у посиланні не стали жирним або курсивом.
+  const imgs = [];
+  s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (m, alt, u) => {
+    const a = alt.replace(/"/g, "&quot;");
+    const own = u.match(/^\/api\/catalog\/files\/(\d+)\/preview$/);
+    let tag = null;
+    if (own) {
+      const url = FILE_SIGS.get(Number(own[1]));
+      tag = `<img class="md-img" data-file="${own[1]}"${url ? ` src="${url}"` : ""} alt="${a}">`;
+    } else if (/^https?:\/\//i.test(u)) {
+      tag = `<img class="md-img" src="${u}" alt="${a}">`;
+    }
+    if (!tag) return alt;
+    imgs.push(tag);
+    return `\u0002${imgs.length - 1}\u0002`;
+  });
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
     (m, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
   s = s.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
@@ -134,6 +186,7 @@ function mdInline(s, opts = {}) {
   // Автопосилання «голих» URL (не всередині href="…" чи текст-посилання).
   s = s.replace(/(^|[^"'>=\](])((?:https?:\/\/)[^\s<>()"']+)/g,
     (m, pre, u) => `${pre}<a href="${u}" target="_blank" rel="noopener">${u}</a>`);
+  s = s.replace(/\u0002(\d+)\u0002/g, (m, idx) => imgs[+idx]);
   s = s.replace(/\u0000(\d+)\u0000/g, (m, idx) => `<code>${codes[+idx]}</code>`);
   s = s.replace(/\u0001(\d+)\u0001/g, (m, idx) => esc(escs[+idx]));
   return s;
@@ -255,7 +308,7 @@ $("#login-form").addEventListener("submit", async (e) => {
     $("#login-error").textContent = err.message;
   }
 });
-$("#logout-btn").addEventListener("click", logout);
+$("#logout-btn").addEventListener("click", () => logoutWithSurvey());
 
 // ---------- Тема (Темна glass / Світла / Material), лише всередині застосунку ----------
 const T_MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
@@ -406,6 +459,9 @@ async function showApp() {
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
   maybeStartTour();   // новому користувачу — знайомство з інтерфейсом
+  // Попередній сеанс скінчився закриттям вкладки — питаємо, як він минув.
+  // Знайомство з інтерфейсом має перевагу: воно вже позначило surveyShown.
+  if (startSession()) setTimeout(maybeAskSurvey, 1500);
 }
 
 // ---------- Навігація: режим → бічна панель → екран ----------
@@ -428,6 +484,7 @@ const GLYPH = {
   doc: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5V8h4"/><path d="M9 12.5h6M9 16h4"/>',
   bulb: '<path d="M9.6 18.2h4.8M10.6 21h2.8M12 3.2a6.2 6.2 0 0 1 3.6 11.2v1.4H8.4v-1.4A6.2 6.2 0 0 1 12 3.2Z"/>',
   chart: '<path d="M4.5 19.5V13m5 6.5V6m5 13.5v-4.5m5 4.5V9.5"/>',
+  grow: '<path d="M3.8 17.2 9.4 11.6l4 4 6.8-6.8"/><path d="M15.2 8.8h5v5"/>',
   pulse: '<path d="M3.5 12.5h4l2.5-6 4 12 2.5-6h4"/>',
   person: '<circle cx="12" cy="8" r="3.6"/><path d="M4.8 20.2c0-3.4 3.2-5.8 7.2-5.8s7.2 2.4 7.2 5.8"/>',
   ext: '<path d="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
@@ -739,6 +796,7 @@ function bindSideToggle() {
 
 // ---- Маршрутизація ----
 async function go(dest) {
+  if (dest === "hub:paths") dest = "hub:dev";   // колишні «Мої маршрути»
   const mode = destMode(dest);
   nav.lastIn = nav.lastIn || {};
   nav.lastIn[mode] = dest;
@@ -860,8 +918,9 @@ function hubSidebarHtml() {
     }
   }
 
+  // Рівень, наступний крок і маршрути — одна сторінка (фідбек, п. 5 і 8).
   html += `<div class="sb-group">Навчання</div>`
-    + sbItem("hub:paths", "Мої маршрути", "path", catalogState.paths.length || "");
+    + sbItem("hub:dev", "Мій розвиток", "grow");
   // Наповнення каталогу — особисте для кожного: лічильник — власні матеріали
   // й навички. Черга модерації менеджера — у «Керуванні».
   const mine = (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
@@ -925,7 +984,7 @@ function panelEl() {
 // Стандартна іконка навички (коли власну не задано) — фірмова «блискавка».
 const DEFAULT_SKILL_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>';
-const DESC_PREVIEW_LEN = 150;  // скільки символів опису показувати на плитці
+const DESC_PREVIEW_LEN = 120;  // скільки символів опису показувати на плитці
 
 // Види наповнення каталогу. Порядок = порядок фільтрів-пігулок.
 // Види матеріалів. Гліф — один стиль, одна товщина; відтінок робить тип
@@ -969,7 +1028,7 @@ const ICO_DOWNLOAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3
 
 let catalogState = {
   skills: [], resources: [], items: [], sections: [], folders: [], terms: [],
-  showcase: [], paths: [], recommendations: [], maturity: null, types: [],
+  paths: [], recommendations: [], maturity: null, types: [],
   favorites: { skill: new Set(), resource: new Set() },
   query: "", kind: "all", sectionId: null, folderId: null, favOnly: false,
   // Фільтри за атрибутами картки (BR-06). Порожній рядок = фільтр не активний.
@@ -1036,7 +1095,8 @@ function normResource(r) {
     item_type: "resource", kind: r.resource_type, id: r.id, name: r.name,
     description: r.description || "", category: r.category || "",
     author: r.author || "", version: r.version, tags: r.tags || [],
-    accent: r.accent || kindMeta(r.resource_type).accent || "red",
+    // Колір — лише за видом: однаковий вид завжди виглядає однаково (п. 2.2).
+    accent: kindMeta(r.resource_type).accent || "red",
     popularity: r.opens_count || 0, when: pubTime(r),
     featured: !!r.is_featured, iconUrl: null, emoji: r.icon_emoji || null,
     url: r.url, linkScope: r.link_scope, body: r.body,
@@ -1056,16 +1116,14 @@ function normResource(r) {
 // частиною рендера сторінки.
 async function ensureHubData(force = false) {
   if (catalogState.loaded && !force) return;
-  const [all, resources, favs, sections, folders, showcase] = await Promise.all([
+  const [all, resources, favs, sections, folders] = await Promise.all([
     api("/skills"),
     api("/catalog/resources"), api("/catalog/favorites"), api("/catalog/sections"),
     api("/catalog/folders"),
-    api("/catalog/showcase").catch(() => []),
   ]);
   // Види матеріалів — з довідника: доданий адміністратором вид має одразу
   // з'явитися і в перемикачі, і у фільтрах, без зміни коду (AKH-17).
   catalogState.types = await api("/catalog/terms?kind=material_type").catch(() => []);
-  catalogState.showcase = showcase || [];
   // Персональні блоки не мають затримувати каталог: якщо щось із них впаде,
   // сторінка все одно має відкритися.
   const [paths, recs, maturity, mineRes, mineSkills] = await Promise.all([
@@ -1137,11 +1195,11 @@ function applyHubScope(dest) {
 
 async function renderHubDest(dest) {
   await ensureHubData();
-  if (dest === "hub:paths") { buildSidebar(); return viewPaths(); }
+  if (dest === "hub:dev") { buildSidebar(); return viewDevelopment(); }
   if (dest === "hub:contrib") { buildSidebar(); return viewContributions(); }
   applyHubScope(dest);
   buildSidebar();
-  return viewCatalog();
+  return catalogState.scope === "home" ? viewHome() : viewCatalog();
 }
 
 function plural(n, one, few, many) {
@@ -1195,27 +1253,57 @@ function hubHead() {
   };
 }
 
+const PAGE_ACTS_HTML = `
+  <div class="page-acts">
+    <button class="ghost hidden" id="cat-my-content">Мій контент</button>
+    <button class="ghost" id="cat-idea">Поділитися ідеєю</button>
+    <button class="ghost" id="cat-add">${gsvg("plus")}Додати матеріал</button>
+    <button id="cat-assistant">Опишіть задачу</button>
+  </div>`;
+
+function bindPageActs() {
+  $("#cat-assistant").addEventListener("click", () => openAssistant());
+  $("#cat-idea").addEventListener("click", () => openIdeaForm());
+  $("#cat-add").addEventListener("click", () => openContentWizard());
+  paintMyContentButton();
+}
+
+// Головна (фідбек тестування, п. 5 і 8): привітання з рівнем під ним і два
+// блоки — «Рекомендовано вам» і «Нещодавно додані». Каталог із фільтрами живе
+// в «Матеріалах», рівень і маршрути — на сторінці «Мій розвиток». Пошук із
+// головної веде в «Матеріали»: сітки, яку він звужував би, тут немає.
+const RECENT_ADDED_LIMIT = 8;
+
+async function viewHome() {
+  const head = hubHead();
+  $("#view").innerHTML = `
+    <div class="catalog home">
+      <div class="page-head">
+        <div class="page-head-txt">
+          <h1 class="page-h1 page-h1-lg">${head.title}</h1>
+          <p class="page-sub home-level hidden" id="home-level"></p>
+        </div>
+        ${PAGE_ACTS_HTML}
+      </div>
+      <div class="cat-personal" id="cat-personal"></div>
+    </div>`;
+  paintCatalog();
+  bindPageActs();
+}
+
 async function viewCatalog() {
   const head = hubHead();
-  const home = catalogState.scope === "home";
   const view = $("#view");
   view.innerHTML = `
     <div class="catalog">
       <div class="page-head">
         <div class="page-head-txt">
           ${head.crumb ? `<div class="page-crumb">${head.crumb}</div>` : ""}
-          <h1 class="page-h1${home ? " page-h1-lg" : ""}">${head.title}</h1>
+          <h1 class="page-h1">${head.title}</h1>
           <p class="page-sub">${esc(head.sub)}</p>
         </div>
-        <div class="page-acts">
-          <button class="ghost hidden" id="cat-my-content">Мій контент</button>
-          <button class="ghost" id="cat-idea">Поділитися ідеєю</button>
-          <button class="ghost" id="cat-add">${gsvg("plus")}Додати матеріал</button>
-          <button id="cat-assistant">Опишіть задачу</button>
-        </div>
+        ${PAGE_ACTS_HTML}
       </div>
-      <div class="cat-personal" id="cat-personal"></div>
-      <div class="cat-showcase" id="cat-showcase"></div>
       <div class="cat-toolbar">
         <div class="cat-kinds" id="cat-kinds"></div>
         <div class="cat-tools">
@@ -1234,12 +1322,7 @@ async function viewCatalog() {
     </div>`;
 
   paintCatalog();
-  maybeAskSurvey();
-
-  $("#cat-assistant").addEventListener("click", () => openAssistant());
-  $("#cat-idea").addEventListener("click", () => openIdeaForm());
-  $("#cat-add").addEventListener("click", () => openContentWizard());
-  paintMyContentButton();
+  bindPageActs();
   bindFilterPopover();
 }
 
@@ -1260,29 +1343,99 @@ function bindFilterPopover() {
   document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
 }
 
-// Навчальні маршрути окремою сторінкою — пункт бічної панелі веде сюди.
-async function viewPaths() {
-  let paths = [];
-  try { paths = await api("/paths"); } catch (err) { paths = []; }
+// «Мій розвиток» (фідбек тестування, п. 5 і 8): рівень і дата, тест рівня,
+// наступний крок і навчальні маршрути — окремою сторінкою, щоб головна
+// лишалася короткою. Поки тест не підключено, рівень людина вказує сама;
+// кнопка тесту з'являється, щойно адміністратор вкаже посилання на нього.
+async function viewDevelopment() {
+  const [paths, settings, maturity] = await Promise.all([
+    api("/paths").catch(() => []),
+    api("/catalog/settings").catch(() => ({})),
+    api("/catalog/maturity").catch(() => catalogState.maturity),
+  ]);
+  catalogState.maturity = maturity;
+  const m = maturity;
+  const testUrl = (settings && settings.maturity_test_url) || "";
+  const test = (label) => testUrl
+    ? `<a class="btn" href="${esc(testUrl)}" target="_blank" rel="noopener">${esc(label)}${gsvg("ext", "btn-ext")}</a>`
+    : "";
+
+  const ladder = m && m.levels.length ? `<ol class="dev-ladder">${m.levels.map((l, i) => {
+    const at = m.current ? m.levels.findIndex(x => x.id === m.current.id) : -1;
+    const cls = i === at ? "on" : i < at ? "done" : "";
+    return `<li class="${cls}" title="${esc(l.description || "")}"><span>${esc(l.name)}</span></li>`;
+  }).join("")}</ol>` : "";
+
+  const levelHtml = !m ? `<p class="muted">Не вдалося завантажити рівні. Оновіть сторінку.</p>`
+    : m.current ? `
+      <div class="dev-level-main">
+        <span class="dev-eyebrow">Ваш рівень</span>
+        <b class="dev-level-name">${esc(m.current.name)}</b>
+        <p class="muted">${esc(m.current.description || "")}</p>
+        ${m.assessed_at ? `<span class="dev-date">Визначено ${esc(dateUa(m.assessed_at))}</span>` : ""}
+      </div>
+      <div class="dev-level-acts">
+        ${test("Пройти тест")}
+        <button class="ghost" id="dev-change">Змінити рівень</button>
+      </div>` : `
+      <div class="dev-level-main">
+        <span class="dev-eyebrow">Ваш рівень</span>
+        <b class="dev-level-name">Ще не визначено</b>
+        <p class="muted">Визначте рівень — і хаб почне підбирати матеріали саме під нього.</p>
+      </div>
+      <div class="dev-level-acts">
+        ${testUrl ? `${test("Визначити мій рівень і пройти тест")}
+          <button class="ghost" id="dev-change">Вказати самостійно</button>`
+          : `<button id="dev-change">Визначити мій рівень</button>`}
+      </div>`;
+
+  const nextHtml = !m || !m.current ? "" : m.next
+    ? `<p class="lvl-next dev-next"><b>Наступний крок — ${esc(m.next.name)}:</b> ${esc(m.next_hint || "")}</p>`
+    : `<p class="lvl-next dev-next">Ви на найвищому рівні — тепер ваші рішення стають
+       матеріалами для інших: поділіться ними в каталозі.</p>`;
+  const itemsHtml = !m || !m.current || !m.items.length ? "" : `
+    <section class="show-block">
+      <div class="show-head"><div>
+        <h2>Матеріали для рівня ${esc(m.current.name)}</h2>
+        <p class="muted">Те, що варто опанувати зараз.</p>
+      </div></div>
+      <div class="show-row" id="dev-items"></div>
+    </section>`;
+
   $("#view").innerHTML = `
     <div class="page-head">
       <div class="page-head-txt">
-        <h1 class="page-h1">Навчальні маршрути</h1>
-        <p class="page-sub">Впорядкована послідовність матеріалів — від простого до складного.</p>
+        <h1 class="page-h1">Мій розвиток</h1>
+        <p class="page-sub">Ваш рівень роботи з AI, наступний крок і навчальні маршрути.</p>
       </div>
     </div>
-    ${paths.length ? `<div class="path-list">${paths.map(pt => `
-      <button class="path-row-item" data-path="${pt.id}">
-        <span class="path-ic">${gsvg("path")}</span>
-        <span class="path-body">
-          <b>${esc(pt.name)}${pt.is_starter ? ` <i class="path-tag">для старту</i>` : ""}</b>
-          <i>${esc(pt.description || "")}</i>
-          <span class="path-bar"><span style="width:${pt.progress_pct}%"></span></span>
-        </span>
-        <span class="path-pct">${pt.steps_done}/${pt.steps_total}</span>
-      </button>`).join("")}</div>`
-      : `<div class="card"><p class="muted">Маршрутів ще немає.</p></div>`}`;
-  document.querySelectorAll("[data-path]").forEach(b =>
+    <div class="dev">
+      <section class="dev-level">${levelHtml}${ladder}${nextHtml}</section>
+      ${itemsHtml}
+      <section class="show-block">
+        <div class="show-head"><div><h2>Навчальні маршрути</h2>
+          <p class="muted">Впорядкована послідовність матеріалів — від простого до складного.</p></div></div>
+        ${paths.length ? `<div class="path-list">${paths.map(pt => `
+          <button class="path-row-item" data-path="${pt.id}">
+            <span class="path-ic">${gsvg("path")}</span>
+            <span class="path-body">
+              <b>${esc(pt.name)}${pt.is_starter ? ` <i class="path-tag">для старту</i>` : ""}</b>
+              <i>${esc(pt.description || "")}</i>
+              <span class="path-bar"><span style="width:${pt.progress_pct}%"></span></span>
+            </span>
+            <span class="path-pct">${pt.steps_done}/${pt.steps_total}</span>
+          </button>`).join("")}</div>`
+          : `<div class="card"><p class="muted">Маршрутів ще немає.</p></div>`}
+      </section>
+    </div>`;
+
+  if (m && m.current && m.items.length) {
+    const row = $("#dev-items");
+    m.items.forEach(r => row.appendChild(catalogCard(normResource(r))));
+  }
+  const change = $("#dev-change");
+  if (change) change.addEventListener("click", () => openMaturityPicker());
+  document.querySelectorAll("#view [data-path]").forEach(b =>
     b.addEventListener("click", () => openPath(Number(b.dataset.path))));
 }
 
@@ -1402,110 +1555,60 @@ function renderKindPills() {
 // Усі вони залежать одне від одного (лічильники рахуються за поточним зрізом),
 // тому окремі виклики легко розсинхронізувати.
 function paintCatalog() {
+  renderHomeLevel();
   renderPersonal();
-  renderShowcase();
   renderKindPills();
   renderCatFilters();
   renderActiveFilters();
   renderCatalogGrid();
 }
 
-// Чи дивиться користувач каталог «як є» — без жодного звуження.
-// Вітрина має сенс лише на чистій головній: над відфільтрованим списком це шум.
-function catalogIsPristine() {
-  return catalogState.scope === "home"
-    && catalogState.sectionId === null && catalogState.folderId === null
-    && catalogState.kind === "all" && !catalogState.favOnly
-    && !catalogState.query.trim()
-    && Object.values(catalogState.filters).every(v => !v);
+// Рядок під привітанням на головній: де я зараз і вхід у «Мій розвиток».
+// Видимий рівень підштовхує розвиватися (фідбек, п. 5).
+function renderHomeLevel() {
+  const box = $("#home-level");
+  if (!box) return;
+  const m = catalogState.maturity;
+  box.classList.toggle("hidden", !m);
+  if (!m) return;
+  box.innerHTML = m.current
+    ? `<span>Ваш рівень: <b>${esc(m.current.name)}</b></span>
+       <button class="link-btn" id="home-dev">Мій розвиток →</button>`
+    : `<span>Рівень роботи з AI ще не визначено.</span>
+       <button class="link-btn" id="home-dev">Визначити рівень →</button>`;
+  box.querySelector("#home-dev").addEventListener("click", () => go("hub:dev"));
 }
 
-// Персональні блоки головної: рівень зрілості, маршрути, рекомендації.
-// Показуємо їх лише на чистій головній — як і вітрину.
+// Блоки головної: «Рекомендовано вам» і «Нещодавно додані». Те, що вже є
+// серед рекомендацій, у новинках не повторюємо.
 function renderPersonal() {
   const box = $("#cat-personal");
   if (!box) return;
-  const show = catalogIsPristine();
-  const m = catalogState.maturity;
-  const paths = catalogState.paths;
   const recs = catalogState.recommendations;
-  box.classList.toggle("hidden", !show);
-  if (!show) { box.innerHTML = ""; return; }
+  const recIds = new Set(recs.map(r => r.id));
+  const fresh = catalogState.items
+    .filter(i => !(i.item_type === "resource" && recIds.has(i.id)))
+    .sort((a, b) => b.when - a.when)
+    .slice(0, RECENT_ADDED_LIMIT);
 
-  const levelCard = !m ? "" : (m.current ? `
-    <section class="show-block">
-      <div class="show-head">
-        <div>
-          <h2>Ваш рівень: ${esc(m.current.name)}</h2>
-          <p class="muted">${esc(m.current.description || "")}</p>
-        </div>
-        <button class="ghost-act" id="lvl-change">Змінити рівень</button>
-      </div>
-      ${m.next ? `<p class="lvl-next"><b>Наступний крок — ${esc(m.next.name)}:</b>
-        ${esc(m.next_hint || "")}</p>` : `<p class="lvl-next">Ви на найвищому рівні —
-        тепер ваші рішення стають матеріалами для інших.</p>`}
-      ${m.items.length ? `<div class="show-row" id="lvl-row"></div>` : ""}
-    </section>` : `
-    <div class="nudge lvl-empty">
-      ${gsvg("spark", "nudge-ic")}
-      <div class="nudge-txt"><b>Який у вас рівень роботи з AI?</b>
-        <i>Вкажіть рівень — і хаб почне підбирати матеріали під нього.</i></div>
-      <button class="ghost" id="lvl-change">Вказати рівень</button>
-    </div>`);
-
-  const pathCard = !paths.length ? "" : `
-    <section class="show-block">
-      <div class="show-head">
-        <div><h2>Ваші маршрути</h2>
-          <p class="muted">Продовжуйте з того місця, де зупинилися.</p></div>
-        <button class="ghost-act" id="paths-all">Усі маршрути</button>
-      </div>
-      <div class="path-row">${paths.map(p => `
-        <button class="path-tile" data-path="${p.id}">
-          <span class="path-ic">${gsvg("path")}</span>
-          <span class="path-body">
-            <b>${esc(p.name)}</b>
-            <i>${p.steps_done} з ${p.steps_total} кроків</i>
-            <span class="path-bar"><span style="width:${p.progress_pct}%"></span></span>
-          </span>
-          <span class="path-pct">${p.progress_pct}%</span>
-        </button>`).join("")}</div>
-    </section>`;
-
-  const startCard = paths.length ? "" : `
-    <div class="nudge">
-      ${gsvg("path", "nudge-ic")}
-      <div class="nudge-txt"><b>Навчальні маршрути</b>
-        <i>Впорядкована послідовність матеріалів — від простого до складного.</i></div>
-      <button class="ghost" id="paths-all">Переглянути</button>
-    </div>`;
-
-  const recCard = !recs.length ? "" : `
+  box.innerHTML = (recs.length ? `
     <section class="show-block">
       <div class="show-head">
         <div><h2>Рекомендовано вам</h2>
           <p class="muted">Дібрано за вашим рівнем, підрозділом та тим, що ви вже дивилися.</p></div>
       </div>
       <div class="show-row" id="rec-row"></div>
+    </section>` : "") + `
+    <section class="show-block">
+      <div class="show-head">
+        <div><h2>Нещодавно додані</h2>
+          <p class="muted">Нові матеріали каталогу — найсвіжіші першими.</p></div>
+        <button class="ghost-act" id="home-all">Усі матеріали</button>
+      </div>
+      ${fresh.length ? `<div class="show-row" id="fresh-row"></div>`
+        : `<p class="muted">Каталог поки що порожній.</p>`}
     </section>`;
 
-  // Порядок — як шлях людини: де я (рівень), куди далі (наступний крок — у
-  // блоці рівня), як туди дійти (маршрути), і лише потім добірка. Сусідні
-  // підказки стають в один рядок, але порядку не змінюють (фідбек, п. 5).
-  const isNudge = x => !!x && x.indexOf('class="nudge') > -1;
-  const parts = [];
-  [levelCard, pathCard || startCard, recCard].filter(Boolean).forEach(x => {
-    const prev = parts[parts.length - 1];
-    if (isNudge(x) && prev && prev.nudge) prev.html.push(x);
-    else parts.push({ nudge: isNudge(x), html: [x] });
-  });
-  box.innerHTML = parts.map(p => p.nudge
-    ? `<div class="nudges">${p.html.join("")}</div>` : p.html.join("")).join("");
-
-  if (m && m.current && m.items.length) {
-    const row = box.querySelector("#lvl-row");
-    m.items.forEach(r => row.appendChild(catalogCard(normResource(r))));
-  }
   if (recs.length) {
     const row = box.querySelector("#rec-row");
     recs.forEach(r => {
@@ -1530,13 +1633,9 @@ function renderPersonal() {
         } catch (err) { toast(err.message, "err"); }
       }));
   }
-
-  const lvlBtn = box.querySelector("#lvl-change");
-  if (lvlBtn) lvlBtn.addEventListener("click", () => openMaturityPicker());
-  const allBtn = box.querySelector("#paths-all");
-  if (allBtn) allBtn.addEventListener("click", () => go("hub:paths"));
-  box.querySelectorAll("[data-path]").forEach(b =>
-    b.addEventListener("click", () => openPath(Number(b.dataset.path))));
+  const freshRow = box.querySelector("#fresh-row");
+  if (freshRow) fresh.forEach(i => freshRow.appendChild(catalogCard(i)));
+  box.querySelector("#home-all").addEventListener("click", () => go("hub:all"));
 }
 
 // Вибір власного рівня зрілості.
@@ -1568,49 +1667,8 @@ function openMaturityPicker() {
           (await api("/catalog/recommendations").catch(() => ({ items: [] }))).items || [];
         toast("Рівень збережено");
         close();
-        renderPersonal();
+        if (nav.dest === "hub:dev") viewDevelopment(); else paintCatalog();
       } catch (err) { toast(err.message, "err"); }
-    }));
-}
-
-// Вітрина головної: стан бази знань у чотирьох блоках (BR-01).
-function renderShowcase() {
-  const box = $("#cat-showcase");
-  if (!box) return;
-  const blocks = catalogIsPristine() ? catalogState.showcase : [];
-  box.classList.toggle("hidden", !blocks.length);
-  if (!blocks.length) { box.innerHTML = ""; return; }
-
-  box.innerHTML = blocks.map((b, bi) => `
-    <section class="show-block">
-      <div class="show-head">
-        <div>
-          <h2>${esc(b.title)}${b.manager_only
-            ? ` <span class="show-only">лише для менеджерів</span>` : ""}</h2>
-          <p class="muted">${esc(b.hint || "")}</p>
-        </div>
-        <button class="ghost-act" data-show-all="${bi}">${
-          b.key === "needs_update" ? "Показати всі" : "У каталог"}</button>
-      </div>
-      <div class="show-row" data-show-row="${bi}"></div>
-    </section>`).join("");
-
-  blocks.forEach((b, bi) => {
-    const row = box.querySelector(`[data-show-row="${bi}"]`);
-    b.items.forEach(r => row.appendChild(catalogCard(normResource(r))));
-  });
-
-  box.querySelectorAll("[data-show-all]").forEach(btn =>
-    btn.addEventListener("click", async () => {
-      const block = blocks[Number(btn.dataset.showAll)];
-      // Сітка «Матеріалів» уже впорядкована «рекомендовані → популярні →
-      // нові», тож для трьох блоків достатньо перейти до неї. Блоку
-      // «Потребують оновлення» відповідає фільтр за статусом.
-      await go("hub:all");
-      if (block.key === "needs_update") {
-        catalogState.filters.status = STATUS_LABELS.needs_update;
-        paintCatalog();
-      }
     }));
 }
 
@@ -1886,6 +1944,29 @@ function ratingHtml(it) {
     ${ICO_STAR}<b>${it.ratingAvg}</b><i>(${it.ratingCount})</i></span>`;
 }
 
+// Тег — кнопка: клік показує всі матеріали з цим тегом (фідбек, п. 8.4).
+function tagButton(tag) {
+  return `<button type="button" class="mdc-tag mdc-tag-link" data-tag="${esc(tag)}"
+    title="Усі матеріали з тегом «${esc(tag)}»">${esc(tag)}</button>`;
+}
+
+function bindTagButtons(root, beforeGo) {
+  root.querySelectorAll("[data-tag]").forEach(b => {
+    b.addEventListener("keydown", (e) => e.stopPropagation());
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (beforeGo) beforeGo();
+      showTag(b.dataset.tag);
+    });
+  });
+}
+
+async function showTag(tag) {
+  await go("hub:all");
+  catalogState.filters.tag = tag;
+  paintCatalog();
+}
+
 function catalogCard(it) {
   const kind = kindMeta(it.kind);
   const desc = it.description || "";
@@ -1897,10 +1978,9 @@ function catalogCard(it) {
   if (it.status === "needs_update") {
     tags.push(`<span class="mdc-tag stale" title="Матеріал очікує актуалізації">Потребує оновлення</span>`);
   }
-  if (it.category) tags.push(`<span class="mdc-tag">${esc(it.category)}</span>`);
   if (it.linkScope === "internal") tags.push(`<span class="mdc-tag">Внутрішній</span>`);
-  (it.tags || []).slice(0, 2).forEach(t =>
-    tags.push(`<span class="mdc-tag">${esc(t)}</span>`));
+  // Три теги матеріалу; клік відкриває всі матеріали з тим самим тегом (фідбек, п. 8).
+  (it.tags || []).slice(0, 3).forEach(t => tags.push(tagButton(t)));
 
   const meta = it.kind === "skill"
     ? `Версія ${esc(it.version)} · ${esc(it.author || "—")}`
@@ -1922,7 +2002,10 @@ function catalogCard(it) {
     </div>
   </article>`);
 
+  bindTagButtons(card);
   const favBtn = card.querySelector(".mdc-fav");
+  // Enter на кнопці всередині картки не має відкривати саму картку.
+  favBtn.addEventListener("keydown", (e) => e.stopPropagation());
   favBtn.addEventListener("click", async (e) => {
     e.stopPropagation();
     try {
@@ -2458,8 +2541,16 @@ async function openContentWizard(opts = {}) {
         placeholder: bodyPh, label: b.body_label || "Текст",
         onChange: (md) => { st.body = md; upd(md); },
         onFiles: (files) => takeTextFile(files[0]),
+        onImage: uploadInlineImage,
       });
       bodyEditor.el.id = "wiz-editor";
+      // Редагування наявного матеріалу: підписи для його картинок.
+      if (existing && existing.id) {
+        api(`/catalog/resources/${existing.id}/files`).then(files => {
+          registerFileSigs(files.filter(f => f.source === "inline"));
+          if (bodyEditor) bodyEditor.refreshImages();
+        }).catch(() => {});
+      }
       holder.replaceWith(bodyEditor.el);
       upd(st.body);
       bindDrop(takeTextFile);
@@ -2526,6 +2617,7 @@ async function openContentWizard(opts = {}) {
       }
       if (bodyEditor.getValue().trim()
           && !confirm("У редакторі вже є текст. Замінити його текстом із файлу?")) return;
+      registerFileSigs(data.images);   // картинки з .docx — уже в тексті
       bodyEditor.setValue(data.text);
       st.body = data.text;
       // Оригінал Word/PDF лишаємо при картці: витягнутий текст втрачає оформлення.
@@ -3245,9 +3337,9 @@ async function openPath(pathId) {
       try {
         const data = await api(`/paths/${pathId}/steps/${step.id}/complete`,
                                { method: "POST", body: { done: !step.done } });
-        // Маршрути на головній теж мають оновитись, інакше прогрес розійдеться.
+        // Сторінка «Мій розвиток» теж має оновитись, інакше прогрес розійдеться.
         catalogState.paths = await api("/paths?mine=1").catch(() => catalogState.paths);
-        renderPersonal();
+        if (nav.dest === "hub:dev") viewDevelopment();
         refresh(data);
       } catch (err) { toast(err.message, "err"); }
     }));
@@ -3344,33 +3436,87 @@ function renderAssistantAnswer(out, data, close) {
 }
 
 // ------------------ Опитування задоволеності (BR-16) ------------------
-// Показуємо ненав'язливо: смужка внизу екрана, яку можна закрити одним кліком.
-// Питаємо не частіше за налаштований інтервал і лише після кількох переглядів.
+// Питаємо тоді, коли людина закінчує роботу (фідбек тестування, п. 6): після
+// кнопки «Вийти» — перед самим виходом, а якщо вкладку просто закрили — на
+// початку наступного сеансу («Як вам минулий сеанс?»). Показати власну форму
+// в момент закриття вкладки браузер не дозволяє. Чи час питати і про що,
+// вирішує сервер: щонайбільше раз на 30 днів і лише тих, хто вже відкривав
+// матеріали.
 
 let surveyShown = false;   // одне опитування на завантаження сторінки
 
+// Сеанс — це робота у вкладці. Остання ознака життя сеансу лежить у
+// localStorage й оновлюється щохвилини, кнопка «Вийти» її прибирає. Нова
+// вкладка, що бачить ознаку, старішу за пів години, знає: попередній сеанс
+// скінчився закриттям вкладки. Свіжа ознака означає, що поруч відкрита
+// інша вкладка або її щойно перезавантажили — тоді не питаємо.
+const SESSION_KEY = "hub-session";
+const SESSION_TAB = "hub-session-tab";
+const SESSION_GAP = 30 * 60 * 1000;
+let sessionTimer = null;
+
+function sessionMark() {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify({ user: state.user.id, at: Date.now() })); }
+  catch (e) { /* без сховища опитування просто не з'явиться */ }
+}
+
+// Початок роботи у вкладці. true — попередній сеанс цього користувача
+// закінчився закриттям вкладки, а не кнопкою «Вийти».
+function startSession() {
+  let prev = null, newTab = false;
+  try {
+    prev = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    newTab = !sessionStorage.getItem(SESSION_TAB);
+    sessionStorage.setItem(SESSION_TAB, "1");
+  } catch (e) { /* ні */ }
+  sessionMark();
+  clearInterval(sessionTimer);
+  sessionTimer = setInterval(() => { if (state.user) sessionMark(); }, 60 * 1000);
+  return newTab && !!prev && prev.user === state.user.id && Date.now() - prev.at > SESSION_GAP;
+}
+
+function endSession() {
+  clearInterval(sessionTimer);
+  try { localStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(SESSION_TAB); }
+  catch (e) { /* ні */ }
+}
+
+async function surveyDue() {
+  try { return (await api("/catalog/survey/due")).due; }
+  catch (e) { return null; }       // опитування не має заважати роботі
+}
+
+function surveyScaleHtml(due) {
+  const scale = [];
+  for (let i = due.min; i <= due.max; i++) {
+    scale.push(`<button class="sv-score" data-score="${i}">${i}</button>`);
+  }
+  return `<div class="sv-title">${esc(due.title)}</div>
+    <div class="sv-scale">${scale.join("")}</div>
+    <div class="sv-ends"><span>${esc(due.low)}</span><span>${esc(due.high)}</span></div>`;
+}
+
+const SURVEY_COMMENT_HTML = `
+  <div class="sv-title">Дякуємо! Що варто покращити?</div>
+  <div class="sv-comment">
+    <input type="text" id="sv-text" maxlength="2000"
+           placeholder="Необов'язково — але дуже допомагає">
+    <button class="mdc-act" id="sv-send">Надіслати</button>
+  </div>`;
+
+// Новий сеанс після закритої вкладки: смужка внизу, яку можна закрити.
 async function maybeAskSurvey() {
   if (surveyShown || !state.token) return;
-  let due;
-  try { due = (await api("/catalog/survey/due")).due; }
-  catch (e) { return; }        // опитування не має заважати роботі
-  if (!due) return;
+  const due = await surveyDue();
+  if (!due || surveyShown) return;
   surveyShown = true;
   renderSurveyBar(due);
 }
 
 function renderSurveyBar(due) {
-  const scale = [];
-  for (let i = due.min; i <= due.max; i++) {
-    scale.push(`<button class="sv-score" data-score="${i}">${i}</button>`);
-  }
   const bar = el(`<div class="survey-bar" role="dialog" aria-label="Опитування">
       <button class="sv-close" aria-label="Закрити">×</button>
-      <div class="sv-body">
-        <div class="sv-title">${esc(due.title)}</div>
-        <div class="sv-scale">${scale.join("")}</div>
-        <div class="sv-ends"><span>${esc(due.low)}</span><span>${esc(due.high)}</span></div>
-      </div>
+      <div class="sv-body"><div class="sv-lead">Як вам минулий сеанс?</div>${surveyScaleHtml(due)}</div>
     </div>`);
   document.body.appendChild(bar);
 
@@ -3387,17 +3533,11 @@ function renderSurveyBar(due) {
     b.addEventListener("click", () => {
       const score = Number(b.dataset.score);
       // Після оцінки пропонуємо коментар — але не вимагаємо його.
-      bar.querySelector(".sv-body").innerHTML = `
-        <div class="sv-title">Дякуємо! Що варто покращити?</div>
-        <div class="sv-comment">
-          <input type="text" id="sv-text" maxlength="2000"
-                 placeholder="Необов'язково — але дуже допомагає">
-          <button class="mdc-act" id="sv-send">Надіслати</button>
-        </div>`;
+      bar.querySelector(".sv-body").innerHTML = SURVEY_COMMENT_HTML;
       const input = bar.querySelector("#sv-text");
       input.focus();
       const send = () => finish({ kind: due.kind, score,
-                                  comment: input.value, context: "catalog" });
+                                  comment: input.value, context: "session" });
       bar.querySelector("#sv-send").addEventListener("click", send);
       input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") send(); });
       // Закриття після оцінки все одно зберігає саму оцінку.
@@ -3405,6 +3545,62 @@ function renderSurveyBar(due) {
         el(`<button class="sv-close" aria-label="Закрити">×</button>`));
       bar.querySelector(".sv-close").addEventListener("click", send);
     }));
+}
+
+// «Вийти»: якщо час питати — одне питання перед виходом. Вихід відбувається
+// в будь-якому разі: оцінка, коментар, «Пропустити» чи хрестик ведуть далі.
+async function logoutWithSurvey() {
+  const menu = $("#me-menu");
+  if (menu) menu.classList.add("hidden");
+  const due = surveyShown ? null : await surveyDue();
+  if (due) {
+    surveyShown = true;
+    await askBeforeLogout(due);
+  }
+  endSession();
+  logout();
+}
+
+function askBeforeLogout(due) {
+  return new Promise(resolve => {
+    let score = null, sent = false;
+    const answer = (comment) => score == null
+      ? { kind: due.kind, dismissed: true }
+      : { kind: due.kind, score, comment: comment || "", context: "logout" };
+    const send = async (body) => {
+      if (sent) return;
+      sent = true;
+      try { await api("/catalog/survey", { method: "POST", body }); }
+      catch (e) { /* відповідь не критична — вихід важливіший */ }
+      close(true);
+      resolve();
+    };
+    const { overlay, close } = catalogModal(`
+      <div class="modal sm-modal sv-modal" role="dialog" aria-label="Опитування перед виходом">
+        <div class="modal-head">
+          <h2>Перш ніж вийти</h2>
+          <button class="modal-x" aria-label="Закрити">×</button>
+        </div>
+        <div class="sv-body">${surveyScaleHtml(due)}</div>
+        <div class="sv-foot"><button class="ghost" id="sv-skip">Пропустити й вийти</button></div>
+      </div>`, { beforeClose: () => { send(answer()); return false; } });
+
+    overlay.querySelectorAll(".sv-score").forEach(b =>
+      b.addEventListener("click", () => {
+        score = Number(b.dataset.score);
+        overlay.querySelector(".sv-body").innerHTML = SURVEY_COMMENT_HTML;
+        const input = overlay.querySelector("#sv-text");
+        input.focus();
+        overlay.querySelector("#sv-send").textContent = "Надіслати й вийти";
+        overlay.querySelector("#sv-send").addEventListener("click", () => send(answer(input.value)));
+        input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") send(answer(input.value)); });
+        overlay.querySelector("#sv-skip").textContent = "Вийти без коментаря";
+      }));
+    overlay.querySelector("#sv-skip").addEventListener("click", () => {
+      const input = overlay.querySelector("#sv-text");
+      send(answer(input ? "" : undefined));
+    });
+  });
 }
 
 // ---------------------- Воронка ідей (BR-15, FR-10) ----------------------
@@ -3638,6 +3834,11 @@ async function renderResourceFiles(overlay, r) {
   let files = [];
   try { files = await api(`/catalog/resources/${r.id}/files`); }
   catch (e) { box.innerHTML = ""; return; }
+  // Картинки з тексту показані в самому тексті — у вкладеннях їх немає.
+  registerFileSigs(files.filter(f => f.source === "inline"));
+  const doc = overlay.querySelector(".md-doc");
+  hydrateImages(doc);
+  files = files.filter(f => f.source !== "inline");
   paintMedia(overlay, files);
   if (!files.length && !mayEdit) { box.innerHTML = ""; return; }
 
@@ -3732,8 +3933,7 @@ async function openResourceModal(resourceId) {
         <a class="md-url" href="${esc(it.url)}" target="_blank" rel="noopener">${esc(it.url)}</a>
       </div>`;
 
-  const tags = (it.tags || []).map(t =>
-    `<span class="mdc-tag"><i class="md-dot"></i>${esc(t)}</span>`).join("");
+  const tags = (it.tags || []).map(tagButton).join("");
 
   const dateUa = (iso) => iso ? new Date(iso).toLocaleDateString("uk-UA") : "";
   const attr = (label, value) => value
@@ -3801,6 +4001,15 @@ async function openResourceModal(resourceId) {
       ${commentsBlockHtml()}
     </div>`);
 
+  bindTagButtons(overlay.querySelector(".sm-meta"), () => close(true));
+  hydrateImages(overlay);
+  overlay.querySelectorAll(".md-doc").forEach(doc => doc.addEventListener("click", (e) => {
+    const img = e.target.closest("img.md-img[src]");
+    if (!img) return;
+    const all = [...doc.querySelectorAll("img.md-img[src]")];
+    openLightbox(all.map(x => ({ preview_url: x.src, filename: x.alt || "Зображення" })),
+                 all.indexOf(img));
+  }));
   bindComments(overlay, `/catalog/resources/${it.id}/feedback`, { onRated: (d) => {
     overlay.querySelector("#res-rating").innerHTML = d.rating_count
       ? `Оцінка: <b>${d.rating_avg}</b> з 5 (${d.rating_count})` : "";
@@ -5027,10 +5236,11 @@ function openTermMerge(term, peers) {
 async function renderPathsManage() {
   const panel = panelEl();
   panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
-  let paths, resources, terms;
+  let paths, resources, terms, settings;
   try {
-    [paths, resources, terms] = await Promise.all([
+    [paths, resources, terms, settings] = await Promise.all([
       api("/paths"), api("/catalog/resources"), api("/catalog/terms?kind=maturity"),
+      api("/catalog/settings").catch(() => ({})),
     ]);
   } catch (err) {
     panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
@@ -5064,8 +5274,26 @@ async function renderPathsManage() {
           </div>
         </div>`).join("") : `<p class="muted" style="margin-top:12px">Маршрутів ще немає.</p>`}
       </div>
+    </div>
+    <div class="card">
+      <h2>Тест рівня AI-обізнаності</h2>
+      <p class="muted">Посилання з'явиться кнопкою «Пройти тест» на сторінці «Мій розвиток» і
+      відкриється в новій вкладці. Порожнє поле — кнопки немає, рівень користувач
+      вказує сам.</p>
+      <div class="test-url-row">
+        <input id="test-url" type="url" value="${esc((settings && settings.maturity_test_url) || "")}"
+               placeholder="https://forms.office.com/…" aria-label="Посилання на тест рівня">
+        <button class="mdc-act" id="test-url-save">Зберегти</button>
+      </div>
     </div>`;
 
+  $("#test-url-save").addEventListener("click", async () => {
+    try {
+      const res = await api("/catalog/settings", { method: "POST",
+        body: { maturity_test_url: $("#test-url").value } });
+      toast(res.maturity_test_url ? "Посилання на тест збережено" : "Посилання на тест прибрано");
+    } catch (err) { toast(err.message, "err"); }
+  });
   $("#path-add").addEventListener("click", () => openPathEditor(null, terms));
   panel.querySelectorAll("[data-path-edit]").forEach(b =>
     b.addEventListener("click", () => openPathEditor(
@@ -5379,7 +5607,7 @@ const ACCENT_OPTIONS = [["", "Типовий для виду"], ["red", "Чер�
 
 // Редактор матеріалу каталогу (створення або зміна).
 async function openResourceEditor(resourceId, { onSaved } = {}) {
-  let r = { resource_type: "prompt", accent: "", status: "draft", version: "1.0.0",
+  let r = { resource_type: "prompt", status: "draft", version: "1.0.0",
             link_scope: "external", tags: [] };
   if (resourceId) {
     try { r = await api(`/catalog/resources/${resourceId}`); }
@@ -5403,7 +5631,6 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
     ? typeTerms.map(t => opt(t.code, t.name, r.resource_type))
     : CAT_ORDER.filter(k => k !== "skill")
         .map(k => opt(k, CAT_KINDS[k].label, r.resource_type))).join("");
-  const accentOpts = ACCENT_OPTIONS.map(([v, l]) => opt(v, l, r.accent || "")).join("");
   const sectionOpts = opt("", "— не вказано —", r.section_id || "")
     + sections.map(s => opt(s.id, s.name, r.section_id || "")).join("");
   const statusOpts = statusChoices(r.status, { creating: !resourceId })
@@ -5450,7 +5677,6 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
             .map(t => `<option value="${esc(t.name)}">`).join("")}</datalist></label>
         <label>Версія<input id="re-version" type="text" value="${esc(r.version || "1.0.0")}"></label>
         <label>Емодзі-іконка<input id="re-emoji" type="text" maxlength="4" value="${esc(r.icon_emoji || "")}" placeholder="⚙️"></label>
-        <label>Колір плитки<select id="re-accent">${accentOpts}</select></label>
         <label class="wide" id="re-url-row"><span id="re-url-label">Посилання</span>
           <input id="re-url" type="text" value="${esc(r.url || "")}" placeholder="https://… або /внутрішній/шлях"></label>
         <label id="re-scope-row">Тип ресурсу<select id="re-scope">
@@ -5487,7 +5713,13 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
   // Текст — у візуальному редакторі; промпт і документ відрізняються тим, чи
   // екранується розмітка (див. editor.js).
   const bodyEd = RichEditor.create({ value: r.body || "", label: "Текст",
-    kind: typeSel.value === "prompt" ? "prompt" : "doc" });
+    kind: typeSel.value === "prompt" ? "prompt" : "doc", onImage: uploadInlineImage });
+  if (resourceId) {
+    api(`/catalog/resources/${resourceId}/files`).then(files => {
+      registerFileSigs(files.filter(f => f.source === "inline"));
+      bodyEd.refreshImages();
+    }).catch(() => {});
+  }
   overlay.querySelector("#re-body").replaceWith(bodyEd.el);
   const reuseEd = RichEditor.create({ value: r.reuse_guidance || "", label: "Як повторити рішення",
     placeholder: "Передумови, кроки, до кого звертатися — щоб колега міг застосувати це у себе" });
@@ -5554,7 +5786,6 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
       tags: overlay.querySelector("#re-tags").value,
       version: overlay.querySelector("#re-version").value,
       icon_emoji: overlay.querySelector("#re-emoji").value,
-      accent: overlay.querySelector("#re-accent").value,
       url: overlay.querySelector("#re-url").value,
       link_scope: overlay.querySelector("#re-scope").value,
       body: bodyEd.getValue(),
@@ -5906,6 +6137,10 @@ function tourSteps() {
       title: phone ? "Бічна панель" : "Розділи",
       text: phone ? "Тут розділи каталогу, ваші публікації й інструкція."
                   : "Каталог за темами. Розділ зі стрілкою відкриває зовнішній портал." },
+    { at: () => tourPick('#sidebar [data-dest="hub:dev"]', "#home-level"), side: "right",
+      title: "Мій розвиток",
+      text: "Ваш рівень роботи з AI, наступний крок і навчальні маршрути. Рівень видно й на "
+        + "головній — під привітанням." },
     { at: () => tourPick("#view article.mdc"), title: "Картка матеріалу",
       text: "Клацніть картку, щоб відкрити опис. Кнопка внизу копіює промпт чи завантажує "
         + "навичку, а зірочка зберігає матеріал в «Обране»." },
