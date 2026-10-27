@@ -25,7 +25,7 @@ from app import create_app  # noqa: E402
 from app.config import BaseConfig  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.extensions import db  # noqa: E402
-from app.models import Role, User, UserRole  # noqa: E402
+from app.models import Role, User, UserRole, CatalogSection  # noqa: E402
 from tests.e2e.helpers import PASSWORD  # noqa: E402
 
 _TMP = tempfile.mkdtemp(prefix="hub_e2e_")
@@ -49,25 +49,31 @@ class E2EConfig(BaseConfig):
 
 
 def _seed(app):
-    """Автор, тестувальник і менеджер; чотири опубліковані матеріали з тегами,
-    двоє з них в обраному тестувальника."""
+    """Автор, тестувальник і менеджер розділу; чотири опубліковані матеріали з
+    тегами, двоє з них в обраному тестувальника."""
     from app.core.schema import seed_catalog_terms
     with app.app_context():
         db.create_all()
         seed_catalog_terms()
-        manager_role = Role(code="skill_manager", name="Менеджер каталогу")
+        manager_role = Role(code="section_manager", name="Менеджер розділу")
         db.session.add_all([Role(code="admin", name="Адміністратор"), manager_role])
+        # Менеджер модерує розділ «Матеріали для тестів»: туди й лягають матеріали.
+        section = CatalogSection(name="Матеріали для тестів")
+        db.session.add(section)
         # Знайомство з інтерфейсом уже пройдене — інакше воно перекрило б екран.
         done = datetime.utcnow()
         for username, name in (("author", "Автор Матеріалів"), ("tester", "Тестувальник"),
-                               ("manager", "Менеджер Каталогу")):
+                               ("manager", "Менеджер Розділу"), ("admin", "Адміністратор Хабу")):
             db.session.add(User(username=username, full_name=name, is_active=True,
                                 password_hash=hash_password(PASSWORD),
+                                is_system_admin=username == "admin",
                                 tour_completed_at=done))
         db.session.flush()
         manager = User.query.filter_by(username="manager").one()
         db.session.add(UserRole(user_id=manager.id, role_id=manager_role.id))
+        manager.managed_sections = [section]
         db.session.commit()
+        section_id = section.id
 
     client = app.test_client()
 
@@ -75,7 +81,8 @@ def _seed(app):
         res = client.post("/api/auth/login", json={"username": username, "password": PASSWORD})
         return {"Authorization": f"Bearer {res.get_json()['access_token']}"}
 
-    author = token("author")
+    # Матеріали подає автор, а публікує менеджер розділу (попередня модерація).
+    author, manager = token("author"), token("manager")
     ids = {}
     for kind, name, extra in (
         ("instruction", "Питання та відповіді (FAQ)",
@@ -87,9 +94,12 @@ def _seed(app):
     ):
         res = client.post("/api/catalog/resources", headers=author, json={
             "resource_type": kind, "name": name, "description": "Опис для тесту.",
-            "status": "published", **extra})
+            "status": "published", "section_id": section_id, **extra})
         assert res.status_code == 201, res.get_json()
         ids[name] = res.get_json()["id"]
+        res = client.post(f"/api/catalog/resources/{ids[name]}/status", headers=manager,
+                          json={"status": "published"})
+        assert res.get_json()["status"] == "published", res.get_json()
 
     tester = token("tester")
     for name in ("Питання та відповіді (FAQ)", "Корисний сайт"):

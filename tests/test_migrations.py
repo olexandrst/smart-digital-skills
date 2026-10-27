@@ -100,7 +100,7 @@ def test_post_moderation_migration_converts_data(tmp_path):
         _insert(conn, "catalog_resources", name="Чернетка", status="draft")
         _insert(conn, "skill_feedback", item_type="resource", skill_name="x",
                 message="приватний відгук")
-    _alembic(path, "upgrade", "head", tmp_path=tmp_path)
+    _alembic(path, "upgrade", "e5a7c9d1f3b6", tmp_path=tmp_path)
     with engine.connect() as conn:
         rows = dict(conn.execute(text("SELECT name, status FROM catalog_resources")).all())
         assert rows == {"На розгляді": "published", "Чернетка": "draft"}
@@ -204,3 +204,43 @@ def test_ai_coffee_retired(tmp_path):
     _alembic(path, "upgrade", "head", tmp_path=tmp_path)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM review_logs")).scalar() == 1
+
+
+def test_section_moderation_migration_keeps_managers_access(tmp_path):
+    """Колишній менеджер каталогу стає менеджером усіх наявних розділів;
+    з'являються статус «На розгляді» й поля пропозиції змін. Опубліковане
+    лишається опублікованим."""
+    from sqlalchemy import text
+    path = tmp_path / "sections.db"
+    _alembic(path, "upgrade", "d5f7b9c1e3a6", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        _insert(conn, "roles", id=1, code="admin", name="Адміністратор")
+        _insert(conn, "roles", id=2, code="skill_manager", name="Менеджер каталогу")
+        _insert(conn, "users", id=5, username="mgr")
+        _insert(conn, "users", id=6, username="plain")
+        _insert(conn, "user_roles", user_id=5, role_id=2)
+        _insert(conn, "catalog_sections", id=10, name="Toolbox")
+        _insert(conn, "catalog_sections", id=11, name="Insight Center")
+        _insert(conn, "catalog_resources", name="Опублікований", status="published")
+    _alembic(path, "upgrade", "e7a9c1d3f5b8", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT code, name FROM roles WHERE id = 2")).one() == \
+            ("section_manager", "Менеджер розділу")
+        pairs = set(conn.execute(text("SELECT user_id, section_id FROM section_managers")))
+        assert pairs == {(5, 10), (5, 11)}
+        assert conn.execute(text("SELECT is_expert, is_ideas_owner FROM users "
+                                 "WHERE id = 6")).one() == (0, 0)
+        assert conn.execute(text("SELECT status FROM catalog_resources")).scalar() == "published"
+        assert conn.execute(text("SELECT name FROM catalog_terms WHERE kind = 'status' "
+                                 "AND code = 'review'")).scalar() == "На розгляді"
+        conn.execute(text("SELECT pending_data, pending_by, pending_at, submitted_at "
+                          "FROM skills"))
+    # Відкат повертає стару роль, а поданий матеріал — авторові чернеткою.
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE catalog_resources SET status = 'review'"))
+    _alembic(path, "downgrade", "d5f7b9c1e3a6", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT code FROM roles WHERE id = 2")).scalar() == \
+            "skill_manager"
+        assert conn.execute(text("SELECT status FROM catalog_resources")).scalar() == "draft"

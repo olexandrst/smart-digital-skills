@@ -1,5 +1,7 @@
 """Ресурси каталогу (промпти, інструкції, агенти, посилання) та «Обране»."""
-from app.models import CatalogResource, CatalogFavorite, Skill
+from app.models import CatalogResource, CatalogFavorite, Skill, CatalogSection
+from app.extensions import db
+from tests.conftest import sm_section_id
 
 
 def _login(client, username, password="pass"):
@@ -14,10 +16,12 @@ def _admin(client):
 
 
 def _make(client, headers, **over):
+    """Новий матеріал у розділі менеджера `sm` (там він модерує)."""
     payload = {"resource_type": "prompt", "name": "Промпт аналітика",
                "description": "Розбір тендерної документації",
                "body": "Проаналізуй документ і виділи ризики.",
-               "category": "Аналітика", "status": "published"}
+               "category": "Аналітика", "status": "published",
+               "section_id": sm_section_id()}
     payload.update(over)
     return client.post("/api/catalog/resources", json=payload, headers=headers)
 
@@ -36,28 +40,43 @@ def test_admin_creates_prompt(client):
     assert data["author"]  # автор проставляється автоматично
 
 
-def test_skill_manager_publishes_directly(client):
-    res = _make(client, _login(client, "sm"))
+def test_section_manager_publishes_directly_only_in_own_section(client):
+    sm = _login(client, "sm")
+    res = _make(client, sm)
     assert res.status_code == 201
     assert res.get_json()["status"] == "published"
+    # У чужому розділі менеджер — звичайний автор: матеріал іде на розгляд.
+    other = CatalogSection(name="Чужий розділ")
+    db.session.add(other)
+    db.session.commit()
+    assert _make(client, sm, section_id=other.id).get_json()["status"] == "review"
 
 
-# --- Публікація звичайним користувачем ---
+# --- Подання звичайним користувачем ---
 #
-# Будь-хто публікує матеріал сам (або зберігає чернетку) і керує своїм.
-# «Рекомендований» — рішення менеджера: з запиту користувача поле не береться.
+# Попередня модерація: «Опублікувати» від користувача означає «подати на
+# розгляд». «Рекомендований» — рішення менеджера: з запиту поле не береться.
 
-def test_plain_user_publishes_directly(client):
+def test_plain_user_submission_goes_to_review(client):
     res = _make(client, _login(client, "u1"), is_featured=True)
     assert res.status_code == 201, res.get_json()
     data = res.get_json()
-    assert data["status"] == "published"
-    assert data["published_at"]
+    assert data["status"] == "review"
+    assert data["submitted_at"]
+    assert data["published_at"] is None
     assert data["is_featured"] is False
     assert data["author"]
-    # Відповідальним стає сам автор, а перегляд призначається наперед.
-    assert data["owner"] == data["author"]
-    assert data["next_review_at"]
+
+
+def test_submission_requires_section(client):
+    u1 = _login(client, "u1")
+    res = _make(client, u1, section_id=None)
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "section_required"
+    # Чернетку без розділу зберегти можна.
+    assert _make(client, u1, section_id=None, status="draft").status_code == 201
+    # Адміністратор модерує й матеріали без розділу.
+    assert _make(client, _admin(client), section_id=None).get_json()["status"] == "published"
 
 
 def test_plain_user_may_save_draft_but_not_other_statuses(client):
@@ -88,24 +107,31 @@ def test_author_sees_own_draft_others_do_not(client):
 
 
 def test_author_manages_own_material_in_any_state(client):
-    u1 = _login(client, "u1")
+    u1, sm = _login(client, "u1"), _login(client, "sm")
     rid = _make(client, u1).get_json()["id"]
 
+    # На розгляді автор правив напряму: матеріал ще не в каталозі.
     upd = client.patch(f"/api/catalog/resources/{rid}",
                        json={"name": "Уточнена назва", "is_featured": True,
                              "status": "archived"}, headers=u1)
     assert upd.status_code == 200
     assert upd.get_json()["name"] == "Уточнена назва"
     assert upd.get_json()["is_featured"] is False   # не його рішення
-    assert upd.get_json()["status"] == "published"  # статус — окремою дією
+    assert upd.get_json()["status"] == "review"     # статус — окремою дією
 
-    # Зняти з публікації й опублікувати знову автор може сам; архів — ні.
+    # Забрати з розгляду й подати знову автор може сам; архів — ні.
     assert client.post(f"/api/catalog/resources/{rid}/status",
                        json={"status": "draft"}, headers=u1).get_json()["status"] == "draft"
     assert client.post(f"/api/catalog/resources/{rid}/status",
                        json={"status": "archived"}, headers=u1).status_code == 400
     assert client.post(f"/api/catalog/resources/{rid}/status",
-                       json={"status": "published"}, headers=u1).get_json()["status"] == "published"
+                       json={"status": "published"}, headers=u1).get_json()["status"] == "review"
+    # Опублікувати може лише менеджер розділу.
+    assert client.post(f"/api/catalog/resources/{rid}/status",
+                       json={"status": "published"}, headers=sm).get_json()["status"] == "published"
+    # Зняти з публікації автор може й сам.
+    assert client.post(f"/api/catalog/resources/{rid}/status",
+                       json={"status": "draft"}, headers=u1).get_json()["status"] == "draft"
 
     assert client.delete(f"/api/catalog/resources/{rid}", headers=u1).status_code == 200
     assert CatalogResource.query.get(rid) is None

@@ -16,7 +16,7 @@ class Role(db.Model):
     __tablename__ = "roles"
 
     id = db.Column(db.Integer, primary_key=True)
-    code = db.Column(db.String, nullable=False, unique=True)  # 'admin', 'skill_manager'
+    code = db.Column(db.String, nullable=False, unique=True)  # 'admin', 'section_manager'
     name = db.Column(db.String, nullable=False)
     description = db.Column(db.Text)
 
@@ -32,6 +32,18 @@ class UserRole(db.Model):
                         primary_key=True)
     role_id = db.Column(db.Integer, db.ForeignKey("roles.id", ondelete="CASCADE"),
                         primary_key=True)
+
+
+class SectionManager(db.Model):
+    """Менеджер розділу ↔ розділ. Одна людина може вести кілька розділів, а
+    в розділу може бути кілька менеджерів (заступник має ті самі права)."""
+    __tablename__ = "section_managers"
+
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
+                        primary_key=True)
+    section_id = db.Column(db.Integer,
+                           db.ForeignKey("catalog_sections.id", ondelete="CASCADE"),
+                           primary_key=True)
 
 
 class User(db.Model):
@@ -56,6 +68,10 @@ class User(db.Model):
     # Коли людина пройшла (або пропустила) знайомство з інтерфейсом. Порожньо —
     # гайд покажеться під час наступного входу, на будь-якому пристрої.
     tour_completed_at = db.Column(db.DateTime)
+    # Ознаки, які ставить адміністратор: «Експерт» (позначка біля автора) і
+    # «Відповідальний за ідеї» (доступ до розділу «Ідеї» в «Керуванні»).
+    is_expert = db.Column(db.Boolean, nullable=False, default=False)
+    is_ideas_owner = db.Column(db.Boolean, nullable=False, default=False)
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
@@ -63,6 +79,12 @@ class User(db.Model):
     roles = db.relationship(
         "Role", secondary="user_roles", lazy="joined",
         backref=db.backref("users", lazy="select"),
+    )
+    # Розділи, які модерує менеджер розділу. Діють лише разом із роллю
+    # section_manager: зняли роль — права на розділи зникають.
+    managed_sections = db.relationship(
+        "CatalogSection", secondary="section_managers", lazy="selectin",
+        order_by="CatalogSection.position",
     )
 
     @property
@@ -118,6 +140,9 @@ class User(db.Model):
             "is_active": self.is_active,
             "is_system_admin": self.is_system_admin,
             "roles": self.role_codes,
+            "managed_section_ids": sorted(s.id for s in self.managed_sections),
+            "is_expert": bool(self.is_expert),
+            "is_ideas_owner": bool(self.is_ideas_owner),
             "maturity_level_id": self.maturity_level_id,
             "department": self.department,
             "tour_completed_at": (self.tour_completed_at.isoformat()

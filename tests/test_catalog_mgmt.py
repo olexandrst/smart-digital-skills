@@ -2,7 +2,7 @@
 import io
 import zipfile
 from app.models import Skill
-from tests.conftest import login, auth
+from tests.conftest import login, auth, sm_section_id
 
 MD_FULL = """---
 name: Перекладач
@@ -38,10 +38,16 @@ def make_zip(files):
     return buf.getvalue()
 
 
-def upload(client, token, zip_bytes, skill_id=None, filename="skill.skill"):
+def upload(client, token, zip_bytes, skill_id=None, filename="skill.skill", status=None):
+    """Завантаження пакета. Нова навичка лягає в розділ менеджера `sm`: там
+    він модерує, а інші користувачі подають навички на розгляд."""
     url = f"/api/skills/{skill_id}/upload" if skill_id else "/api/skills/upload"
-    return client.post(url, headers=auth(token),
-                       data={"file": (io.BytesIO(zip_bytes), filename)},
+    data = {"file": (io.BytesIO(zip_bytes), filename)}
+    if not skill_id:
+        data["section_id"] = str(sm_section_id())
+    if status:
+        data["status"] = status
+    return client.post(url, headers=auth(token), data=data,
                        content_type="multipart/form-data")
 
 
@@ -82,7 +88,7 @@ def test_publish_and_unpublish(client):
                       json={"status": "draft"})
     assert res.get_json()["status"] == "draft"
 
-    # Інші статуси більше не приймаються.
+    # Невідомі статуси не приймаються.
     res = client.post(f"/api/skills/{sid}/status", headers=auth(sm),
                       json={"status": "testing"})
     assert res.status_code == 400
@@ -138,7 +144,7 @@ def test_upload_new_version_keeps_identity_and_state(client):
 
 
 def test_user_may_not_manage_foreign_skill(client):
-    """Користувач публікує власні навички, але чужими не керує."""
+    """Користувач завантажує власні навички, але чужими не керує."""
     sm = login(client, "sm", "pass")
     sid = upload(client, sm, make_zip({"SKILL.md": MD_FULL})).get_json()["id"]
     client.post(f"/api/skills/{sid}/status", headers=auth(sm), json={"status": "published"})

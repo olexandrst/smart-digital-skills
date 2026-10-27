@@ -18,9 +18,13 @@ def _summarizer_id():
 # ---------- Категорії ----------
 
 def test_category_crud_and_backfill(client):
+    """Довідник категорій веде адміністратор; менеджер розділу лише користується."""
     sm = login(client, "sm", "pass")
     # Завантажуємо навичку з категорією «Мова» — GET має її «підхопити».
     upload(client, sm, make_zip({"SKILL.md": MD_FULL, "main.py": MAIN_PY}))
+    assert client.post("/api/categories", headers=auth(sm),
+                       json={"name": "Аналітика"}).status_code == 403
+    sm = login(client, "admin", "Admin123!")
 
     res = client.get("/api/categories", headers=auth(sm))
     assert res.status_code == 200

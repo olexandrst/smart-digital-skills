@@ -226,10 +226,22 @@ def _purge_pending(user):
         db.session.delete(uf)
 
 
+def _pending_body(res):
+    """Текст із пропозиції змін, що чекає схвалення (див. moderation_service):
+    його картинки теж належать картці, поки зміни не схвалять чи відхилять."""
+    import json
+    try:
+        data = json.loads(res.pending_data) if getattr(res, "pending_data", None) else None
+    except (TypeError, ValueError):
+        data = None
+    return data.get("body") if isinstance(data, dict) else None
+
+
 def sync_inline_images(res, user):
     """Після збереження тексту: прив'язує до картки картинки, вставлені цим
-    користувачем, і видаляє картинки картки, яких у тексті більше немає."""
-    used = inline_ids(res.body)
+    користувачем, і видаляє картинки картки, яких немає ні в тексті, ні в
+    пропозиції змін, що чекає схвалення."""
+    used = inline_ids(res.body, _pending_body(res))
     if used:
         pending = UserFile.query.filter(UserFile.id.in_(used), UserFile.source == "inline",
                                         UserFile.resource_id.is_(None),

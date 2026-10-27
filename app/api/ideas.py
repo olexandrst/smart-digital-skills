@@ -1,12 +1,14 @@
 """Воронка ідей (BR-15, FR-10): подання, черга менеджера, життєвий цикл.
 
 Подати ідею може будь-який авторизований користувач; свої ідеї він бачить
-завжди. Черга всіх ідей і зміна статусу — адміністратор і менеджер каталогу.
+завжди. Черга всіх ідей і зміна статусу — адміністратор і ті, кому він
+поставив ознаку «Відповідальний за ідеї».
 """
 from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 from app.extensions import db
-from app.core.permissions import require_auth, require_global_role
+from app.core import access
+from app.core.permissions import require_auth, require_check
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
@@ -20,7 +22,7 @@ MAX_TEXT = 5000
 
 
 def _is_manager(user):
-    return user.has_global_role("admin") or user.has_global_role("skill_manager")
+    return access.can_manage_ideas(user)
 
 
 def _clean_text(value, label, *, required=False, limit=MAX_TEXT):
@@ -88,7 +90,7 @@ def list_ideas():
 
 
 @bp.get("/stats")
-@require_global_role("admin", "skill_manager")
+@require_check(access.can_manage_ideas, "Ідеї опрацьовують відповідальні за ідеї")
 def idea_stats():
     """Скільки ідей у кожному статусі — для черги та аналітики воронки."""
     counts = dict(db.session.query(Idea.status, func.count(Idea.id))
@@ -136,7 +138,7 @@ def create_idea():
 
 
 @bp.patch("/<int:idea_id>")
-@require_global_role("admin", "skill_manager")
+@require_check(access.can_manage_ideas, "Ідеї опрацьовують відповідальні за ідеї")
 def update_idea(idea_id):
     """Маршрутизація ідеї: зовнішній процес оцінки та картка-результат."""
     idea = Idea.query.get_or_404(idea_id)
@@ -151,7 +153,7 @@ def update_idea(idea_id):
 
 
 @bp.post("/<int:idea_id>/status")
-@require_global_role("admin", "skill_manager")
+@require_check(access.can_manage_ideas, "Ідеї опрацьовують відповідальні за ідеї")
 def change_idea_status(idea_id):
     """Перехід життєвим циклом із коментарем, який бачить автор ідеї."""
     idea = Idea.query.get_or_404(idea_id)

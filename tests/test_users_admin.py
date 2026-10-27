@@ -3,7 +3,7 @@ from app.extensions import db
 from app.models import (
     User, CatalogFavorite, Notification, Idea, SkillFeedback, Skill, UserRole,
 )
-from tests.conftest import login, auth
+from tests.conftest import login, auth, sm_section_id
 
 
 def _uid(username):
@@ -14,10 +14,13 @@ def test_create_edit_delete_user(client):
     token = login(client, "admin", "Admin123!")
     res = client.post("/api/users", headers=auth(token), json={
         "username": "temp", "full_name": "Тимчасовий", "password": "pass12",
-        "roles": ["skill_manager"]})
+        "roles": ["section_manager"], "managed_section_ids": [sm_section_id()],
+        "is_expert": True})
     assert res.status_code == 201
     uid = res.get_json()["id"]
-    assert res.get_json()["roles"] == ["skill_manager"]
+    assert res.get_json()["roles"] == ["section_manager"]
+    assert res.get_json()["managed_section_ids"] == [sm_section_id()]
+    assert res.get_json()["is_expert"] is True
 
     res = client.patch(f"/api/users/{uid}", headers=auth(token),
                        json={"full_name": "Оновлений", "email": "t@e.com"})

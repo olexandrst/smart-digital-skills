@@ -36,7 +36,15 @@ class Skill(db.Model):
     starter_prompt = db.Column(db.Text)  # «Стартовий промпт»
     package_filename = db.Column(db.String)  # оригінальна назва завантаженого архіву
     package_path = db.Column(db.String)      # шлях до збереженого архіву
-    status = db.Column(db.String, nullable=False, default="draft")  # draft|published
+    status = db.Column(db.String, nullable=False, default="draft")  # draft|review|published
+    # Попередня модерація — так само, як у матеріалів (CatalogResource):
+    # причина повернення, час подання й зміни до опублікованої навички, що
+    # чекають схвалення (атрибути та/або новий пакет).
+    review_note = db.Column(db.Text)
+    submitted_at = db.Column(db.DateTime)
+    pending_data = db.Column(db.Text)
+    pending_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    pending_at = db.Column(db.DateTime)
     version = db.Column(db.String, nullable=False, default="1.0.0")
     # Скільки разів пакет завантажили — міра популярності навички в каталозі
     # (замість колишнього лічильника активацій).
@@ -70,6 +78,9 @@ class Skill(db.Model):
             "output_spec": self.output_spec,
             "starter_prompt": self.starter_prompt,
             "status": self.status,
+            "review_note": self.review_note,
+            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
+            "has_pending": bool(self.pending_data),
             "version": self.version,
             "downloads_count": self.downloads_count or 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,

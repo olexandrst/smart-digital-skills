@@ -5,7 +5,7 @@
 """
 import io
 import os
-from tests.conftest import login, auth
+from tests.conftest import login, auth, sm_section_id
 
 
 def test_users_get_distinct_storage_uid(app):
@@ -83,7 +83,13 @@ def test_manager_may_attach_and_delete(client):
     rid = _resource(client, admin).get_json()["id"]
     fid = _attach(client, admin, rid).get_json()["id"]
 
-    sm = login(client, "sm", "pass")          # інший менеджер каталогу
+    sm = login(client, "sm", "pass")
+    # Менеджер чужого розділу файлами не керує…
+    assert client.delete(f"/api/catalog/resources/{rid}/files/{fid}",
+                         headers=auth(sm)).status_code == 403
+    # …а менеджер розділу матеріалу — так.
+    client.patch(f"/api/catalog/resources/{rid}", headers=auth(admin),
+                 json={"section_id": sm_section_id()})
     assert client.delete(f"/api/catalog/resources/{rid}/files/{fid}",
                          headers=auth(sm)).status_code == 200
     assert client.get(f"/api/catalog/resources/{rid}/files",

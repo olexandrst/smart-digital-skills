@@ -136,24 +136,6 @@ def verify_id_token(id_token):
     )
 
 
-def role_codes_for(claims):
-    """Глобальні ролі застосунку за членством у групах Entra ID.
-
-    Зіставлення задається змінними середовища: доступ менеджера визначається
-    членством у групі каталогу, а не ручним призначенням у застосунку.
-    """
-    cfg = current_app.config
-    mapping = {
-        "admin": {g.strip() for g in (cfg.get("ENTRA_ADMIN_GROUPS") or "").split(",")
-                  if g.strip()},
-        "skill_manager": {g.strip() for g in
-                          (cfg.get("ENTRA_MANAGER_GROUPS") or "").split(",")
-                          if g.strip()},
-    }
-    member_of = set(claims.get("groups") or []) | set(claims.get("roles") or [])
-    return [code for code, groups in mapping.items() if groups & member_of]
-
-
 def profile_from_claims(claims):
     """Дані користувача з токена каталогу."""
     email = (claims.get("preferred_username") or claims.get("email") or "").strip()

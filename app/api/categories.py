@@ -6,7 +6,7 @@
 """
 from flask import Blueprint, request, jsonify
 from app.extensions import db
-from app.core.permissions import require_auth, require_global_role
+from app.core.permissions import require_auth, require_admin
 from app.core.errors import ApiError
 from app.models import SkillCategory, Skill
 
@@ -36,7 +36,7 @@ def list_categories():
 
 
 @bp.post("")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def create_category():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -52,7 +52,7 @@ def create_category():
 
 
 @bp.delete("/<int:category_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_category(category_id):
     """Видаляє категорію з довідника. Навички зберігають свою назву категорії."""
     cat = SkillCategory.query.get_or_404(category_id)

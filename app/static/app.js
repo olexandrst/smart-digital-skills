@@ -509,25 +509,42 @@ function sectionTone(sec) {
 const MODES = [
   { id: "hub", label: "База знань", glyph: "hub", home: "hub:home" },
   { id: "admin", label: "Керування", glyph: "gear", home: "admin:content",
-    roles: ["admin", "skill_manager"] },
+    show: () => hasConsole() },
 ];
 
-// Секції консолі керування. `panel` малює вміст у #view.
+// Секції консолі керування. `panel` малює вміст у #view, `show` — кому видно
+// (фідбек тестування, п. 11): модерацію й аналітику — менеджерам розділів,
+// структуру, маршрути й користувачів — адміністратору, ідеї — відповідальним.
 const ADMIN_SECTIONS = [
   { group: "Контент", items: [
-    { id: "content", label: "Наповнення каталогу", glyph: "pen", panel: renderContentManage },
-    { id: "structure", label: "Структура каталогу", glyph: "doc", panel: renderResourcesManage },
-    { id: "ideas", label: "Ідеї", glyph: "bulb", panel: renderIdeasManage },
-    { id: "paths", label: "Маршрути", glyph: "path", panel: renderPathsManage },
+    { id: "content", label: "Модерація", glyph: "pen", panel: renderContentManage,
+      show: () => isModerator() },
+    { id: "structure", label: "Структура каталогу", glyph: "doc", panel: renderResourcesManage,
+      show: () => isAdmin() },
+    { id: "ideas", label: "Ідеї", glyph: "bulb", panel: renderIdeasManage,
+      show: () => canManageIdeas() },
+    { id: "paths", label: "Маршрути", glyph: "path", panel: renderPathsManage,
+      show: () => isAdmin() },
   ]},
   { group: "Аналітика", items: [
-    { id: "kpi", label: "KPI хабу", glyph: "chart", panel: renderKpiDashboard },
-    { id: "analytics", label: "Використання", glyph: "pulse", panel: renderHubAnalytics },
+    { id: "kpi", label: "KPI хабу", glyph: "chart", panel: renderKpiDashboard,
+      show: () => isModerator() },
+    { id: "analytics", label: "Використання", glyph: "pulse", panel: renderHubAnalytics,
+      show: () => isModerator() },
   ]},
   { group: "Система", items: [
-    { id: "users", label: "Користувачі", glyph: "person", panel: viewUsers, roles: ["admin"] },
+    { id: "users", label: "Користувачі", glyph: "person", panel: viewUsers,
+      show: () => isAdmin() },
   ]},
 ];
+// Перша доступна секція консолі — туди веде перемикач «Керування».
+function adminHome() {
+  for (const grp of ADMIN_SECTIONS) {
+    const hit = grp.items.find(i => !i.show || i.show());
+    if (hit) return `admin:${hit.id}`;
+  }
+  return "hub:home";
+}
 
 // Поточне місце. `dest` — рядок виду "hub:sec:12"; перший сегмент — режим.
 let nav = { mode: "hub", dest: "hub:home" };
@@ -537,16 +554,31 @@ function destMode(dest) {
   return MODES.some(m => m.id === head) ? head : "hub";
 }
 function visibleModes() {
-  return MODES.filter(m => !m.roles || m.roles.some(r => hasRole(r)));
+  return MODES.filter(m => !m.show || m.show());
 }
-function isManager() { return hasRole("admin") || hasRole("skill_manager"); }
 
-// Три ролі: адміністратор — усе; менеджер каталогу — усе в каталозі
-// (модерація, структура, аналітика); користувач — переглядає, коментує,
-// оцінює й публікує власне. Код ролі менеджера історично skill_manager.
-const ROLE_LABELS = { admin: "Адміністратор", skill_manager: "Менеджер каталогу" };
+// Ролі (фідбек тестування, п. 11) — ті самі правила, що й app/core/access.py:
+// адміністратор — усе; менеджер розділу — модерація матеріалів і навичок
+// призначених розділів; користувач — переглядає, коментує, оцінює й подає
+// своє на розгляд. «Експерт» і «Відповідальний за ідеї» — ознаки профілю.
+function isAdmin() { return hasRole("admin"); }
+function managedSections() {
+  return new Set(hasRole("section_manager") && state.user
+    ? (state.user.managed_section_ids || []) : []);
+}
+function isModerator() { return isAdmin() || managedSections().size > 0; }
+function canModerateSection(sectionId) {
+  if (isAdmin()) return true;
+  return sectionId != null && managedSections().has(Number(sectionId));
+}
+// Чи модерує поточний користувач матеріал чи навичку (за розділом).
+function canModerate(raw) { return !!raw && canModerateSection(raw.section_id); }
+function canManageIdeas() { return isAdmin() || !!(state.user && state.user.is_ideas_owner); }
+function hasConsole() { return isAdmin() || hasRole("section_manager") || canManageIdeas(); }
+
+const ROLE_LABELS = { admin: "Адміністратор", section_manager: "Менеджер розділу" };
 function roleLabel(u) {
-  const code = ["admin", "skill_manager"].find(c => (u.roles || []).includes(c));
+  const code = ["admin", "section_manager"].find(c => (u.roles || []).includes(c));
   return code ? ROLE_LABELS[code] : "Користувач";
 }
 
@@ -569,12 +601,12 @@ function buildNav() {
 function buildModeSeg() {
   const seg = $("#mode-seg");
   if (!seg) return;
-  // На «Керуванні» — скільки публікацій користувачів чекає перегляду:
-  // менеджер бачить це з будь-якої сторінки бази знань.
-  const queue = isManager() ? reviewQueue().length : 0;
+  // На «Керуванні» — скільки подань і змін чекає рішення: менеджер бачить
+  // це з будь-якої сторінки бази знань.
+  const queue = isModerator() ? moderationCount() : 0;
   seg.innerHTML = visibleModes().map(m =>
     `<button data-mode="${m.id}" title="${esc(m.label)}"${m.id === nav.mode ? ' class="active"' : ""}>${gsvg(m.glyph)}<span>${esc(m.label)}</span>${
-      m.id === "admin" && queue ? `<b class="seg-badge" title="Потребують перегляду">${queue}</b>` : ""}</button>`
+      m.id === "admin" && queue ? `<b class="seg-badge" title="Чекають рішення">${queue}</b>` : ""}</button>`
   ).join("");
   // Перемикач із однієї кнопки нічого не перемикає — ховаємо його.
   seg.classList.toggle("hidden", visibleModes().length < 2);
@@ -582,7 +614,8 @@ function buildModeSeg() {
     b.addEventListener("click", () => {
       const m = MODES.find(x => x.id === b.dataset.mode);
       // Повернення в режим відкриває те місце, де користувач був востаннє.
-      go(nav.lastIn && nav.lastIn[m.id] ? nav.lastIn[m.id] : m.home);
+      go(nav.lastIn && nav.lastIn[m.id] ? nav.lastIn[m.id]
+         : m.id === "admin" ? adminHome() : m.home);
     }));
 }
 
@@ -590,7 +623,8 @@ function buildModeSeg() {
 function buildTabbar() {
   const bar = $("#tabbar");
   if (!bar) return;
-  const items = visibleModes().map(m => ({ dest: m.home, mode: m.id, ...m }));
+  const items = visibleModes().map(m => ({ dest: m.id === "admin" ? adminHome() : m.home,
+                                          mode: m.id, ...m }));
   items.splice(1, 0, { id: "all", label: "Матеріали", glyph: "list", dest: "hub:all" });
   items.push({ id: "fav", label: "Обране", glyph: "star", dest: "hub:fav" });
   bar.innerHTML = items.map(it =>
@@ -634,10 +668,24 @@ function bindProfileMenu() {
 // прихованому меню, і клік відкриває саме ту картку, де діяти.
 let notifState = { items: [], unread: 0, timer: null, queue: 0 };
 
+// Черга модерації (фідбек тестування, п. 12): подання на розгляд і зміни до
+// опублікованого, що чекають рішення, — з сервера, у розділах, які модерує
+// поточний користувач. Лічильник — лише те, що чекає рішення; старі
+// сповіщення про публікації (див. reviewQueue) показуються в консолі окремо.
+let modState = { items: [], count: 0 };
+async function refreshModeration() {
+  if (!isModerator()) { modState = { items: [], count: 0 }; return modState; }
+  try { modState = await api("/catalog/moderation"); } catch (e) { /* лишаємо попереднє */ }
+  return modState;
+}
+function moderationCount() { return modState.count || 0; }
+
 async function refreshNotifications() {
   if (!state.token || !$("#notif-btn")) return;
   let data;
-  try { data = await api("/catalog/notifications"); } catch (e) { return; }
+  try {
+    [data] = await Promise.all([api("/catalog/notifications"), refreshModeration()]);
+  } catch (e) { return; }
   notifState.items = data.items || [];
   notifState.unread = data.unread || 0;
   paintNotifBadge();
@@ -648,8 +696,8 @@ async function refreshNotifications() {
 // Лічильник непереглянутих публікацій у бічній панелі менеджера живе зі
 // сповіщень — перемальовуємо панель, лише коли число справді змінилося.
 function syncReviewCount() {
-  if (!isManager()) return;
-  const n = reviewQueue().length;
+  if (!isModerator()) return;
+  const n = moderationCount();
   if (n === notifState.queue) return;
   notifState.queue = n;
   buildModeSeg();
@@ -867,9 +915,9 @@ function buildSidebar() {
 
 function adminSidebarHtml() {
   return ADMIN_SECTIONS.map(grp => {
-    const items = grp.items.filter(i => !i.roles || i.roles.some(r => hasRole(r)));
+    const items = grp.items.filter(i => !i.show || i.show());
     if (!items.length) return "";
-    const queue = reviewQueue().length;
+    const queue = moderationCount();
     return `<div class="sb-group">${esc(grp.group)}</div>`
       + items.map(i => i.id === "content"
         ? sbItem(`admin:${i.id}`, i.label, i.glyph, queue || "", queue ? "sb-attn" : "")
@@ -960,7 +1008,13 @@ function adminDestMeta(dest) {
 }
 
 async function renderAdminDest(dest) {
-  const meta = adminDestMeta(dest);
+  let meta = adminDestMeta(dest);
+  // Секція, недоступна цій ролі (стара закладка, зміна прав), — до першої своєї.
+  if (meta.show && !meta.show()) {
+    const home = adminHome();
+    if (home.startsWith("admin:")) { nav.dest = home; meta = adminDestMeta(home); }
+    else { go(home); return; }
+  }
   $("#view").innerHTML = `
     <div class="page-head">
       <div class="page-head-txt"><h1 class="page-h1">${esc(meta.label)}</h1></div>
@@ -1606,6 +1660,8 @@ function renderPersonal() {
         <button class="ghost-act" id="home-all">Усі матеріали</button>
       </div>
       ${fresh.length ? `<div class="show-row" id="fresh-row"></div>`
+        : catalogState.items.length
+        ? `<p class="muted">Усі нові матеріали вже серед рекомендованих вище.</p>`
         : `<p class="muted">Каталог поки що порожній.</p>`}
     </section>`;
 
@@ -1682,7 +1738,7 @@ function resetCatFilters() {
 
 // Доступні фільтри: менеджерські показуємо лише менеджерам.
 function activeFilterDefs() {
-  const manager = hasRole("admin") || hasRole("skill_manager");
+  const manager = isModerator();
   return CAT_FILTERS.filter(f => !f.manager || manager);
 }
 
@@ -2117,19 +2173,30 @@ function bindComments(overlay, base, { onRated } = {}) {
   load();
 }
 
-// Блок керування в картці: автор бачить «Ваш матеріал», менеджер чужого —
-// «Модерація». Стоїть першим у картці: менеджер, що прийшов зі сповіщення,
-// має одразу бачити дії, а не гортати до них. Ті самі дії, що й на сторінці
-// «Наповнення каталогу».
+// Блок керування в картці: автор бачить «Ваш матеріал», менеджер розділу
+// чужого — «Модерація». Стоїть першим у картці: менеджер, що прийшов зі
+// сповіщення, має одразу бачити дії, а не гортати до них. Ті самі дії, що й
+// у списках «Наповнення каталогу» та «Модерація».
 function manageBarHtml(ref) {
-  if (!(isManager() || isOwnItem(ref))) return "";
+  const own = isOwnItem(ref), mod = canModerate(ref.raw);
+  if (!(own || mod)) return "";
+  const btn = (m, label, cls = "") => `<button class="ghost-act${cls}" data-m="${m}">${label}</button>`;
+  const acts = [btn("edit", `${gsvg("pen")}Редагувати`)];
+  if (ref.status === "review") {
+    acts.push(...(mod ? [btn("approve", "Схвалити", " accent-act"), btn("return", "Повернути")]
+                      : [btn("withdraw", "Забрати з розгляду")]));
+  } else if (itemPublic(ref)) {
+    acts.push(btn("unpub", "Зняти з публікації"));
+  } else {
+    acts.push(btn("pub", mod ? "Опублікувати" : "Подати на розгляд"));
+  }
+  if (ref.raw.has_pending) {
+    acts.push(mod ? btn("changes", "Переглянути зміни", " accent-act")
+                  : btn("drop-changes", "Скасувати зміни"));
+  }
+  acts.push(btn("del", "Видалити", " danger-act"));
   return `<div class="sm-manage">
-      <span class="sm-manage-k">${isOwnItem(ref) ? "Ваш матеріал" : "Модерація"}</span>
-      <button class="ghost-act" data-m="edit">${gsvg("pen")}Редагувати</button>
-      ${itemPublic(ref)
-        ? `<button class="ghost-act" data-m="unpub">Зняти з публікації</button>`
-        : `<button class="ghost-act" data-m="pub">Опублікувати</button>`}
-      <button class="ghost-act danger-act" data-m="del">Видалити</button>
+      <span class="sm-manage-k">${own ? "Ваш матеріал" : "Модерація"}</span>${acts.join("")}
     </div>`;
 }
 function bindManageBar(overlay, ref, close) {
@@ -2137,10 +2204,40 @@ function bindManageBar(overlay, ref, close) {
   overlay.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => {
     const m = b.dataset.m;
     if (m === "edit") { close(true); editItem(ref, after); }
-    else if (m === "pub") setItemStatus(ref, "published", after);
-    else if (m === "unpub") setItemStatus(ref, "draft", after);
+    else if (m === "pub" || m === "approve") setItemStatus(ref, "published", after);
+    else if (m === "unpub" || m === "return" || m === "withdraw") setItemStatus(ref, "draft", after);
+    else if (m === "changes") { close(true); openChangesReview(ref, after); }
+    else if (m === "drop-changes") changesAction(ref, "withdraw", "", after);
     else if (m === "del") deleteItem(ref, after);
   }));
+}
+
+// Що бачить автор чи менеджер у картці про стан модерації: на розгляді,
+// повернуто з причиною, зміни чекають схвалення.
+function moderationNoteHtml(ref) {
+  const raw = ref.raw, own = isOwnItem(ref), mod = canModerate(raw);
+  const out = [];
+  if (raw.status === "review") {
+    out.push(own && !mod
+      ? `<p class="sm-draft review">На розгляді — менеджер розділу перевірить матеріал, і ви
+         отримаєте сповіщення про рішення.</p>`
+      : `<p class="sm-draft review">Подано на розгляд${raw.submitted_at ? ` ${timeAgo(raw.submitted_at)}` : ""}.
+         Схваліть публікацію або поверніть автору з причиною.</p>`);
+  } else if (raw.status === "draft" && raw.review_note) {
+    const reason = /[.!?…]$/.test(raw.review_note.trim()) ? raw.review_note.trim() : `${raw.review_note.trim()}.`;
+    out.push(`<p class="sm-draft returned"><b>Повернуто на доопрацювання:</b> ${esc(reason)}${
+      own ? " Виправте й подайте на розгляд знову." : ""}</p>`);
+  } else if (raw.status === "draft") {
+    out.push(`<p class="sm-draft">Чернетка — у каталозі її не видно${
+      own ? `. ${mod ? "Опублікуйте" : "Подайте на розгляд"}, коли матеріал готовий.`
+          : ": бачать лише автор і менеджери розділу."}</p>`);
+  }
+  if (raw.has_pending) {
+    out.push(own && !mod
+      ? `<p class="sm-draft review">Ваші зміни на розгляді: у каталозі поки попередня версія.</p>`
+      : `<p class="sm-draft review">Автор запропонував зміни до опублікованого — перегляньте їх.</p>`);
+  }
+  return out.join("");
 }
 
 // Спільний каркас модалки каталогу: повертає overlay і функцію закриття.
@@ -2200,8 +2297,8 @@ async function openMyContent() {
       </div>
       <div class="own-acts">
         <button class="small" data-confirm="${r.id}">Актуальний</button>
-        ${isManager() || r.created_by === state.user.id ? `<select class="small own-status" data-st="${r.id}">
-          ${statusChoices(r.status).map(([v, m]) =>
+        ${canModerate(r) || r.created_by === state.user.id ? `<select class="small own-status" data-st="${r.id}">
+          ${statusChoices(r.status, { item: r }).map(([v, m]) =>
             `<option value="${v}"${v === r.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
         </select>` : ""}
       </div>
@@ -2418,7 +2515,7 @@ async function openContentWizard(opts = {}) {
         <button class="ghost" id="wiz-back">Назад</button>
         <p class="error" id="wiz-err"></p>
         <button class="ghost hidden" id="wiz-draft"
-                title="Чернетку бачите лише ви й менеджери каталогу">Зберегти чернетку</button>
+                title="Чернетку бачите лише ви й менеджери розділу">Зберегти чернетку</button>
         <button id="wiz-next">Далі</button>
       </div>
     </div>`, { beforeClose: () => !dirty()
@@ -2491,11 +2588,13 @@ async function openContentWizard(opts = {}) {
           <div><b>${st.pkg ? esc(st.pkg.name) : "Перетягніть пакет навички або <u>оберіть</u>"}</b>
             <span>.zip або .skill зі SKILL.md — назва, версія, автор, опис і категорія беруться з нього</span></div>
           <input type="file" id="wiz-file" hidden accept=".zip,.skill"></div>
+        ${placementHtml()}
         <p class="wiz-hint">Іконку, інструкцію та інші деталі можна змінити згодом — з картки навички.</p>`;
-      bindDrop(f => { st.pkg = f; paint(); });
+      bindDrop(f => { collect(); st.pkg = f; paint(); });
+      bindPlacement();
       backBtn.classList.remove("hidden");
       nextBtn.classList.remove("hidden");
-      nextBtn.textContent = "Опублікувати";
+      paintSubmitLabel();
       nextBtn.disabled = draftBtn.disabled = !st.pkg;
       return;
     }
@@ -2664,6 +2763,39 @@ async function openContentWizard(opts = {}) {
     }));
   }
 
+  // Розділ і колекція: від розділу залежить, хто розгляне матеріал, тож
+  // кнопка завершення каже «Опублікувати» лише тому, хто цей розділ модерує.
+  function placementHtml() {
+    const opt = (v, label, cur) =>
+      `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(label)}</option>`;
+    return `<div class="wiz-two">
+        <label class="wiz-label">Розділ <i>його менеджер розгляне матеріал</i>
+          <select id="wiz-section">${opt("", "— не вказано —", st.sectionId)}${
+            sections.filter(s => !s.url).map(s => opt(s.id, s.name, st.sectionId)).join("")}</select></label>
+        <label class="wiz-label">Колекція<select id="wiz-folder"></select></label>
+      </div>`;
+  }
+  function bindPlacement() {
+    const sectionSel = body.querySelector("#wiz-section");
+    const folderSel = body.querySelector("#wiz-folder");
+    const syncFolders = (keep) => {
+      const inSection = folders.filter(f => String(f.section_id) === sectionSel.value);
+      folderSel.innerHTML = `<option value="">— не вказано —</option>` + inSection.map(f =>
+        `<option value="${f.id}"${String(f.id) === String(keep || "") ? " selected" : ""}>${esc(f.name)}</option>`).join("");
+      folderSel.disabled = !sectionSel.value;
+    };
+    syncFolders(st.folderId);
+    sectionSel.addEventListener("change", () => {
+      st.sectionId = sectionSel.value; syncFolders(""); paintSubmitLabel();
+    });
+  }
+  function paintSubmitLabel() {
+    const sec = body.querySelector("#wiz-section");
+    const sectionId = sec ? sec.value : st.sectionId;
+    nextBtn.textContent = existing ? "Зберегти"
+      : canModerateSection(sectionId || null) ? "Опублікувати" : "Подати на розгляд";
+  }
+
   // ---- крок 3: опис ----
   // Останній крок завершують дві кнопки внизу: «Зберегти чернетку» й
   // «Опублікувати». Перемикача режиму з тими самими назвами більше немає:
@@ -2680,12 +2812,7 @@ async function openContentWizard(opts = {}) {
       <label class="wiz-label">Короткий опис
         <textarea id="wiz-desc" rows="2" class="short"
           placeholder="Одне-два речення: що це і кому корисне">${esc(st.desc)}</textarea></label>
-      <div class="wiz-two">
-        <label class="wiz-label">Розділ <i>де шукатимуть</i>
-          <select id="wiz-section">${opt("", "— не вказано —", st.sectionId)}${
-            sections.filter(s => !s.url).map(s => opt(s.id, s.name, st.sectionId)).join("")}</select></label>
-        <label class="wiz-label">Колекція<select id="wiz-folder"></select></label>
-      </div>
+      ${placementHtml()}
       <div class="wiz-two">
         <label class="wiz-label">Категорія
           <input id="wiz-cat" type="text" list="wiz-cats" value="${esc(st.category)}" placeholder="Напр. Аналітика">
@@ -2694,16 +2821,7 @@ async function openContentWizard(opts = {}) {
           <input id="wiz-tags" type="text" value="${esc(st.tags)}" placeholder="RAG, закупівлі"></label>
       </div>`;
 
-    const sectionSel = body.querySelector("#wiz-section");
-    const folderSel = body.querySelector("#wiz-folder");
-    const syncFolders = (keep) => {
-      const inSection = folders.filter(f => String(f.section_id) === sectionSel.value);
-      folderSel.innerHTML = opt("", "— не вказано —", keep || "")
-        + inSection.map(f => opt(f.id, f.name, keep || "")).join("");
-      folderSel.disabled = !sectionSel.value;
-    };
-    syncFolders(st.folderId);
-    sectionSel.addEventListener("change", () => syncFolders(""));
+    bindPlacement();
     const nameInput = body.querySelector("#wiz-name");
     const paintDup = () => {
       const box = body.querySelector("#wiz-dup");
@@ -2719,7 +2837,7 @@ async function openContentWizard(opts = {}) {
     paintDup();
     backBtn.classList.remove("hidden");
     nextBtn.classList.remove("hidden");
-    nextBtn.textContent = existing ? "Зберегти" : "Опублікувати";
+    paintSubmitLabel();
     nextBtn.disabled = draftBtn.disabled = false;
     body.querySelector("#wiz-name").focus();
   }
@@ -2730,6 +2848,9 @@ async function openContentWizard(opts = {}) {
     if (st.step === 2) {
       if (bodyEditor) st.body = bodyEditor.getValue();
       if (v("#wiz-url") !== null) st.url = v("#wiz-url");
+      if (v("#wiz-section") !== null) {     // крок пакета навички
+        st.sectionId = v("#wiz-section") || ""; st.folderId = v("#wiz-folder") || "";
+      }
     } else if (st.step === 3) {
       st.name = v("#wiz-name") || ""; st.desc = v("#wiz-desc") || "";
       st.sectionId = v("#wiz-section") || ""; st.folderId = v("#wiz-folder") || "";
@@ -2786,6 +2907,11 @@ async function openContentWizard(opts = {}) {
     collect();
     const problem = validate();
     if (problem) { setErr(problem); return; }
+    // Без розділу нікому розглянути матеріал (адміністратор модерує й такі).
+    if (publish && !existing && !st.sectionId && !isAdmin()) {
+      setErr("Оберіть розділ — його менеджер розгляне матеріал");
+      return;
+    }
     st.publish = publish;
     await (kindOf().pkg ? submitSkill() : submit());
   }
@@ -2805,12 +2931,14 @@ async function openContentWizard(opts = {}) {
   async function submitSkill() {
     nextBtn.disabled = draftBtn.disabled = true;
     try {
-      const data = await uploadSkillPackage(st.pkg, null, st.publish ? "published" : "draft");
-      toast(st.publish ? `Навичку «${data.name}» опубліковано`
-                       : `Навичку «${data.name}» збережено чернеткою`);
+      const data = await uploadSkillPackage(st.pkg, null, st.publish ? "published" : "draft",
+        { section_id: st.sectionId, folder_id: st.folderId });
+      toast(data.status === "published" ? `Навичку «${data.name}» опубліковано`
+        : data.status === "review" ? `Навичку «${data.name}» подано на розгляд`
+        : `Навичку «${data.name}» збережено чернеткою`);
       close(true);
       await ensureHubData(true);
-      await go(st.publish ? nav.dest : "hub:contrib");
+      await go(data.status === "published" ? nav.dest : "hub:contrib");
       openSkillModal(data.id);
     } catch (e) {
       setErr(e.message);
@@ -2844,11 +2972,14 @@ async function openContentWizard(opts = {}) {
       if (failed) {
         toast(`Матеріал збережено, але ${failed} ${plural(failed, "файл", "файли", "файлів")} не завантажилось`, "err");
       } else {
-        toast(existing ? "Зміни збережено"
-              : st.publish ? "Матеріал опубліковано" : "Чернетку збережено");
+        toast(existing ? (r.has_pending && !canModerate(r)
+                ? "Зміни надіслано на розгляд — у каталозі поки попередня версія" : "Зміни збережено")
+              : r.status === "published" ? "Матеріал опубліковано"
+              : r.status === "review" ? "Подано на розгляд — менеджер розділу отримає сповіщення"
+              : "Чернетку збережено");
       }
-      // Опубліковане — одразу показуємо картку; чернетку — серед своїх.
-      await go(existing || !st.publish ? "hub:contrib" : nav.dest);
+      // Опубліковане — одразу показуємо картку; решту — серед своїх.
+      await go(existing || r.status !== "published" ? "hub:contrib" : nav.dest);
       openResourceModal(r.id);
     } catch (e) {
       setErr(e.message);
@@ -2909,30 +3040,38 @@ function askReason({ title, text, confirm, danger = false }) {
   });
 }
 
-// Опублікувати або зняти з публікації. Менеджер, знімаючи чужий матеріал,
-// може пояснити причину; автор робить це зі своїм без зайвих питань.
+// Зміна стану. Автор подає на розгляд, забирає з розгляду чи знімає з
+// публікації; менеджер розділу схвалює, повертає, знімає, архівує. Рішення
+// щодо чужого матеріалу менеджер може пояснити — автор отримає причину.
 async function setItemStatus(ref, status, onDone) {
-  const foreign = isManager() && !isOwnItem(ref);
+  const foreign = canModerate(ref.raw) && !isOwnItem(ref);
   let note = "";
-  if (status !== "published" && foreign) {
-    const archive = status === "archived";
+  if (status !== "published" && status !== "review" && foreign) {
+    const ret = ref.status === "review" && status === "draft";
+    const archive = status === "archived", stale = status === "needs_update";
+    const title = ret ? "Повернути на доопрацювання" : archive ? "Перенести в архів"
+      : stale ? "Позначити: потребує оновлення" : "Зняти з публікації";
     note = await askReason({
-      title: archive ? "Перенести в архів" : status === "needs_update"
-        ? "Позначити: потребує оновлення" : "Зняти з публікації",
-      text: `«${esc(ref.name)}» ${status === "needs_update"
-        ? "лишиться в каталозі з позначкою «потребує оновлення»"
-        : "зникне з каталогу"}. Автор отримає сповіщення${archive || status === "needs_update"
-        ? "" : " й зможе виправити матеріал і опублікувати знову"}.`,
-      confirm: archive ? "Перенести в архів" : status === "needs_update"
-        ? "Позначити" : "Зняти з публікації" });
+      title,
+      text: ret
+        ? `«${esc(ref.name)}» повернеться авторові чернеткою. Він отримає сповіщення з
+           причиною, виправить і подасть знову.`
+        : `«${esc(ref.name)}» ${stale
+          ? "лишиться в каталозі з позначкою «потребує оновлення»"
+          : "зникне з каталогу"}. Автор отримає сповіщення${archive || stale
+          ? "" : " й зможе виправити матеріал і подати знову"}.`,
+      confirm: ret ? "Повернути" : archive ? "Перенести в архів" : stale ? "Позначити"
+        : "Зняти з публікації" });
     if (note === null) return false;
   }
   try {
-    await api(`${itemUrl(ref)}/status`, { method: "POST", body: { status, note } });
-    toast(status === "published"
-      ? (isManager() ? "Опубліковано" : "Опубліковано — менеджер каталогу отримає сповіщення")
-      : status === "archived" ? "Перенесено в архів"
-      : status === "needs_update" ? "Позначено: потребує оновлення"
+    const res = await api(`${itemUrl(ref)}/status`, { method: "POST", body: { status, note } });
+    const now = res.status;
+    toast(now === "review" ? "Подано на розгляд — менеджер розділу отримає сповіщення"
+      : now === "published" ? (foreign && ref.status === "review" ? "Схвалено й опубліковано" : "Опубліковано")
+      : now === "archived" ? "Перенесено в архів"
+      : now === "needs_update" ? "Позначено: потребує оновлення"
+      : ref.status === "review" ? (foreign ? "Повернуто авторові" : "Забрано з розгляду")
       : foreign ? "Знято з публікації — автор отримає сповіщення" : "Знято з публікації");
     if (onDone) await onDone();
     return true;
@@ -2941,7 +3080,7 @@ async function setItemStatus(ref, status, onDone) {
 
 async function deleteItem(ref, onDone) {
   let note = "";
-  if (isManager() && !isOwnItem(ref)) {
+  if (canModerate(ref.raw) && !isOwnItem(ref)) {
     note = await askReason({ title: "Видалити назавжди",
       text: `«${esc(ref.name)}» буде видалено разом із файлами — дію не можна скасувати.
         Автор отримає сповіщення.`,
@@ -2956,17 +3095,139 @@ async function deleteItem(ref, onDone) {
   } catch (err) { toast(err.message, "err"); return false; }
 }
 
-// Редагування: автор — у тому ж майстрі, де створював; менеджер — у повному
-// редакторі з усіма метаданими. Навичку обоє правлять у редакторі навички.
+// Редагування: автор — у тому ж майстрі, де створював; менеджер розділу — у
+// повному редакторі з усіма метаданими. Навичку обоє правлять у редакторі
+// навички. Якщо зміни автора вже чекають схвалення, він продовжує з них.
 async function editItem(ref, onDone) {
   if (ref.type === "skill") return openSkillEditor(ref.id, { onSaved: onDone });
-  if (isManager()) return openResourceEditor(ref.id, { onSaved: onDone });
-  try { openContentWizard({ resource: await api(`/catalog/resources/${ref.id}`) }); }
+  if (canModerate(ref.raw)) return openResourceEditor(ref.id, { onSaved: onDone });
+  try { openContentWizard({ resource: withPending(await api(`/catalog/resources/${ref.id}`)) }); }
   catch (err) { toast(err.message, "err"); }
 }
 
-// Публікації користувачів, які менеджер ще не переглянув: кожна прийшла
-// сповіщенням, і доки воно не прочитане, матеріал стоїть у черзі.
+// Матеріал разом із запропонованими, ще не схваленими змінами автора.
+function withPending(r) {
+  if (!r.pending) return r;
+  const out = { ...r, ...r.pending.data };
+  if (typeof out.tags === "string") out.tags = out.tags.split(",").map(t => t.trim()).filter(Boolean);
+  return out;
+}
+
+async function changesAction(ref, action, note, onDone) {
+  try {
+    await api(`${itemUrl(ref)}/changes`, { method: "POST", body: { action, note } });
+    toast(action === "approve" ? "Зміни схвалено й опубліковано"
+      : action === "reject" ? "Зміни відхилено — автор отримає сповіщення" : "Зміни скасовано");
+    if (onDone) await onDone();
+    return true;
+  } catch (err) { toast(err.message, "err"); return false; }
+}
+
+// Підписи полів у пропозиції змін; значення-ідентифікатори показуємо назвами.
+const CHANGE_LABELS = {
+  name: "Назва", description: "Короткий опис", body: "Текст", url: "Посилання",
+  link_scope: "Область посилання", section_id: "Розділ", folder_id: "Колекція",
+  category: "Категорія", tags: "Теги", maturity_ids: "Рівні зрілості",
+  complexity_id: "Складність", business_value_id: "Бізнес-цінність",
+  resource_type: "Вид", owner: "Власник", owner_contact: "Контакт власника",
+  tools: "Інструменти", reuse_level: "Повторне використання",
+  reuse_guidance: "Як повторити", version: "Версія", author: "Автор",
+  input_spec: "Вхідні дані", output_spec: "Результат роботи",
+  starter_prompt: "Стартовий промпт", instructions: "Інструкція",
+  icon_emoji: "Іконка", reviewed_at: "Дата перегляду", next_review_at: "Наступний перегляд",
+};
+function changeValue(key, v) {
+  if (v == null || v === "") return "—";
+  if (key === "section_id") {
+    const sec = (catalogState.sections || []).find(x => x.id === Number(v));
+    return sec ? sec.name : String(v);
+  }
+  if (key === "folder_id") {
+    const f = (catalogState.folders || []).find(x => x.id === Number(v));
+    return f ? f.name : String(v);
+  }
+  if (key === "link_scope") return v === "internal" ? "Внутрішній ресурс" : "Зовнішній сервіс";
+  if (Array.isArray(v)) return v.join(", ") || "—";
+  return String(v);
+}
+
+// Огляд пропозиції змін до опублікованого: що було й що стане. Опублікована
+// версія лишається в каталозі, доки менеджер розділу не схвалить зміни.
+async function openChangesReview(ref, onDone) {
+  let item;
+  try { item = await api(itemUrl(ref)); } catch (err) { toast(err.message, "err"); return; }
+  const p = item.pending;
+  if (!p) { toast("Змін, що чекають схвалення, немає"); return; }
+  if (ref.type === "resource") {
+    try {
+      const files = await api(`/catalog/resources/${item.id}/files`);
+      registerFileSigs(files.filter(f => f.source === "inline"));
+    } catch (e) { /* картинки покажуться заглушками */ }
+  }
+  const textKeys = ["body", "instructions", "reuse_guidance"];
+  const rows = Object.entries(p.data).filter(([k]) => k !== "package").map(([k, v]) => {
+    const old = k === "tags" ? (item.tags || []) : item[k];
+    const norm = (x) => Array.isArray(x) ? x.join(", ")
+      : typeof x === "string" ? x.split(",").map(t => t.trim()).join(", ") : x;
+    if (String(norm(old) ?? "") === String(norm(v) ?? "")) return "";
+    const label = CHANGE_LABELS[k] || k;
+    if (textKeys.includes(k)) {
+      return `<div class="chg-row chg-text"><div class="chg-k">${esc(label)}</div>
+          <div class="chg-new md-doc">${renderMarkdown(v || "")}</div>
+          <details class="chg-old"><summary>Опублікована версія</summary>
+            <div class="md-doc">${renderMarkdown(old || "")}</div></details></div>`;
+    }
+    return `<div class="chg-row"><div class="chg-k">${esc(label)}</div>
+        <div class="chg-old-v">${esc(changeValue(k, old))}</div>
+        <div class="chg-arrow" aria-hidden="true">→</div>
+        <div class="chg-new-v">${esc(changeValue(k, v))}</div></div>`;
+  }).join("");
+  const pkg = p.data.package;
+  const pkgRow = pkg ? `<div class="chg-row"><div class="chg-k">Новий пакет</div>
+      <div class="chg-new-v">${esc(pkg.filename || "архів")}${
+        pkg.meta && pkg.meta.version ? ` · версія ${esc(pkg.meta.version)}` : ""}</div>
+      <button class="small ghost" id="chg-dl">Завантажити нову версію</button></div>` : "";
+
+  const { overlay, close } = catalogModal(`
+    <div class="modal sm-modal chg-modal">
+      <div class="modal-head">
+        <div><div class="md-eyebrow">Зміни чекають схвалення</div><h2>${esc(item.name)}</h2></div>
+        <button class="modal-x" aria-label="Закрити">×</button>
+      </div>
+      <p class="muted">${p.by ? `Запропонував(ла) ${esc(p.by)}` : "Зміни автора"}${
+        p.at ? ` · ${timeAgo(p.at)}` : ""}. Опублікована версія лишається в каталозі, доки ви не
+        схвалите зміни.</p>
+      <div class="chg-list">${rows + pkgRow || `<p class="muted">Зміни не відрізняються від опублікованої версії.</p>`}</div>
+      <div class="row">
+        <button id="chg-ok">Схвалити й опублікувати</button>
+        <button class="ghost" id="chg-no">Відхилити</button>
+        <button class="ghost" id="chg-open">Відкрити картку</button>
+      </div>
+    </div>`);
+  hydrateImages(overlay);
+  const dl = overlay.querySelector("#chg-dl");
+  if (dl) dl.addEventListener("click", () => downloadAuthed(
+    `${API}/skills/${item.id}/download?pending=1`, `${item.name}-нова-версія.zip`)
+    .catch(err => toast(err.message, "err")));
+  overlay.querySelector("#chg-ok").addEventListener("click", async () => {
+    if (await changesAction(ref, "approve", "", null)) { close(true); if (onDone) await onDone(); }
+  });
+  overlay.querySelector("#chg-no").addEventListener("click", async () => {
+    const note = await askReason({ title: "Відхилити зміни",
+      text: `У каталозі лишиться опублікована версія «${esc(item.name)}». Автор отримає
+        сповіщення з причиною.`, confirm: "Відхилити" });
+    if (note === null) return;
+    if (await changesAction(ref, "reject", note, null)) { close(true); if (onDone) await onDone(); }
+  });
+  overlay.querySelector("#chg-open").addEventListener("click", () => {
+    close(true);
+    (ref.type === "skill" ? openSkillModal : openResourceModal)(item.id);
+  });
+}
+
+// Що менеджер має переглянути вже після публікації: матеріали, опубліковані
+// ще за пост-модерації, і файли, додані до опублікованого. Кожне прийшло
+// сповіщенням, і доки воно не прочитане, матеріал стоїть у списку.
 const REVIEW_KINDS = ["content_published", "content_updated"];
 function reviewQueue() {
   const map = new Map();
@@ -2998,6 +3259,7 @@ function markItemSeen(type, id) {
 
 const SKILL_STATUS_META = {
   published: { label: "Опублікована", cls: "published" },
+  review: { label: "На розгляді", cls: "review" },
   draft: { label: "Чернетка", cls: "draft" },
 };
 function itemStatusMeta(ref) {
@@ -3007,29 +3269,45 @@ function itemStatusMeta(ref) {
 }
 
 // Рядок матеріалу чи навички у списках наповнення: плитка, назва, вид, стан і
-// дії. `q` — запис черги перегляду (що й коли сталося); `manage` — консоль
-// менеджера: стан обирається списком, видно автора й проблеми з метаданими.
+// дії. `q` — запис черги (що й коли сталося); `manage` — консоль менеджера
+// розділу: стан обирається списком, видно автора й проблеми з метаданими.
 function contribRow(ref, { q = null, manage = false } = {}) {
   const raw = ref.raw;
   const it = ref.type === "skill" ? normSkill(raw) : normResource(raw);
   const kindName = ref.type === "skill" ? "Навичка" : (kindMeta(raw.resource_type).one || raw.resource_type);
   const st = itemStatusMeta(ref);
+  const mod = canModerate(raw);
   const warn = [];
   if (manage && itemPublic(ref) && !raw.owner) warn.push("без власника");
   if (manage && raw.review_overdue) warn.push(`перегляд прострочено (${dateUa(raw.next_review_at)})`);
-  const when = q ? `${q.kind === "content_updated" ? "змінено" : "опубліковано"} ${timeAgo(q.at)}`
-                 : `змінено ${dateUa(raw.updated_at)}`;
+  const when = !q ? `змінено ${dateUa(raw.updated_at)}`
+    : q.kind === "submitted" ? `подано ${timeAgo(q.at)}`
+    : q.kind === "changes" ? `зміни ${timeAgo(q.at)}`
+    : `${q.kind === "content_updated" ? "додано файл" : "опубліковано"} ${timeAgo(q.at)}`;
   const author = manage && raw.author ? ` · ${esc(raw.author)}` : "";
-  const note = ref.type === "resource" && raw.review_note && !itemPublic(ref)
-    ? `<div class="res-note">${raw.status === "archived" ? "В архіві" : "Знято з публікації"}: ${esc(raw.review_note)}</div>` : "";
-  const choices = ref.type === "skill" ? Object.entries(SKILL_STATUS_META) : statusChoices(raw.status);
-  const statusCtl = manage
-    ? `<select class="small res-status" data-act="status" title="Стан">
+  const note = raw.review_note && raw.status === "draft"
+    ? `<div class="res-note">Повернуто: ${esc(raw.review_note)}</div>`
+    : raw.review_note && raw.status === "archived"
+    ? `<div class="res-note">В архіві: ${esc(raw.review_note)}</div>` : "";
+  const choices = ref.type === "skill" ? Object.entries(SKILL_STATUS_META)
+                                       : statusChoices(raw.status, { item: raw });
+  let statusCtl;
+  if (q && (q.kind === "submitted" || q.kind === "changes")) {
+    statusCtl = q.kind === "submitted"
+      ? `<button class="small accent" data-act="approve">Схвалити</button>
+         <button class="small ghost" data-act="return">Повернути</button>`
+      : `<button class="small accent" data-act="changes">Переглянути зміни</button>`;
+  } else if (manage && mod) {
+    statusCtl = `<select class="small res-status" data-act="status" title="Стан">
         ${choices.map(([v, m]) => `<option value="${v}"${v === raw.status ? " selected" : ""}>${esc(m.label)}</option>`).join("")}
-      </select>`
-    : itemPublic(ref)
+      </select>`;
+  } else {
+    statusCtl = raw.status === "review"
+      ? `<button class="small ghost" data-act="withdraw">Забрати з розгляду</button>`
+      : itemPublic(ref)
       ? `<button class="small ghost" data-act="unpub">Зняти з публікації</button>`
-      : `<button class="small accent" data-act="pub">Опублікувати</button>`;
+      : `<button class="small accent" data-act="pub">${mod ? "Опублікувати" : "Подати на розгляд"}</button>`;
+  }
   return `<div class="res-row" data-type="${ref.type}" data-id="${ref.id}">
       ${catTile(it, "mdc-tile")}
       <div class="res-main">
@@ -3040,12 +3318,15 @@ function contribRow(ref, { q = null, manage = false } = {}) {
         ${note}
       </div>
       <span class="badge ${st.cls}">${esc(st.label)}</span>
+      ${raw.has_pending && !(q && q.kind === "changes")
+        ? `<span class="badge review" title="Зміни до опублікованого чекають схвалення">Зміни на розгляді</span>` : ""}
       <div class="res-acts">
         <button class="small" data-act="open">Відкрити</button>
         <button class="small ghost" data-act="edit">Редагувати</button>
         ${statusCtl}
         <button class="small danger" data-act="del">Видалити</button>
-        ${q ? `<button class="small ghost" data-act="seen" title="Прибрати з черги без змін">Переглянуто</button>` : ""}
+        ${q && !["submitted", "changes"].includes(q.kind)
+          ? `<button class="small ghost" data-act="seen" title="Прибрати зі списку без змін">Переглянуто</button>` : ""}
       </div>
     </div>`;
 }
@@ -3060,8 +3341,9 @@ function bindContribRows(root, refOf, reload, rerender) {
       const act = ctl.dataset.act;
       if (act === "open") (ref.type === "skill" ? openSkillModal : openResourceModal)(ref.id);
       else if (act === "edit") editItem(ref, reload);
-      else if (act === "pub") setItemStatus(ref, "published", reload);
-      else if (act === "unpub") setItemStatus(ref, "draft", reload);
+      else if (act === "pub" || act === "approve") setItemStatus(ref, "published", reload);
+      else if (act === "unpub" || act === "return" || act === "withdraw") setItemStatus(ref, "draft", reload);
+      else if (act === "changes") openChangesReview(ref, reload);
       else if (act === "del") deleteItem(ref, reload);
       else if (act === "seen") { markItemSeen(ref.type, ref.id); rerender(); }
       else if (act === "status") {
@@ -3096,40 +3378,42 @@ async function viewContributions() {
   const refs = resources.map(r => itemRef("resource", r))
     .concat(skills.map(s => itemRef("skill", s))).sort(byUpdated);
   const refOf = (type, id) => refs.find(x => x.type === type && x.id === Number(id));
-  const waiting = isManager() ? reviewQueue().length : 0;
+  const waiting = isModerator() ? moderationCount() : 0;
   const published = refs.filter(itemPublic).length;
+  const inReview = refs.filter(r => r.status === "review").length;
 
   view.innerHTML = `
     <div class="page-head">
       <div class="page-head-txt">
         <h1 class="page-h1">Наповнення каталогу</h1>
         <p class="page-sub">${esc(refs.length
-          ? `опубліковано: ${published} · чернеток: ${refs.length - published}`
-          : "Усе, що ви публікуєте в базі знань.")}</p>
+          ? `опубліковано: ${published} · на розгляді: ${inReview} · чернеток: ${refs.length - published - inReview}`
+          : "Усе, що ви додаєте в базу знань.")}</p>
       </div>
       <div class="page-acts"><button id="contrib-add">${gsvg("plus")}Додати матеріал</button></div>
     </div>
     ${waiting ? `<div class="nudge contrib-nudge">
         ${gsvg("pen", "nudge-ic")}
-        <div class="nudge-txt"><b>${waiting} ${plural(waiting, "публікація чекає", "публікації чекають", "публікацій чекають")} перегляду</b>
-          <i>Черга модерації — у «Керування → Наповнення каталогу».</i></div>
+        <div class="nudge-txt"><b>${waiting} ${plural(waiting, "матеріал чекає", "матеріали чекають", "матеріалів чекають")} вашого рішення</b>
+          <i>Черга модерації — у «Керування → Модерація».</i></div>
         <button class="ghost" id="contrib-to-admin">Переглянути</button>
       </div>` : ""}
     ${refs.length ? `
       <div class="mine-list">${refs.map(ref => contribRow(ref)).join("")}</div>
-      <p class="mine-foot">Опублікований матеріал одразу бачать усі, а власником стає той,
-        хто його опублікував. Менеджер каталогу отримує сповіщення про кожну публікацію й
-        може відредагувати матеріал або зняти його з публікації — тоді ви отримаєте
-        сповіщення з причиною. Чернетку бачите лише ви й менеджери.</p>`
+      <p class="mine-foot">Поданий матеріал перевіряє менеджер розділу: він схвалить
+        публікацію або поверне матеріал з причиною — ви отримаєте сповіщення. Зміни до
+        опублікованого теж чекають схвалення, а в каталозі тим часом лишається попередня
+        версія. Власником опублікованого матеріалу стаєте ви. Чернетку бачите лише ви й
+        менеджери розділу.</p>`
     : `
       <div class="mine-empty">${gsvg("pen")}
         <h2>Поділіться тим, що працює</h2>
         <p>Промпт, інструкція, кейс, агент, навичка, MCP-сервер чи корисне посилання —
-          три кроки, і матеріал одразу в каталозі.</p>
+          три кроки, а менеджер розділу перевірить і опублікує.</p>
         <div class="mine-steps">
           <span><b>1</b>Оберіть вид</span>
           <span><b>2</b>Вставте текст або файл</span>
-          <span><b>3</b>Назвіть і опублікуйте</span>
+          <span><b>3</b>Назвіть і подайте на розгляд</span>
         </div>
         <button id="contrib-add-first">Додати перший матеріал</button>
       </div>`}`;
@@ -3141,9 +3425,10 @@ async function viewContributions() {
   bindContribRows(view, refOf, reload, viewContributions);
 }
 
-// «Керування → Наповнення каталогу»: усе наповнення в одному місці — черга
-// перегляду публікацій користувачів, усі матеріали разом із навичками,
-// коментарі й оцінки, категорії навичок і сувора публікація.
+// «Керування → Модерація»: черга на розгляд і змін до опублікованого в
+// розділах, які модерує менеджер (адміністратор — усі), список того, що
+// варто переглянути вже після публікації, усі матеріали своїх розділів,
+// коментарі й оцінки. Категорії навичок і сувора публікація — адміністратору.
 async function renderContentManage() {
   const panel = panelEl();
   panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
@@ -3158,11 +3443,21 @@ async function renderContentManage() {
     panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
     return;
   }
+  // Поки дані вантажилися, людина могла перейти на інший екран.
+  if (!panel.isConnected) return;
   const reload = async () => { await ensureHubData(true); go("admin:content"); };
-  const refs = resources.map(r => itemRef("resource", r))
-    .concat(skills.map(s => itemRef("skill", s))).sort(byUpdated);
-  const refOf = (type, id) => refs.find(x => x.type === type && x.id === Number(id));
-  const queue = reviewQueue().map(q => ({ q, ref: refOf(q.type, q.id) })).filter(x => x.ref);
+  // Менеджер розділу бачить у консолі лише матеріали своїх розділів.
+  const refs = resources.filter(canModerate).map(r => itemRef("resource", r))
+    .concat(skills.filter(canModerate).map(s => itemRef("skill", s))).sort(byUpdated);
+  const queue = (modState.items || []).map(x => ({
+    q: { kind: x.kind, at: x.at }, ref: itemRef(x.type, x.item) }));
+  const queueKey = new Set(queue.map(x => `${x.ref.type}:${x.ref.id}`));
+  const refOf = (type, id) => {
+    const hit = refs.find(x => x.type === type && x.id === Number(id));
+    return hit || (queue.find(x => x.ref.type === type && x.ref.id === Number(id)) || {}).ref;
+  };
+  const seen = reviewQueue().map(q => ({ q, ref: refOf(q.type, q.id) }))
+    .filter(x => x.ref && !queueKey.has(`${x.ref.type}:${x.ref.id}`));
 
   const kindOf = (ref) => ref.type === "skill" ? "skill" : ref.raw.resource_type;
   const kinds = CAT_ORDER;
@@ -3170,6 +3465,7 @@ async function renderContentManage() {
   kinds.forEach(k => counts[k] = refs.filter(r => kindOf(r) === k).length);
   const chips = [["all", "Усі"]].concat(kinds.map(k => [k, CAT_KINDS[k].label]));
   const health = {
+    review: refs.filter(r => r.status === "review").length,
     needs_update: refs.filter(r => r.status === "needs_update").length,
     no_owner: refs.filter(r => itemPublic(r) && !r.raw.owner).length,
     overdue: refs.filter(r => r.raw.review_overdue).length,
@@ -3179,30 +3475,40 @@ async function renderContentManage() {
     `<button class="cat-chipf${contribFilter === key ? " active" : ""}${cnt ? " warn" : ""}" data-f="${key}">${esc(label)} <b>${cnt}</b></button>`;
   const shown = refs.filter(r => {
     if (contribKind !== "all" && kindOf(r) !== contribKind) return false;
+    if (contribFilter === "review") return r.status === "review";
     if (contribFilter === "needs_update") return r.status === "needs_update";
     if (contribFilter === "no_owner") return itemPublic(r) && !r.raw.owner;
     if (contribFilter === "overdue") return !!r.raw.review_overdue;
     if (contribFilter === "draft") return r.status === "draft";
     return true;
   });
+  const scope = isAdmin() ? "усі розділи"
+    : (catalogState.sections || []).filter(x => managedSections().has(x.id)).map(x => x.name).join(", ");
 
   panel.innerHTML = `
     <div class="content-top">
-      <p class="page-sub">Потребують перегляду: ${queue.length} · матеріалів: ${resources.length}
-        · навичок: ${skills.length}</p>
+      <p class="page-sub">Чекають рішення: ${queue.length} · матеріалів: ${refs.length}
+        ${scope ? ` · ${esc(scope)}` : ""}</p>
       <button id="content-add">${gsvg("plus")}Додати матеріал</button>
     </div>
 
     <div class="card content-queue">
-      <h2>Потребують перегляду <span class="content-n${queue.length ? " attn" : ""}">${queue.length}</span></h2>
+      <h2>На розгляді <span class="content-n${queue.length ? " attn" : ""}">${queue.length}</span></h2>
       ${queue.length ? `
-        <p class="muted">Користувачі опублікували або змінили ці матеріали — вони вже в
-          каталозі. Перегляньте; за потреби відредагуйте, зніміть з публікації чи видаліть —
-          автор отримає сповіщення. Відкрита картка вважається переглянутою.</p>
+        <p class="muted">Подані матеріали й зміни до опублікованого. Схваліть — і матеріал
+          з'явиться в каталозі; поверніть з причиною — автор отримає сповіщення, виправить і
+          подасть знову. Поки зміни не схвалено, у каталозі лишається попередня версія.</p>
         <div class="mine-list">${queue.map(({ q, ref }) => contribRow(ref, { q, manage: true })).join("")}</div>`
-      : `<p class="muted">Усе переглянуто. Коли користувач опублікує матеріал, ви отримаєте
+      : `<p class="muted">Черга порожня. Коли автор подасть матеріал у ваш розділ, ви отримаєте
           сповіщення, а матеріал з'явиться тут.</p>`}
     </div>
+
+    ${seen.length ? `<div class="card">
+      <h2>Переглянути після публікації <span class="content-n">${seen.length}</span></h2>
+      <p class="muted">Опубліковане ще до попередньої модерації та файли, додані до
+        опублікованих матеріалів. Відкрита картка вважається переглянутою.</p>
+      <div class="mine-list">${seen.map(({ q, ref }) => contribRow(ref, { q, manage: true })).join("")}</div>
+    </div>` : ""}
 
     <div class="card">
       <h2>Усі матеріали <span class="content-n">${refs.length}</span></h2>
@@ -3210,6 +3516,7 @@ async function renderContentManage() {
         `<button class="fb-tab${contribKind === k ? " active" : ""}" data-k="${k}">${esc(label)} <b>${counts[k] || 0}</b></button>`).join("")}</div>
       <div class="res-health">
         ${healthChip("all", "Усі", refs.length)}
+        ${healthChip("review", "На розгляді", health.review)}
         ${healthChip("needs_update", "Потребують оновлення", health.needs_update)}
         ${healthChip("no_owner", "Без власника", health.no_owner)}
         ${healthChip("overdue", "Перегляд прострочено", health.overdue)}
@@ -3217,12 +3524,12 @@ async function renderContentManage() {
       </div>
       <div class="mine-list">${shown.map(ref => contribRow(ref, { manage: true })).join("")
         || `<p class="muted">За цим фільтром матеріалів немає.</p>`}</div>
-      <label class="ind-toggle contrib-strict">
+      ${isAdmin() ? `<label class="ind-toggle contrib-strict">
         <input type="checkbox" id="strict-publish" ${settings.strict_publish ? "checked" : ""}>
         <span><b>Сувора публікація</b> — не публікувати матеріал без розділу, категорії,
-        опису, власника та дати наступного перегляду. Власником стає той, хто публікує, а
-        перегляд, якщо дату не вказано, призначається через пів року.</span>
-      </label>
+        опису, власника та дати наступного перегляду. Власником стає автор, а перегляд, якщо
+        дату не вказано, призначається через пів року.</span>
+      </label>` : ""}
     </div>
 
     <div class="card" id="fb-card">
@@ -3239,7 +3546,7 @@ async function renderContentManage() {
       <div id="fb-list" class="fb-list"></div>
     </div>
 
-    <div class="card">
+    ${isAdmin() ? `<div class="card">
       <h2>Категорії навичок</h2>
       <p class="muted">Список, з якого обирають категорію в редакторі навички.</p>
       <div class="row" style="margin-bottom:12px">
@@ -3247,7 +3554,7 @@ async function renderContentManage() {
         <button id="cat-add">Додати</button>
       </div>
       <div id="cat-chips" class="cat-chips"></div>
-    </div>`;
+    </div>` : ""}`;
 
   panel.querySelector("#content-add").addEventListener("click", () => openContentWizard());
   bindContribRows(panel, refOf, reload, renderContentManage);
@@ -3256,7 +3563,7 @@ async function renderContentManage() {
   panel.querySelectorAll("[data-f]").forEach(b =>
     b.addEventListener("click", () => { contribFilter = b.dataset.f; renderContentManage(); }));
   const strict = panel.querySelector("#strict-publish");
-  strict.addEventListener("change", async () => {
+  if (strict) strict.addEventListener("change", async () => {
     strict.disabled = true;
     try {
       const res = await api("/catalog/settings", { method: "POST", body: { strict_publish: strict.checked } });
@@ -3272,9 +3579,11 @@ async function renderContentManage() {
     catch (err) { toast(err.message, "err"); }
   });
   renderFeedback();
-  renderCategoryChips();
-  panel.querySelector("#cat-add").addEventListener("click", addCategory);
-  panel.querySelector("#cat-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCategory(); });
+  if (isAdmin()) {
+    renderCategoryChips();
+    panel.querySelector("#cat-add").addEventListener("click", addCategory);
+    panel.querySelector("#cat-new").addEventListener("keydown", (e) => { if (e.key === "Enter") addCategory(); });
+  }
 }
 
 // ------------------ Навчальні маршрути (BR-9) ------------------
@@ -3828,8 +4137,7 @@ function openLightbox(images, start) {
 async function renderResourceFiles(overlay, r) {
   const box = overlay.querySelector("#res-files");
   if (!box) return;
-  const mayEdit = hasRole("admin") || hasRole("skill_manager")
-    || (state.user && r.created_by === state.user.id);
+  const mayEdit = canModerate(r) || !!(state.user && r.created_by === state.user.id);
 
   let files = [];
   try { files = await api(`/catalog/resources/${r.id}/files`); }
@@ -3950,12 +4258,6 @@ async function openResourceModal(resourceId) {
   const staleNote = r.status === "needs_update"
     ? `<p class="sm-stale">Матеріал очікує актуалізації — звірте його з поточними правилами
        перед використанням${r.owner ? ` або зверніться до відповідального: ${esc(r.owner)}` : ""}.</p>`
-    : r.status === "draft" && r.review_note
-    ? `<p class="sm-draft returned"><b>Знято з публікації:</b> ${esc(r.review_note)}${
-        own ? " Виправте й опублікуйте знову." : ""}</p>`
-    : r.status === "draft"
-    ? `<p class="sm-draft">Чернетка — у каталозі її не видно${
-        own ? ". Опублікуйте, коли матеріал готовий." : ": бачать лише автор і менеджери."}</p>`
     : r.status === "archived"
     ? `<p class="sm-draft">В архіві — користувачі матеріал не бачать${
         r.review_note ? `. Причина: ${esc(r.review_note)}` : ""}.</p>`
@@ -3986,6 +4288,7 @@ async function openResourceModal(resourceId) {
       </div>
       <div class="sm-body">
         ${manageBarHtml(ref)}
+        ${moderationNoteHtml(ref)}
         ${staleNote}
         ${it.description ? `<p class="sm-desc">${esc(it.description)}</p>` : ""}
         <div id="res-media"></div>
@@ -4090,9 +4393,7 @@ async function openSkillModal(skillId) {
     : "";
   const downloadsText = n => `${n} ${plural(n, "завантаження", "завантаження", "завантажень")}`;
   const ref = itemRef("skill", s);
-  const draftNote = s.status === "published" ? ""
-    : isOwnItem(ref) ? `<p class="sm-draft">Чернетка — у каталозі її не видно. Опублікуйте, коли навичка готова.</p>`
-    : `<p class="sm-draft">Не опублікована — бачать лише автор і менеджери каталогу.</p>`;
+  const draftNote = moderationNoteHtml(ref);
 
   const { overlay, close } = catalogModal(`
     <div class="modal sm-modal md-modal" id="skill-modal">
@@ -4197,10 +4498,11 @@ async function openSkillModal(skillId) {
 
 // Завантаження пакета: без skillId — НОВА навичка (status: published | draft);
 // зі skillId — нова ВЕРСІЯ наявної.
-async function uploadSkillPackage(file, skillId, status) {
+async function uploadSkillPackage(file, skillId, status, placement = {}) {
   const form = new FormData();
   form.append("file", file);
   if (status) form.append("status", status);
+  Object.entries(placement).forEach(([k, v]) => { if (v) form.append(k, v); });
   const url = skillId ? `${API}/skills/${skillId}/upload` : `${API}/skills/upload`;
   const res = await fetch(url, {
     method: "POST",
@@ -4274,6 +4576,8 @@ async function renderFeedback() {
   let data;
   try { data = await api(`/skills/feedback?filter=${manageFbFilter}`); }
   catch (err) { listEl.innerHTML = `<p class="error">${esc(err.message)}</p>`; return; }
+  // Поки відгуки вантажилися, людина могла перейти на іншу сторінку.
+  if (!listEl.isConnected) return;
 
   const badge = $("#fb-unread");
   badge.textContent = data.unread || "";
@@ -4654,15 +4958,18 @@ async function downloadKpiCsv() {
 // Статуси, які може обрати поточний користувач: менеджер — будь-який,
 // автор — опублікувати або зняти з публікації. Новий матеріал буває лише
 // опублікованим або чернеткою.
-function statusChoices(current, { creating = false } = {}) {
-  const allowed = creating || !isManager() ? ["draft", "published"]
-                                          : Object.keys(RES_STATUS_META);
+// Які стани можна обрати: менеджер розділу — будь-який для матеріалів свого
+// розділу; автор — чернетку чи подання (published для нього означає розгляд).
+function statusChoices(current, { creating = false, item = null } = {}) {
+  const allowed = !creating && canModerate(item) ? Object.keys(RES_STATUS_META)
+                                                 : ["draft", "published"];
   return Object.entries(RES_STATUS_META)
     .filter(([v]) => allowed.includes(v) || v === current);
 }
 
 const RES_STATUS_META = {
   draft: { label: "Чернетка", cls: "draft" },
+  review: { label: "На розгляді", cls: "review" },
   published: { label: "Опублікований", cls: "published" },
   needs_update: { label: "Потребує оновлення", cls: "stale" },
   archived: { label: "Архів", cls: "delisted" },
@@ -5633,7 +5940,7 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
         .map(k => opt(k, CAT_KINDS[k].label, r.resource_type))).join("");
   const sectionOpts = opt("", "— не вказано —", r.section_id || "")
     + sections.map(s => opt(s.id, s.name, r.section_id || "")).join("");
-  const statusOpts = statusChoices(r.status, { creating: !resourceId })
+  const statusOpts = statusChoices(r.status, { creating: !resourceId, item: r })
     .map(([v, m]) => opt(v, m.label, r.status)).join("");
   const reuseOpts = REUSE_OPTIONS.map(([v, l]) => opt(v, l, r.reuse_level || "")).join("");
   const termOpts = (kind, cur) => opt("", "— не вказано —", cur || "")
@@ -5831,9 +6138,14 @@ async function uploadSkillIcon(file, skillId) {
 // Відкривається у вікні поверх сторінки — з картки навички чи з рядка в
 // «Наповненні каталогу».
 async function openSkillEditor(skillId, { onSaved } = {}) {
-  const [s, cats] = await Promise.all([
+  const [loaded, cats] = await Promise.all([
     api(`/skills/${skillId}`), api("/categories").catch(() => []),
   ]);
+  // Зміни автора, що вже чекають схвалення, — він продовжує з них.
+  const s = loaded.pending ? { ...loaded, ...loaded.pending.data } : loaded;
+  const sectionOpts = (catalogState.sections || []).filter(x => !x.url)
+    .map(x => `<option value="${x.id}"${x.id === s.section_id ? " selected" : ""}>${esc(x.name)}</option>`)
+    .join("");
   // Гарантуємо, що поточна категорія навички є серед варіантів (навіть якщо її
   // видалили з довідника).
   const names = cats.map(c => c.name);
@@ -5872,6 +6184,13 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
           </div>
         </div>
       </div>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Розділ <i>його менеджер розгляне навичку</i></label>
+          <select id="se-section"><option value="">— не вказано —</option>${sectionOpts}</select></div>
+        <div class="field" style="flex:1"><label>Колекція</label><select id="se-folder"></select></div>
+      </div>
+      ${loaded.pending && !canModerate(loaded) ? `<p class="sm-draft review">Ваші зміни на розгляді: нижче — запропонована версія.
+        У каталозі поки опублікована.</p>` : ""}
       <div class="field"><label>Опис</label><textarea id="se-desc">${esc(s.description || "")}</textarea></div>
       <div class="field"><label>Вхідні дані</label><textarea id="se-input" placeholder="Що подавати на вхід навички">${esc(s.input_spec || "")}</textarea></div>
       <div class="field"><label>Результат роботи</label><textarea id="se-output" placeholder="Що навичка повертає на виході">${esc(s.output_spec || "")}</textarea></div>
@@ -5890,6 +6209,17 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
       </div>
       <div id="se-files" class="muted" style="margin-top:10px"></div>
     </div>`;
+
+  const syncSkillFolders = (keep) => {
+    const sec = $("#se-section").value;
+    $("#se-folder").innerHTML = `<option value="">— не вказано —</option>` + (catalogState.folders || [])
+      .filter(f => String(f.section_id) === sec)
+      .map(f => `<option value="${f.id}"${String(f.id) === String(keep) ? " selected" : ""}>${esc(f.name)}</option>`)
+      .join("");
+    $("#se-folder").disabled = !sec;
+  };
+  syncSkillFolders(s.folder_id);
+  $("#se-section").addEventListener("change", () => syncSkillFolders(""));
 
   // Інструкція навички без пакета — у візуальному редакторі.
   const instrEd = s.has_package ? null : RichEditor.create({ value: s.instructions || "",
@@ -5937,7 +6267,9 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
 
   $("#se-save").addEventListener("click", async () => {
     try {
-      await api(`/skills/${s.id}`, { method: "PATCH", body: {
+      const num = (v) => v ? Number(v) : null;
+      const res = await api(`/skills/${s.id}`, { method: "PATCH", body: {
+        section_id: num($("#se-section").value), folder_id: num($("#se-folder").value),
         name: $("#se-name").value, version: $("#se-version").value,
         author: $("#se-author").value, category: $("#se-category").value,
         description: $("#se-desc").value,
@@ -5946,7 +6278,9 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
         // Інструкцію пакетної навички бере зі skill.md — тут її не правлять.
         ...(s.has_package ? {} : { instructions: instrEd.getValue() }),
       }});
-      toast("Зміни збережено"); saved();
+      toast(res.has_pending && !canModerate(res)
+        ? "Зміни надіслано на розгляд — у каталозі поки попередня версія" : "Зміни збережено");
+      saved();
     } catch (err) { toast(err.message, "err"); }
   });
   $("#se-close").addEventListener("click", () => closeBox());
@@ -5956,7 +6290,9 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
     $("#se-upload").disabled = true;
     try {
       const data = await uploadSkillPackage(file, s.id);
-      toast(`Нову версію «${data.name}» v${data.version} завантажено`);
+      toast(data.has_pending && !canModerate(data)
+        ? "Нову версію надіслано на розгляд — у каталозі поки попередня"
+        : `Нову версію «${data.name}» v${data.version} завантажено`);
       saved();
     } catch (err) { toast(err.message, "err"); }
     finally { $("#se-upload").disabled = false; }
@@ -5964,19 +6300,34 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
 }
 
 // ---------- Користувачі (Admin) ----------
+// Ролі призначає адміністратор вручну (фідбек тестування, п. 11). Менеджер
+// розділу модерує лише обрані розділи; «Експерт» і «Відповідальний за ідеї» —
+// ознаки, які можна поставити будь-кому.
 const USER_ROLE_OPTS = [
   { v: "", label: "Користувач" },
-  { v: "skill_manager", label: "Менеджер каталогу" },
+  { v: "section_manager", label: "Менеджер розділу" },
   { v: "admin", label: "Адміністратор" },
 ];
 function primaryRole(u) {
   if (u.roles.includes("admin")) return "admin";
-  if (u.roles.includes("skill_manager")) return "skill_manager";
+  if (u.roles.includes("section_manager")) return "section_manager";
   return "";
+}
+// Роль, розділи й ознаки одним рядком для таблиці користувачів.
+function userAccessHtml(u, sections) {
+  const names = (u.managed_section_ids || [])
+    .map(id => (sections.find(x => x.id === id) || {}).name).filter(Boolean);
+  const flags = [u.is_expert ? "Експерт" : "", u.is_ideas_owner ? "Відповідальний за ідеї" : ""]
+    .filter(Boolean);
+  return `<div>${esc(roleLabel(u))}</div>${
+    primaryRole(u) === "section_manager"
+      ? `<div class="u-who-login">${names.length ? esc(names.join(", ")) : "розділи не призначено"}</div>` : ""}${
+    flags.length ? `<div class="u-who-login">${esc(flags.join(" · "))}</div>` : ""}`;
 }
 
 async function viewUsers() {
-  const users = await api("/users");
+  const [users, sections] = await Promise.all([
+    api("/users"), api("/catalog/sections").catch(() => [])]);
   const view = panelEl();
   const roleOpts = (sel) => USER_ROLE_OPTS.map(o =>
     `<option value="${o.v}" ${o.v === sel ? "selected" : ""}>${esc(o.label)}</option>`).join("");
@@ -5997,10 +6348,17 @@ async function viewUsers() {
 
   $("#u-add").addEventListener("click", async () => {
     const roles = $("#u-role").value ? [$("#u-role").value] : [];
-    try { await api("/users", { method: "POST", body: {
-      username: $("#u-username").value, full_name: $("#u-name").value,
-      email: $("#u-email").value || null, password: $("#u-pass").value, roles }});
-      toast("Користувача створено"); openTab("users"); }
+    try {
+      const created = await api("/users", { method: "POST", body: {
+        username: $("#u-username").value, full_name: $("#u-name").value,
+        email: $("#u-email").value || null, password: $("#u-pass").value, roles }});
+      await openTab("users");
+      // Менеджер без розділів нічого не модерує — одразу пропонуємо їх обрати.
+      if (roles.includes("section_manager")) {
+        toast("Користувача створено — оберіть розділи, які він модеруватиме");
+        openUserEditor(created.id);
+      } else toast("Користувача створено");
+    }
     catch (err) { toast(err.message, "err"); }
   });
 
@@ -6020,7 +6378,7 @@ async function viewUsers() {
           u.is_active ? "" : ` <span class="badge delisted">вимкнений</span>`}</div>
         <div class="u-who-login">${esc(u.username)}${mail ? " · " + esc(mail) : ""}</div>
       </td>
-      <td>${esc(roleLabel(u))}</td>
+      <td>${userAccessHtml(u, sections)}</td>
       <td class="actions">
         <button class="small ghost" data-act="edit">Редагувати</button>
         <button class="small" data-act="reset">Пароль</button>
@@ -6045,11 +6403,13 @@ async function viewUsers() {
   watchTableFit(body.closest("table"));
 }
 
-// Редактор користувача: ім'я, пошта, роль і стан облікового запису.
+// Редактор користувача: ім'я, пошта, роль, розділи менеджера, ознаки й стан.
 async function openUserEditor(userId) {
-  const u = await api(`/users/${userId}`);
+  const [u, sections] = await Promise.all([
+    api(`/users/${userId}`), api("/catalog/sections").catch(() => [])]);
   const roleOpts = USER_ROLE_OPTS.map(o =>
     `<option value="${o.v}" ${o.v === primaryRole(u) ? "selected" : ""}>${esc(o.label)}</option>`).join("");
+  const mine = new Set(u.managed_section_ids || []);
   const box = $("#u-detail");
   box.innerHTML = `
     <div class="card">
@@ -6063,20 +6423,49 @@ async function openUserEditor(userId) {
         <div class="field" style="flex:1"><label>Статус</label>
           <select id="ue-active"><option value="1" ${u.is_active ? "selected" : ""}>Активний</option><option value="0" ${!u.is_active ? "selected" : ""}>Деактивований</option></select></div>
       </div>
+      <div class="field ue-sections" id="ue-sections">
+        <span class="field-k">Розділи, які модерує</span>
+        <div class="ue-checks">${sections.filter(x => !x.url).map(x => `
+          <label class="ind-toggle"><input type="checkbox" value="${x.id}"${mine.has(x.id) ? " checked" : ""}>
+            <span>${esc(x.name)}</span></label>`).join("") || `<p class="muted">Розділів ще немає.</p>`}</div>
+        <p class="muted ue-hint">Заступнику призначте ту саму роль і ті самі розділи — права в них однакові.</p>
+      </div>
+      <div class="field">
+        <span class="field-k">Ознаки</span>
+        <div class="ue-checks">
+          <label class="ind-toggle"><input type="checkbox" id="ue-expert"${u.is_expert ? " checked" : ""}>
+            <span><b>Експерт</b> — позначка біля автора на його матеріалах</span></label>
+          <label class="ind-toggle"><input type="checkbox" id="ue-ideas"${u.is_ideas_owner ? " checked" : ""}>
+            <span><b>Відповідальний за ідеї</b> — опрацьовує ідеї в «Керуванні»</span></label>
+        </div>
+      </div>
       <div class="row">
         <button id="ue-save">Зберегти</button>
         <button id="ue-close" class="ghost">Закрити</button>
       </div>
     </div>`;
   box.scrollIntoView({ behavior: "smooth", block: "start" });
+  const paintSections = () => {
+    $("#ue-sections").classList.toggle("hidden", $("#ue-role").value !== "section_manager");
+  };
+  paintSections();
+  $("#ue-role").addEventListener("change", paintSections);
 
   $("#ue-close").addEventListener("click", () => { box.innerHTML = ""; });
   $("#ue-save").addEventListener("click", async () => {
-    const roles = $("#ue-role").value ? [$("#ue-role").value] : [];
+    const role = $("#ue-role").value;
+    const sectionIds = role === "section_manager"
+      ? [...box.querySelectorAll("#ue-sections input:checked")].map(i => Number(i.value)) : [];
+    if (role === "section_manager" && !sectionIds.length) {
+      toast("Оберіть розділи, які модеруватиме менеджер", "err");
+      return;
+    }
     try {
       await api(`/users/${userId}`, { method: "PATCH", body: {
         full_name: $("#ue-name").value, email: $("#ue-email").value || null,
-        is_active: $("#ue-active").value === "1", roles }});
+        is_active: $("#ue-active").value === "1", roles: role ? [role] : [],
+        managed_section_ids: sectionIds,
+        is_expert: $("#ue-expert").checked, is_ideas_owner: $("#ue-ideas").checked }});
       toast("Користувача оновлено"); openTab("users");
     } catch (err) { toast(err.message, "err"); }
   });
@@ -6149,12 +6538,14 @@ function tourSteps() {
         + "стаєте ви." },
     { at: () => tourPick('#sidebar [data-dest="hub:contrib"]'), side: "right",
       title: "Наповнення каталогу",
-      text: "Усе, що ви опублікували: редагуйте, знімайте з публікації або видаляйте." },
-    { when: () => isManager(),
+      text: "Усе, що ви додали: чернетки, подане на розгляд і опубліковане. Матеріал "
+        + "з'являється в каталозі після схвалення менеджером розділу." },
+    { when: () => hasConsole(),
       at: () => tourPick('#mode-seg [data-mode="admin"]', '#tabbar [data-tab="admin"]'),
       title: "Керування",
-      text: "Консоль менеджера: черга перегляду нових публікацій, структура каталогу й "
-        + "аналітика. Число показує, скільки публікацій чекає перегляду." },
+      text: "Консоль за вашою роллю: черга матеріалів на розгляді у ваших розділах, "
+        + "аналітика, а в адміністратора — структура й користувачі. Число показує, "
+        + "скільки матеріалів чекає рішення." },
     { at: () => tourPick("#notif-btn"), title: "Сповіщення",
       text: "Коментарі до ваших матеріалів, рішення менеджера й нагадування про перевірку. "
         + "Клік відкриває потрібну картку." },

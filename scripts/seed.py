@@ -9,7 +9,7 @@ from datetime import datetime
 from app import create_app
 from app.extensions import db
 from app.core.security import hash_password
-from app.models import Role, User, UserRole, Skill
+from app.models import Role, User, UserRole, Skill, CatalogSection
 
 
 def _get_or_create(model, defaults=None, **kwargs):
@@ -35,9 +35,9 @@ def seed():
             defaults={"name": "Адміністратор",
                       "description": "Повний контроль над системою й користувачами"})
         sm_role, _ = _get_or_create(
-            Role, code="skill_manager",
-            defaults={"name": "Менеджер каталогу",
-                      "description": "Модерація й керування всім контентом каталогу"})
+            Role, code="section_manager",
+            defaults={"name": "Менеджер розділу",
+                      "description": "Модерація матеріалів і навичок призначених розділів"})
 
         # 2. Супер-адмін
         admin_username = os.getenv("ADMIN_USERNAME", "admin")
@@ -54,11 +54,11 @@ def seed():
         if created:
             db.session.add(UserRole(user_id=admin.id, role_id=admin_role.id))
 
-        # 3. Демо-менеджер каталогу
+        # 3. Демо-менеджер розділу (розділи призначаються нижче, після їх створення)
         sm_user, sm_created = _get_or_create(
             User, username="skillmanager",
             defaults={
-                "full_name": "Демо менеджер каталогу",
+                "full_name": "Демо менеджер розділу",
                 "email": "skill@profihub.local",
                 "password_hash": hash_password("Skill123!"),
                 "is_active": True,
@@ -106,6 +106,13 @@ def seed():
         # 7. Розділи каталогу (дзеркало меню корпоративного AI Knowledge Hub)
         sections = _seed_catalog_sections()
 
+        # Демо-менеджер веде два розділи — так видно, що права обмежені ними.
+        if sm_created:
+            sm_user.managed_sections = [CatalogSection.query.get(sections[name])
+                                        for name in ("Toolbox", "Insight Center")
+                                        if name in sections]
+            db.session.commit()
+
         # 8. Колекції та довідники метаданих
         folders = _seed_catalog_folders(sections)
         from app.core.schema import seed_catalog_terms
@@ -119,7 +126,7 @@ def seed():
 
         print("✓ Seed завершено.")
         print(f"  Адмін:          {admin_username} / {admin_password}")
-        print("  Менеджер каталогу: skillmanager / Skill123!")
+        print("  Менеджер розділів Toolbox і Insight Center: skillmanager / Skill123!")
         print("  Користувачі:    user1 / User123!,  user2 / User123!")
 
 

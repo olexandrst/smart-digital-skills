@@ -1,8 +1,10 @@
 """Каталог AI Knowledge Hub: розділи, ресурси, обране, пошук та аналітика.
 
 Навички лишаються у /api/skills — тут усе інше наповнення каталогу.
-Публікує матеріали будь-який користувач; структуру каталогу (розділи,
-колекції, довідники) і модерацію веде менеджер каталогу. Перегляд — усі.
+Матеріал створює будь-який користувач, а в каталог він потрапляє після
+схвалення менеджером свого розділу (попередня модерація, див.
+moderation_service). Структуру каталогу, довідники й налаштування веде
+адміністратор (див. app/core/access.py). Перегляд опублікованого — усі.
 """
 import os
 import re
@@ -11,12 +13,13 @@ from flask import (Blueprint, request, jsonify, send_from_directory, Response,
                    current_app)
 from sqlalchemy import func
 from app.extensions import db
-from app.core.permissions import require_auth, require_global_role
+from app.core import access
+from app.core.permissions import require_auth, require_admin, require_moderator
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.services import (
     file_service, usage_service, search_service, assistant_service, review_service,
-    text_extract_service, comment_service,
+    text_extract_service, comment_service, moderation_service,
 )
 from app.models import (
     CatalogSection, CatalogFolder, CatalogTerm, CatalogResourceTag,
@@ -25,7 +28,7 @@ from app.models import (
     UserFile,
     Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
     Notification,
-    User,
+    User, SectionManager,
     RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
     RESOURCE_STATUSES, AUTHOR_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
     TERM_KINDS, MULTI_VALUE_TERM_KINDS,
@@ -94,29 +97,25 @@ def type_behaviour(code):
     }
 
 
-def _is_manager(user):
-    return user.has_global_role("admin") or user.has_global_role("skill_manager")
-
-
 # --- Хто що може з матеріалом ---
 #
-# Пост-модерація. Будь-який користувач публікує матеріал сам (або зберігає
-# чернетку) і далі керує своїм: править, знімає з публікації, видаляє.
-# Менеджери каталогу отримують сповіщення про кожну публікацію користувача
-# й можуть зробити з будь-яким матеріалом усе — автор дізнається про їхнє
+# Попередня модерація. Автор створює чернетку й подає її на розгляд; у
+# каталог матеріал потрапляє після схвалення менеджером розділу (або
+# адміністратором). Хто модерує розділ, публікує одразу. Зміни автора до
+# опублікованого чекають схвалення, не ховаючи опубліковану версію. Менеджер
+# розділу може з матеріалами своїх розділів усе — автор дізнається про його
 # рішення сповіщенням. Архів і «потребує оновлення» — інструменти менеджера.
 
 def _is_author(res, user):
-    return res.created_by is not None and res.created_by == user.id
+    return moderation_service.is_author(res, user)
 
 
 def _can_see(res, user):
-    return (res.status in PUBLIC_STATUSES or _is_manager(user)
-            or _is_author(res, user))
+    return moderation_service.can_see(res, user, PUBLIC_STATUSES)
 
 
 def _may_edit(res, user):
-    return _is_manager(user) or _is_author(res, user)
+    return _is_author(res, user) or access.can_moderate(user, res)
 
 
 # Типовий період до наступного перегляду, якщо автор його не задав.
@@ -124,7 +123,7 @@ DEFAULT_REVIEW_MONTHS = 6
 
 
 def _default_ownership(item, user):
-    """Власником опублікованого матеріалу стає той, хто його опублікував.
+    """Власником опублікованого матеріалу стає його автор (див. _publish_resource).
 
     Правило однакове для всіх ролей. Без власника й дати перегляду
     опублікований матеріал ніхто не актуалізує, а сувора публікація взагалі
@@ -306,6 +305,26 @@ def _apply_placement(item, data):
                 item.folder_id = None
 
 
+def target_section(item, data):
+    """Розділ, у якому опиниться матеріал після змін із запиту (див. _apply_placement)."""
+    if "folder_id" in data:
+        folder = _resolve_folder(data.get("folder_id"))
+        if folder is not None:
+            return folder.section_id
+    if "section_id" in data:
+        return _resolve_section(data.get("section_id"))
+    return item.section_id
+
+
+def require_stays_moderated(user, item, data):
+    """Менеджер не виводить матеріал зі своїх розділів: у чужому розділі його
+    мав би розглянути інший менеджер."""
+    if (item.status != "draft" and access.can_moderate(user, item)
+            and not access.can_moderate_section(user, target_section(item, data))):
+        raise ApiError("Перенести матеріал можна лише в розділ, який ви модеруєте",
+                       403, "forbidden")
+
+
 def _apply_fields(res, data, *, creating=False):
     """Переносить поля запиту в ресурс із валідацією (спільне для POST/PATCH)."""
     if creating or "resource_type" in data:
@@ -410,13 +429,7 @@ def _require_publish_ready(res):
 
 def _log_review(item_type, item, from_status, to_status, note=None):
     """Запис у журнал життєвого циклу (FR-08)."""
-    user = current_user()
-    db.session.add(ReviewLog(
-        item_type=item_type, item_id=item.id, item_name=item.name,
-        actor_user_id=user.id if user else None,
-        actor_name=(user.full_name or user.username) if user else None,
-        from_status=from_status, to_status=to_status, note=note,
-    ))
+    moderation_service.log(item_type, item, current_user(), from_status, to_status, note)
 
 
 # ------------------------------- Розділи -------------------------------
@@ -424,8 +437,9 @@ def _log_review(item_type, item, from_status, to_status, note=None):
 @bp.get("/sections")
 @require_auth
 def list_sections():
-    """Розділи каталогу з кількістю матеріалів у кожному."""
-    manager = _is_manager(current_user())
+    """Розділи каталогу з кількістю матеріалів у кожному. Приховані розділи
+    й неопубліковане в лічильниках бачить адміністратор."""
+    manager = access.is_admin(current_user())
     query = CatalogSection.query
     if not manager:
         query = query.filter_by(is_active=True)
@@ -447,7 +461,7 @@ def list_sections():
 
 
 @bp.post("/sections")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def create_section():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -483,7 +497,7 @@ def _apply_section_fields(section, data):
 
 
 @bp.patch("/sections/<int:section_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def update_section(section_id):
     section = CatalogSection.query.get_or_404(section_id)
     data = request.get_json(silent=True) or {}
@@ -502,7 +516,7 @@ def update_section(section_id):
 
 
 @bp.delete("/sections/<int:section_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_section(section_id):
     """Видаляє розділ. Матеріали зберігаються — у них знімається прив'язка."""
     section = CatalogSection.query.get_or_404(section_id)
@@ -520,6 +534,10 @@ def delete_section(section_id):
         {CatalogResource.section_id: None}, synchronize_session=False)
     Skill.query.filter_by(section_id=section_id).update(
         {Skill.section_id: None}, synchronize_session=False)
+    # Призначення менеджерів зникають разом із розділом; матеріали без розділу
+    # далі модерує адміністратор.
+    SectionManager.query.filter_by(section_id=section_id).delete(
+        synchronize_session=False)
     db.session.delete(section)
     db.session.commit()
     return jsonify({"message": "Розділ видалено"})
@@ -548,7 +566,7 @@ def _folder_counts(manager):
 @require_auth
 def list_folders():
     """Колекції каталогу. `?section_id=` — лише колекції одного розділу."""
-    manager = _is_manager(current_user())
+    manager = access.is_admin(current_user())
     query = CatalogFolder.query
     if not manager:
         query = query.filter_by(is_active=True)
@@ -568,7 +586,7 @@ def _folder_name_taken(section_id, name, exclude_id=None):
 
 
 @bp.post("/folders")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def create_folder():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -603,7 +621,7 @@ def _apply_folder_fields(folder, data):
 
 
 @bp.patch("/folders/<int:folder_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def update_folder(folder_id):
     folder = CatalogFolder.query.get_or_404(folder_id)
     data = request.get_json(silent=True) or {}
@@ -635,7 +653,7 @@ def update_folder(folder_id):
 
 
 @bp.delete("/folders/<int:folder_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_folder(folder_id):
     """Видаляє колекцію. Матеріали лишаються в розділі, без колекції."""
     folder = CatalogFolder.query.get_or_404(folder_id)
@@ -683,7 +701,7 @@ def _require_term_kind(kind):
 @require_auth
 def list_terms():
     """Значення довідників. `?kind=` — один довідник, без нього — усі."""
-    manager = _is_manager(current_user())
+    manager = access.is_admin(current_user())
     query = CatalogTerm.query
     kind = request.args.get("kind")
     if kind:
@@ -697,7 +715,7 @@ def list_terms():
 
 
 @bp.post("/terms")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def create_term():
     data = request.get_json(silent=True) or {}
     kind = _require_term_kind((data.get("kind") or "").strip())
@@ -766,7 +784,7 @@ def _apply_term_fields(term, data):
 
 
 @bp.patch("/terms/<int:term_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def update_term(term_id):
     """Перейменування та налаштування терміна.
 
@@ -792,7 +810,7 @@ def update_term(term_id):
 
 
 @bp.post("/terms/<int:term_id>/merge")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def merge_term(term_id):
     """Зливає термін в інший того ж довідника: посилання переносяться, термін зникає."""
     source = CatalogTerm.query.get_or_404(term_id)
@@ -828,7 +846,7 @@ def merge_term(term_id):
 
 
 @bp.delete("/terms/<int:term_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_term(term_id):
     """Видаляє значення довідника. Посилання на нього в картках знімаються."""
     term = CatalogTerm.query.get_or_404(term_id)
@@ -864,13 +882,13 @@ def list_resources():
     `type`, `section_id`, `folder_id`, `status`, `complexity_id`,
     `business_value_id`, `reuse_level`, `tag_id`, `tool`, `owner`, `q`.
 
-    Менеджери каталогу бачать усе; решта — опубліковані та ті, що потребують
-    оновлення (чернетки й архів приховані). `mine=1` — лише матеріали, які
-    створив поточний користувач, у будь-якому статусі: так автор бачить свої
-    чернетки, не отримуючи доступу до чужих.
+    Усі бачать опубліковані та ті, що потребують оновлення; менеджер розділу —
+    ще й усе в розділах, які модерує, адміністратор — усе. `mine=1` — лише
+    матеріали, які створив поточний користувач, у будь-якому статусі: так
+    автор бачить свої чернетки, не отримуючи доступу до чужих.
     """
     user = current_user()
-    manager = _is_manager(user)
+    manager = access.is_admin(user)
     query = CatalogResource.query
 
     mine = request.args.get("mine") in ("1", "true")
@@ -941,11 +959,13 @@ def list_resources():
         if status not in RESOURCE_STATUSES:
             raise ApiError("Статус має бути одним із: " + ", ".join(RESOURCE_STATUSES),
                            400, "validation_error")
-        if not manager and not mine and status not in PUBLIC_STATUSES:
+        if (not mine and status not in PUBLIC_STATUSES
+                and not access.is_moderator(user)):
             raise ApiError("Матеріали цього статусу недоступні", 403, "forbidden")
         query = query.filter_by(status=status)
     if not manager and not mine:
-        query = query.filter(CatalogResource.status.in_(PUBLIC_STATUSES))
+        query = query.filter(moderation_service.visible_filter(
+            CatalogResource, user, PUBLIC_STATUSES))
 
     order = ((CatalogResource.updated_at.desc(), CatalogResource.id.desc()) if mine
              else (CatalogResource.is_featured.desc(), CatalogResource.id.desc()))
@@ -966,7 +986,7 @@ def showcase():
     Порожні блоки не повертаються взагалі — фронт не має вирішувати, чи
     малювати рамку без вмісту.
     """
-    manager = _is_manager(current_user())
+    manager = access.is_moderator(current_user())
     ratings = _rating_map("resource")
 
     def pack(items):
@@ -1061,71 +1081,129 @@ def extract_text():
 @require_auth
 def get_resource(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
-    if not _can_see(res, current_user()):
+    user = current_user()
+    if not _can_see(res, user):
         raise ApiError("Ресурс недоступний", 403, "forbidden")
+    return jsonify(_payload(res, user))
+
+
+def _payload(res, user):
+    """Картка для відповіді: рейтинг і пропозиція змін (автору й модератору)."""
     ratings = _rating_map("resource")
-    return jsonify(dict(res.to_dict(), **ratings.get(res.id, _EMPTY_RATING)))
+    out = dict(res.to_dict(), **ratings.get(res.id, _EMPTY_RATING))
+    out["pending"] = moderation_service.pending_payload(res, user)
+    out["can_moderate"] = access.can_moderate(user, res)
+    return out
 
 
 @bp.post("/resources")
 @require_auth
 def create_resource():
+    """Новий матеріал: чернетка (`draft`) або подання (`review` / `published`).
+
+    `published` публікує одразу лише той, хто модерує обраний розділ; для
+    решти це подання на розгляд — у відповіді статус буде `review`.
+    """
     data = request.get_json(silent=True) or {}
     user = current_user()
-    manager = _is_manager(user)
-    if not manager:
-        # «Рекомендований» — рішення менеджера; з запиту користувача поле не
-        # береться мовчки, щоб один клієнт працював для обох ролей.
-        data = {k: v for k, v in data.items() if k != "is_featured"}
     status = data.get("status") or "draft"
     if status not in AUTHOR_STATUSES:
-        raise ApiError("Новий матеріал можна опублікувати (published) або зберегти "
-                       "чернеткою (draft)", 400, "validation_error")
+        raise ApiError("Новий матеріал можна зберегти чернеткою (draft), подати на "
+                       "розгляд (review) або опублікувати (published)",
+                       400, "validation_error")
     res = CatalogResource(created_by=user.id)
     res.author = user.full_name or user.username
     _apply_fields(res, data, creating=True)
-    publish = status == "published"
-    if publish:
-        _default_ownership(res, user)
-        _require_publish_ready(res)
-        res.status = "published"
-        res.published_at = datetime.utcnow()
+    # «Рекомендований» — рішення того, хто модерує розділ.
+    if not access.can_moderate(user, res):
+        res.is_featured = False
+    if status != "draft":
+        moderation_service.require_section(user, res)
     db.session.add(res)
     db.session.flush()
     _set_tags(res, data.get("tags"))
     _set_maturity(res, data.get("maturity_ids"))
     file_service.sync_inline_images(res, user)
-    if publish:
-        _log_review("resource", res, None, "published")
-        review_service.notify_published("resource", res, user)
+    if status != "draft":
+        moderation_service.submit("resource", res, user, status,
+                                  lambda item: _publish_resource(item, user))
     db.session.commit()
-    return jsonify(res.to_dict()), 201
+    return jsonify(_payload(res, user)), 201
+
+
+def _publish_resource(res, user):
+    """Що стається з матеріалом у момент публікації. Власником стає автор:
+    менеджер, що схвалив матеріал, відповідає за модерацію, а не за зміст."""
+    author = db.session.get(User, res.created_by) if res.created_by else None
+    _default_ownership(res, author or user)
+    _require_publish_ready(res)
+    res.status = "published"
+    if res.published_at is None:
+        res.published_at = datetime.utcnow()
+    res.reviewed_at = datetime.utcnow()
+    res.review_note = None
+
+
+# Поля, які автор не може змінити сам: «рекомендований» і стан — рішення модератора.
+_MODERATOR_FIELDS = ("is_featured", "status")
+
+
+def _check_changes(res, data):
+    """Перевіряє зміни, не чіпаючи матеріал: на копії полів. Так пропозиція
+    змін не потрапить на розгляд з помилкою, яку виявлять лише при схваленні."""
+    copy = CatalogResource(**{c.name: getattr(res, c.name)
+                              for c in CatalogResource.__table__.columns
+                              if c.name != "id"})
+    _apply_fields(copy, data)
+    _tag_names(data.get("tags"))
+    for raw in (data.get("maturity_ids") or []):
+        _resolve_term("maturity", raw, "рівень зрілості")
+
+
+def _apply_changes(res, data, user):
+    """Застосовує зміни до матеріалу (власне збереження або схвалення пропозиції)."""
+    _apply_fields(res, data)
+    if "tags" in data:
+        _set_tags(res, data.get("tags"))
+    if "maturity_ids" in data:
+        _set_maturity(res, data.get("maturity_ids"))
 
 
 @bp.patch("/resources/<int:resource_id>")
 @require_auth
 def update_resource(resource_id):
+    """Зміна матеріалу. Опублікований матеріал автор (якщо він не модерує
+    розділ) змінює через пропозицію змін: опублікована версія лишається, доки
+    менеджер розділу не схвалить нову (див. /changes)."""
     res = CatalogResource.query.get_or_404(resource_id)
     user = current_user()
     if not _may_edit(res, user):
-        raise ApiError("Редагувати матеріал може його автор або менеджер каталогу",
+        raise ApiError("Редагувати матеріал може його автор або менеджер розділу",
                        403, "forbidden")
     data = request.get_json(silent=True) or {}
-    manager = _is_manager(user)
-    if not manager:
-        data = {k: v for k, v in data.items() if k not in ("is_featured", "status")}
-    _apply_fields(res, data)
+    moderator = access.can_moderate(user, res)
+    if not moderator:
+        data = {k: v for k, v in data.items() if k not in _MODERATOR_FIELDS}
+
+    if moderation_service.needs_pending(res, user):
+        _check_changes(res, data)
+        moderation_service.store_pending("resource", res, user, data)
+        if "body" in data:
+            file_service.sync_inline_images(res, user)
+        db.session.commit()
+        return jsonify(_payload(res, user))
+
+    old_section = res.section_id
+    require_stays_moderated(user, res, data)
+    _apply_changes(res, data, user)
     if "body" in data:
         file_service.sync_inline_images(res, user)
-    if "tags" in data:
-        _set_tags(res, data.get("tags"))
-    if "maturity_ids" in data:
-        _set_maturity(res, data.get("maturity_ids"))
-    # Автор змінив те, що вже бачать усі, — менеджери мають про це знати.
-    if res.status in PUBLIC_STATUSES:
-        review_service.notify_published("resource", res, user, updated=True)
+    # Поданий матеріал переїхав в інший розділ — розглядати його тепер іншим.
+    if res.status == "review" and res.section_id != old_section:
+        moderation_service.require_section(user, res)
+        review_service.notify_review_requested("resource", res, user)
     db.session.commit()
-    return jsonify(res.to_dict())
+    return jsonify(_payload(res, user))
 
 
 @bp.post("/resources/<int:resource_id>/status")
@@ -1133,59 +1211,156 @@ def update_resource(resource_id):
 def change_resource_status(resource_id):
     """Зміна стану матеріалу.
 
-    Автор може опублікувати свій матеріал або зняти його з публікації
-    (`published` / `draft`); менеджер — будь-який перехід життєвого циклу.
-    Коли менеджер змінює стан чужого матеріалу, автор отримує сповіщення з
-    причиною (`note`); коли автор публікує — сповіщення отримують менеджери.
+    Автор подає матеріал на розгляд (`review`, або `published`, що для нього
+    означає те саме), забирає з розгляду чи знімає з публікації (`draft`).
+    Менеджер розділу — будь-який перехід: схвалити (`published`), повернути
+    на доопрацювання (`draft`), архів, «потребує оновлення». Рішення щодо
+    чужого матеріалу автор отримує сповіщенням із причиною (`note`).
     """
     res = CatalogResource.query.get_or_404(resource_id)
     user = current_user()
-    manager = _is_manager(user)
-    if not (manager or _is_author(res, user)):
-        raise ApiError("Змінити стан матеріалу може його автор або менеджер каталогу",
+    moderator = access.can_moderate(user, res)
+    author = _is_author(res, user)
+    if not (moderator or author):
+        raise ApiError("Змінити стан матеріалу може його автор або менеджер розділу",
                        403, "forbidden")
     data = request.get_json(silent=True) or {}
     new_status = data.get("status")
-    allowed = RESOURCE_STATUSES if manager else AUTHOR_STATUSES
+    allowed = RESOURCE_STATUSES if moderator else AUTHOR_STATUSES
     if new_status not in allowed:
         raise ApiError("Статус має бути одним із: " + ", ".join(allowed),
                        400, "validation_error")
-    note = " ".join((data.get("note") or "").split()) or None
-    if note and len(note) > 2000:
-        raise ApiError("Причина завелика (максимум 2000 символів)", 400, "validation_error")
-    if new_status == "published":
-        _default_ownership(res, user)
-        _require_publish_ready(res)
-
+    note = moderation_service.clean_note(data)
     old_status = res.status
     if old_status == new_status:
-        return jsonify(res.to_dict())
-    res.status = new_status
-    if new_status == "published":
-        if res.published_at is None:
-            res.published_at = datetime.utcnow()
-        res.reviewed_at = datetime.utcnow()
-        res.review_note = None
-    elif new_status in ("draft", "archived") and manager and not _is_author(res, user):
-        # Причина лишається в картці: автор побачить її, відкривши свій матеріал.
-        res.review_note = note
-    _log_review("resource", res, old_status, new_status, note)
-    if manager:
-        action = {"draft": "unpublished"}.get(new_status, new_status)
-        review_service.notify_moderated("resource", res, user, action, note)
+        return jsonify(_payload(res, user))
+
+    if new_status in ("review", "published") and not moderator:
+        moderation_service.submit("resource", res, user, new_status,
+                                  lambda item: _publish_resource(item, user))
+    elif new_status == "review":
+        moderation_service.submit("resource", res, user, "review", lambda item: None)
     elif new_status == "published":
-        review_service.notify_published("resource", res, user)
+        _publish_resource(res, user)
+        moderation_service.log("resource", res, user, old_status, "published", note)
+        if not author:
+            action = "approved" if old_status == "review" else "published"
+            review_service.notify_moderated("resource", res, user, action, note)
+    else:
+        if new_status == "draft" and old_status in PUBLIC_STATUSES:
+            _merge_pending(res, user)
+        if new_status == "archived":
+            _drop_pending(res, user)
+        res.status = new_status
+        if moderator and not author:
+            # Причина лишається в картці: автор побачить її, відкривши матеріал.
+            res.review_note = note if new_status in ("draft", "archived") else res.review_note
+            action = ("returned" if old_status == "review" and new_status == "draft"
+                      else {"draft": "unpublished"}.get(new_status, new_status))
+            review_service.notify_moderated("resource", res, user, action, note)
+        moderation_service.log("resource", res, user, old_status, new_status, note)
     db.session.commit()
-    return jsonify(res.to_dict())
+    return jsonify(_payload(res, user))
+
+
+def _merge_pending(res, user):
+    """Матеріал повертається в чернетки — неcхвалені зміни автора стають
+    чернеткою: далі він працює з власною останньою версією."""
+    data = moderation_service.get_pending(res)
+    if data is None:
+        return
+    moderation_service.clear_pending(res)
+    _apply_changes(res, data, user)
+    file_service.sync_inline_images(res, user)
+
+
+def _drop_pending(res, user):
+    if res.pending_data:
+        moderation_service.clear_pending(res)
+        file_service.sync_inline_images(res, user)
+
+
+@bp.post("/resources/<int:resource_id>/changes")
+@require_auth
+def resource_changes(resource_id):
+    """Рішення щодо пропозиції змін до опублікованого матеріалу.
+
+    `action`: `approve` (менеджер розділу — зміни потрапляють у каталог),
+    `reject` (менеджер — з причиною `note`, лишається попередня версія),
+    `withdraw` (автор забирає свої зміни).
+    """
+    res = CatalogResource.query.get_or_404(resource_id)
+    user = current_user()
+    data = request.get_json(silent=True) or {}
+    action = data.get("action")
+    if action not in ("approve", "reject", "withdraw"):
+        raise ApiError("action має бути approve, reject або withdraw",
+                       400, "validation_error")
+    moderator = access.can_moderate(user, res)
+    if action == "withdraw" and not (_is_author(res, user) or moderator):
+        raise ApiError("Забрати зміни може їхній автор", 403, "forbidden")
+    if action != "withdraw" and not moderator:
+        raise ApiError("Рішення щодо змін ухвалює менеджер розділу", 403, "forbidden")
+    changes = moderation_service.get_pending(res)
+    if changes is None:
+        raise ApiError("Змін, що чекають схвалення, немає", 400, "no_pending")
+    note = moderation_service.clean_note(data)
+
+    moderation_service.clear_pending(res)
+    if action == "approve":
+        _apply_changes(res, changes, user)
+        res.reviewed_at = datetime.utcnow()
+        moderation_service.log("resource", res, user, res.status, res.status,
+                               note or "Зміни схвалено")
+        review_service.notify_moderated("resource", res, user, "changes_approved", note)
+    else:
+        moderation_service.log("resource", res, user, res.status, res.status,
+                               ("Зміни відхилено" + (f": {note}" if note else ""))
+                               if action == "reject" else "Автор забрав зміни")
+        if action == "reject":
+            review_service.notify_moderated("resource", res, user,
+                                            "changes_rejected", note)
+    file_service.sync_inline_images(res, user)
+    db.session.commit()
+    return jsonify(_payload(res, user))
 
 
 @bp.get("/resources/<int:resource_id>/review-log")
-@require_global_role("admin", "skill_manager")
+@require_auth
 def resource_review_log(resource_id):
-    CatalogResource.query.get_or_404(resource_id)
+    res = CatalogResource.query.get_or_404(resource_id)
+    if not access.can_moderate(current_user(), res):
+        raise ApiError("Журнал бачить менеджер розділу", 403, "forbidden")
     rows = (ReviewLog.query.filter_by(item_type="resource", item_id=resource_id)
             .order_by(ReviewLog.created_at.desc()).all())
     return jsonify([r.to_dict() for r in rows])
+
+
+@bp.get("/moderation")
+@require_moderator
+def moderation_queue():
+    """Черга модерації: подане на розгляд і зміни до опублікованого, що чекають
+    схвалення, — у розділах, які модерує поточний користувач (адміністратор —
+    усі, зокрема матеріали без розділу). Найдавніші — першими."""
+    from app.api.skills import skill_payload
+    user = current_user()
+    items = []
+    for res in CatalogResource.query.filter(
+            moderation_service.queue_filter(CatalogResource, user)).all():
+        items.append({"type": "resource",
+                      "kind": "submitted" if res.status == "review" else "changes",
+                      "at": (res.submitted_at if res.status == "review" else res.pending_at),
+                      "item": _payload(res, user)})
+    for skill in Skill.query.filter(moderation_service.queue_filter(Skill, user)).all():
+        items.append({"type": "skill",
+                      "kind": "submitted" if skill.status == "review" else "changes",
+                      "at": (skill.submitted_at if skill.status == "review"
+                             else skill.pending_at),
+                      "item": skill_payload(skill, user)})
+    items.sort(key=lambda x: x["at"] or datetime.min)
+    for x in items:
+        x["at"] = x["at"].isoformat() if x["at"] else None
+    return jsonify({"items": items, "count": len(items)})
 
 
 @bp.post("/resources/<int:resource_id>/open")
@@ -1253,13 +1428,13 @@ def _visible_resource(resource_id):
 
 
 def _may_attach(res, user):
-    """Наповнювати картку файлами може її автор або менеджер каталогу.
+    """Наповнювати картку файлами може її автор або менеджер розділу.
 
     Поле `owner` — вільний текст (прізвище відповідального), а не посилання на
     користувача, тому правами воно керувати не може: звірятися з ним означало б
     видавати доступ за збігом рядків.
     """
-    return _is_manager(user) or res.created_by == user.id
+    return _may_edit(res, user)
 
 
 @bp.get("/resources/<int:resource_id>/files")
@@ -1295,6 +1470,10 @@ def upload_resource_file(resource_id):
     if file is None or not file.filename:
         raise ApiError("Файл не надіслано (поле 'file')", 400, "validation_error")
     uf = file_service.save_attachment(user, file.filename, file.read(), res.id)
+    # Файл до опублікованого з'являється одразу — менеджер розділу має знати.
+    if moderation_service.is_public(res):
+        review_service.notify_updated("resource", res, user)
+        db.session.commit()
     return jsonify(uf.to_dict()), 201
 
 
@@ -1415,7 +1594,7 @@ def delete_resource(resource_id):
         .delete(synchronize_session=False)
     SkillFeedback.query.filter_by(resource_id=resource_id).update(
         {SkillFeedback.resource_id: None}, synchronize_session=False)
-    if _is_manager(user):
+    if not _is_author(res, user):
         review_service.notify_moderated("resource", res, user, "deleted", note,
                                         link=False)
     db.session.delete(res)
@@ -1561,7 +1740,7 @@ def catalog_settings():
 
 
 @bp.post("/settings")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def set_catalog_settings():
     """Зміна налаштувань. Частота опитувань керується звідси, а не з коду."""
     data = request.get_json(silent=True) or {}
@@ -1600,7 +1779,7 @@ def set_catalog_settings():
 
 
 @bp.get("/analytics")
-@require_global_role("admin", "skill_manager")
+@require_moderator
 def analytics():
     """Базова аналітика наповнення хабу (BR-16, FR-11).
 
@@ -1723,7 +1902,7 @@ def _pct(part, whole):
 
 
 @bp.get("/kpi")
-@require_global_role("admin", "skill_manager")
+@require_moderator
 def kpi():
     """Показники розділу 11 BRD за період із порівнянням до попереднього.
 
@@ -1849,7 +2028,7 @@ def kpi():
 
 
 @bp.get("/kpi/export")
-@require_global_role("admin", "skill_manager")
+@require_moderator
 def kpi_export():
     """Ті самі числа, що й на екрані, у вигляді CSV.
 
@@ -2041,7 +2220,7 @@ def submit_survey():
     db.session.add(SurveyResponse(
         kind=kind, score=score, comment=comment or None,
         user_id=user.id,
-        user_role="manager" if _is_manager(user) else "user",
+        user_role="manager" if access.is_moderator(user) else "user",
         context=(data.get("context") or "catalog")[:50],
         context_id=data.get("context_id") if isinstance(data.get("context_id"), int) else None,
         created_at=now, day=now.date(),
@@ -2088,9 +2267,8 @@ def _survey_summary(since=None, until=None):
 
 def _searchable_items(user):
     """Матеріали, доступні користувачу, у вигляді словників для пошуку."""
-    query = CatalogResource.query
-    if not _is_manager(user):
-        query = query.filter(CatalogResource.status.in_(PUBLIC_STATUSES))
+    query = CatalogResource.query.filter(
+        moderation_service.visible_filter(CatalogResource, user, PUBLIC_STATUSES))
     return [r.to_dict() for r in query.all()]
 
 
@@ -2150,16 +2328,16 @@ def task_search():
 @bp.get("/synonyms")
 @require_auth
 def list_synonyms():
-    """Словник формулювань задач. Менеджер бачить і вимкнені."""
+    """Словник формулювань задач. Адміністратор бачить і вимкнені."""
     query = SearchSynonym.query
-    if not _is_manager(current_user()):
+    if not access.is_admin(current_user()):
         query = query.filter_by(is_active=True)
     rows = query.order_by(SearchSynonym.phrase).all()
     return jsonify([r.to_dict() for r in rows])
 
 
 @bp.post("/synonyms")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def create_synonym():
     data = request.get_json(silent=True) or {}
     phrase = " ".join((data.get("phrase") or "").split())
@@ -2178,7 +2356,7 @@ def create_synonym():
 
 
 @bp.patch("/synonyms/<int:synonym_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def update_synonym(synonym_id):
     row = SearchSynonym.query.get_or_404(synonym_id)
     data = request.get_json(silent=True) or {}
@@ -2204,7 +2382,7 @@ def update_synonym(synonym_id):
 
 
 @bp.delete("/synonyms/<int:synonym_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_synonym(synonym_id):
     row = SearchSynonym.query.get_or_404(synonym_id)
     db.session.delete(row)
@@ -2265,7 +2443,7 @@ def assistant_feedback():
 
 
 @bp.get("/search-analytics")
-@require_global_role("admin", "skill_manager")
+@require_moderator
 def search_analytics():
     """Аналітика запитів: теми, глухі кути й користь помічника (BR-08)."""
     def _grouped(filter_fn=None, limit=10):
@@ -2558,8 +2736,9 @@ def confirm_review(resource_id):
     res = CatalogResource.query.get_or_404(resource_id)
     user = current_user()
     names = {(user.full_name or "").casefold(), (user.username or "").casefold()}
-    if (res.owner or "").strip().casefold() not in names and not _is_manager(user):
-        raise ApiError("Підтвердити актуальність може власник матеріалу або менеджер",
+    if ((res.owner or "").strip().casefold() not in names
+            and not access.can_moderate(user, res)):
+        raise ApiError("Підтвердити актуальність може власник матеріалу або менеджер розділу",
                        403, "forbidden")
 
     data = request.get_json(silent=True) or {}

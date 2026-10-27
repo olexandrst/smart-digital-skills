@@ -1,4 +1,4 @@
-"""RBAC-декоратори: автентифікація та глобальні ролі."""
+"""RBAC-декоратори: автентифікація, глобальні ролі й перевірки з app/core/access.py."""
 from functools import wraps
 from flask_jwt_extended import verify_jwt_in_request
 from app.core.security import current_user
@@ -30,3 +30,29 @@ def require_global_role(*codes):
             return fn(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def require_check(check, message="Недостатньо прав"):
+    """Доступ, якщо `check(user)` повертає True (див. app/core/access.py)."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            verify_jwt_in_request()
+            user = current_user()
+            if user is None or not user.is_active:
+                raise ApiError("Неавторизовано", 401, "unauthorized")
+            if not check(user):
+                raise ApiError(message, 403, "forbidden")
+            return fn(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def require_admin(fn):
+    return require_global_role("admin")(fn)
+
+
+def require_moderator(fn):
+    """Адміністратор або менеджер розділу з призначеними розділами."""
+    from app.core.access import is_moderator
+    return require_check(is_moderator)(fn)

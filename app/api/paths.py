@@ -1,11 +1,12 @@
 """Навчальні маршрути (BR-9): перегляд, проходження, керування.
 
 Дивитися й проходити маршрути може будь-який авторизований користувач;
-створювати й редагувати — адміністратор і менеджер каталогу.
+створювати й редагувати — адміністратор.
 """
 from flask import Blueprint, request, jsonify
 from app.extensions import db
-from app.core.permissions import require_auth, require_global_role
+from app.core import access
+from app.core.permissions import require_auth, require_admin
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
@@ -18,7 +19,7 @@ MAX_TEXT = 5000
 
 
 def _is_manager(user):
-    return user.has_global_role("admin") or user.has_global_role("skill_manager")
+    return access.is_admin(user)
 
 
 def _done_steps(user, path_id=None):
@@ -74,7 +75,7 @@ def get_path(path_id):
 
 
 @bp.post("")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def create_path():
     data = request.get_json(silent=True) or {}
     name = " ".join((data.get("name") or "").split())
@@ -117,7 +118,7 @@ def _apply_path_fields(path, data):
 
 
 @bp.patch("/<int:path_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def update_path(path_id):
     path = LearningPath.query.get_or_404(path_id)
     data = request.get_json(silent=True) or {}
@@ -136,7 +137,7 @@ def update_path(path_id):
 
 
 @bp.delete("/<int:path_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_path(path_id):
     path = LearningPath.query.get_or_404(path_id)
     LearningProgress.query.filter_by(path_id=path_id).delete(synchronize_session=False)
@@ -148,7 +149,7 @@ def delete_path(path_id):
 # -------------------------------- Кроки --------------------------------
 
 @bp.post("/<int:path_id>/steps")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def add_step(path_id):
     """Крок маршруту: або картка каталогу, або зовнішнє посилання."""
     path = LearningPath.query.get_or_404(path_id)
@@ -194,7 +195,7 @@ def _apply_step_fields(step, data, *, creating=False):
 
 
 @bp.patch("/<int:path_id>/steps/<int:step_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def update_step(path_id, step_id):
     step = LearningPathStep.query.filter_by(id=step_id, path_id=path_id).first()
     if step is None:
@@ -205,7 +206,7 @@ def update_step(path_id, step_id):
 
 
 @bp.delete("/<int:path_id>/steps/<int:step_id>")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def delete_step(path_id, step_id):
     step = LearningPathStep.query.filter_by(id=step_id, path_id=path_id).first()
     if step is None:
@@ -222,7 +223,7 @@ def delete_step(path_id, step_id):
 
 
 @bp.post("/<int:path_id>/steps/reorder")
-@require_global_role("admin", "skill_manager")
+@require_admin
 def reorder_steps(path_id):
     """Новий порядок кроків списком id."""
     LearningPath.query.get_or_404(path_id)

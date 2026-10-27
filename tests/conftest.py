@@ -4,7 +4,7 @@ from app import create_app
 from app.config import BaseConfig
 from app.extensions import db as _db
 from app.core.security import hash_password
-from app.models import Role, User, UserRole, Skill
+from app.models import Role, User, UserRole, Skill, CatalogSection
 
 
 import tempfile
@@ -41,10 +41,17 @@ def client(app):
     return app.test_client()
 
 
+# Розділ, який модерує менеджер `sm` (див. app/core/access.py): його id
+# тести передають у section_id, коли менеджер має діяти як модератор.
+SM_SECTION = "Розділ менеджера"
+
+
 def _seed_minimal():
     admin_role = Role(code="admin", name="Admin")
-    sm_role = Role(code="skill_manager", name="Менеджер каталогу")
+    sm_role = Role(code="section_manager", name="Менеджер розділу")
     _db.session.add_all([admin_role, sm_role])
+    section = CatalogSection(name=SM_SECTION)
+    _db.session.add(section)
     _db.session.flush()
 
     admin = User(username="admin", password_hash=hash_password("Admin123!"),
@@ -56,9 +63,10 @@ def _seed_minimal():
     _db.session.flush()
     _db.session.add(UserRole(user_id=admin.id, role_id=admin_role.id))
     _db.session.add(UserRole(user_id=sm.id, role_id=sm_role.id))
+    sm.managed_sections = [section]
 
     _db.session.add(Skill(name="Summarizer", description="desc", status="published",
-                          prompt_template="{text}"))
+                          prompt_template="{text}", section_id=section.id))
     _db.session.commit()
 
 
@@ -69,3 +77,8 @@ def login(client, username, password):
 
 def auth(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+def sm_section_id():
+    """id розділу, який модерує менеджер `sm`."""
+    return CatalogSection.query.filter_by(name=SM_SECTION).one().id

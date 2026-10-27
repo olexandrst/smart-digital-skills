@@ -19,15 +19,16 @@ def _iso(value):
 
 
 # review_due / review_overdue — нагадування власникові про перегляд;
-# content_published / content_updated — менеджерам: користувач опублікував
-#   або змінив опублікований матеріал чи навичку;
-# content_moderated — авторові: менеджер зняв його матеріал з публікації,
-#   переніс в архів, видалив тощо (з причиною, якщо вказана);
+# review_requested — менеджерам розділу: матеріал подано на розгляд або
+#   автор змінив опубліковане й чекає схвалення змін;
+# content_updated — менеджерам розділу: до опублікованого матеріалу додали файл;
+# content_moderated — авторові: рішення менеджера (схвалено, повернуто, знято
+#   з публікації, перенесено в архів, видалено) з причиною, якщо вказана;
 # comment_added — авторові: новий коментар до його матеріалу.
-# Старі review_requested / review_published / review_rejected лишаються в
-# історії й показуються як звичайні сповіщення.
-NOTIFICATION_KINDS = ("review_due", "review_overdue", "content_published",
-                      "content_updated", "content_moderated", "comment_added")
+# content_published лишається в історії з часів пост-модерації.
+NOTIFICATION_KINDS = ("review_due", "review_overdue", "review_requested",
+                      "content_published", "content_updated", "content_moderated",
+                      "comment_added")
 
 
 class Notification(db.Model):

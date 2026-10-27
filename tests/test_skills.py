@@ -1,7 +1,7 @@
 """Навички як матеріали каталогу: перегляд, завантаження пакета, лічильник.
 
 Навички більше не запускаються й не «встановлюються» — їх хостимо: будь-хто
-бачить опубліковані й завантажує пакет, менеджери керують чернетками.
+бачить опубліковані й завантажує пакет, менеджер розділу керує чернетками.
 """
 import io
 import zipfile
@@ -10,7 +10,7 @@ import pytest
 
 from app.models import Skill, CatalogFavorite, SkillFeedback, User
 from app.extensions import db
-from tests.conftest import login, auth
+from tests.conftest import login, auth, sm_section_id
 
 SKILL_MD = """---
 name: Аналіз договорів
@@ -36,7 +36,8 @@ def _zip(files):
 
 def _upload(client, token, data):
     return client.post("/api/skills/upload", headers=auth(token),
-                       data={"file": (io.BytesIO(data), "contracts.skill")},
+                       data={"file": (io.BytesIO(data), "contracts.skill"),
+                             "section_id": str(sm_section_id())},
                        content_type="multipart/form-data")
 
 

@@ -47,6 +47,7 @@ DEFAULT_MATERIAL_TYPES = (
 
 DEFAULT_STATUS_TERMS = (
     ("draft", "Чернетка", "✏️", "ink"),
+    ("review", "На розгляді", "🕓", "amber"),
     ("published", "Опублікований", "✅", "green"),
     ("needs_update", "Потребує оновлення", "⚠️", "amber"),
     ("archived", "Архів", "📦", "steel"),
@@ -62,14 +63,16 @@ DEFAULT_REUSE_TERMS = (
 LINK_SCOPES = ("external", "internal")
 
 # Статуси життєвого циклу матеріалу (BR-12).
-# draft — чернетка або знятий з публікації (бачать автор і менеджери);
+# draft — чернетка або повернений на доопрацювання (бачать автор і менеджери
+# розділу); review — поданий на розгляд, чекає рішення менеджера розділу;
 # published — опублікований; needs_update — потребує оновлення (видимий
 # користувачам із застереженням); archived — архів, видимий лише менеджерам.
-# Попереднього розгляду немає: користувач публікує сам, менеджер каталогу
-# отримує сповіщення й модерує вже опубліковане.
-RESOURCE_STATUSES = ("draft", "published", "needs_update", "archived")
-# Статуси, які автор (не менеджер) може задати своєму матеріалу.
-AUTHOR_STATUSES = ("draft", "published")
+# Модерація попередня: матеріал користувача з'являється в каталозі лише після
+# схвалення менеджером свого розділу (або адміністратором).
+RESOURCE_STATUSES = ("draft", "review", "published", "needs_update", "archived")
+# Статуси, які автор може запросити для свого матеріалу: published від того,
+# хто не модерує розділ, перетворюється на review (див. moderation_service).
+AUTHOR_STATUSES = ("draft", "review", "published")
 
 # Статуси, які бачать звичайні користувачі.
 PUBLIC_STATUSES = ("published", "needs_update")
@@ -391,6 +394,14 @@ class CatalogResource(db.Model):
     # Живе тут (а не лише в журналі), бо автор має бачити її в картці й у
     # списку своїх матеріалів; повторна публікація її знімає.
     review_note = db.Column(db.Text)
+    # Попередня модерація: коли матеріал востаннє подали на розгляд.
+    submitted_at = db.Column(db.DateTime)
+    # Зміни автора до вже опублікованого матеріалу, що чекають схвалення:
+    # JSON із полями запиту на зміну. Опублікована версія лишається видимою,
+    # доки менеджер розділу не схвалить зміни (див. moderation_service).
+    pending_data = db.Column(db.Text)
+    pending_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    pending_at = db.Column(db.DateTime)
     version = db.Column(db.String, nullable=False, default="1.0.0")
     opens_count = db.Column(db.Integer, nullable=False, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
@@ -456,6 +467,8 @@ class CatalogResource(db.Model):
             "is_featured": self.is_featured,
             "status": self.status,
             "review_note": self.review_note,
+            "submitted_at": _iso(self.submitted_at),
+            "has_pending": bool(self.pending_data),
             "version": self.version,
             "opens_count": self.opens_count,
             "created_by": self.created_by,

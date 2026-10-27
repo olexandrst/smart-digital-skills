@@ -11,7 +11,7 @@
 """
 from app.extensions import db
 from app.core.errors import ApiError
-from app.models import SkillFeedback
+from app.models import SkillFeedback, Skill, CatalogResource
 from app.services import review_service
 
 MAX_LENGTH = 5000
@@ -63,9 +63,20 @@ def add(item_type, item, user, message, rating):
     return fb
 
 
-def public_dict(fb, user):
+def _moderates(fb, user):
+    """Чи модерує людина картку, до якої залишено коментар."""
+    from app.core import access
+    item = (db.session.get(Skill, fb.skill_id) if fb.skill_id
+            else db.session.get(CatalogResource, fb.resource_id) if fb.resource_id
+            else None)
+    return access.can_moderate(user, item) if item is not None else access.is_admin(user)
+
+
+def public_dict(fb, user, moderator=None):
     """Коментар у стрічці: лише те, що бачать усі, плюс право видалити."""
     mine = fb.user_id is not None and fb.user_id == user.id
+    if moderator is None:
+        moderator = _moderates(fb, user)
     return {
         "id": fb.id,
         "author": fb.username or "Користувач",
@@ -73,7 +84,7 @@ def public_dict(fb, user):
         "rating": fb.rating,
         "created_at": fb.created_at.isoformat() if fb.created_at else None,
         "mine": mine,
-        "can_delete": mine or review_service.is_manager(user),
+        "can_delete": mine or moderator,
     }
 
 
@@ -91,8 +102,9 @@ def thread(item_type, item_id, user):
                           SkillFeedback.rating.isnot(None)).one())
     mine = (rated.filter(SkillFeedback.user_id == user.id)
             .order_by(SkillFeedback.created_at.desc()).first())
+    moderator = bool(comments) and _moderates(comments[0], user)
     return {
-        "items": [public_dict(c, user) for c in comments],
+        "items": [public_dict(c, user, moderator) for c in comments],
         "rating_avg": round(float(avg), 1) if avg is not None else None,
         "rating_count": int(count),
         "my_rating": mine.rating if mine else None,
@@ -100,13 +112,13 @@ def thread(item_type, item_id, user):
 
 
 def remove(fb, user):
-    """Видалення коментаря: автор коментаря або менеджер каталогу.
+    """Видалення коментаря: автор коментаря або менеджер розділу картки.
 
     Якщо до коментаря прив'язана оцінка, зникає лише текст — видалити
     коментар не означає забрати свою оцінку.
     """
-    if not (fb.user_id == user.id or review_service.is_manager(user)):
-        raise ApiError("Видалити коментар може його автор або менеджер каталогу",
+    if not (fb.user_id == user.id or _moderates(fb, user)):
+        raise ApiError("Видалити коментар може його автор або менеджер розділу",
                        403, "forbidden")
     if fb.rating is not None:
         fb.message = ""

@@ -123,13 +123,31 @@ def _validate_zip_safety(zf):
 
 # --------------------------- Збереження ---------------------------
 
-def store_package(skill_id, file_bytes):
+def store_package(skill_id, file_bytes, pending=False):
+    """Зберігає архів навички. `pending` — нова версія, що чекає схвалення:
+    лежить окремо, поки менеджер розділу не схвалить її (див. promote_package)."""
     packages_dir = current_app.config["SKILL_PACKAGES_DIR"]
     os.makedirs(packages_dir, exist_ok=True)
-    path = os.path.join(packages_dir, f"skill_{skill_id}.zip")
+    name = f"skill_{skill_id}.pending.zip" if pending else f"skill_{skill_id}.zip"
+    path = os.path.join(packages_dir, name)
     with open(path, "wb") as fh:
         fh.write(file_bytes)
     return path
+
+
+def promote_package(skill_id, pending_path):
+    """Схвалена нова версія займає місце основного архіву."""
+    path = os.path.join(current_app.config["SKILL_PACKAGES_DIR"], f"skill_{skill_id}.zip")
+    os.replace(pending_path, path)
+    return path
+
+
+def remove_file(path):
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def delete_package_file(skill):
@@ -140,11 +158,13 @@ def delete_package_file(skill):
             pass
 
 
-def list_package_files(skill):
-    """Файли всередині пакета (без тек) — щоб видно було, що завантажуєш."""
-    if not skill.package_path or not os.path.exists(skill.package_path):
+def list_package_files(skill, path=None):
+    """Файли всередині пакета (без тек) — щоб видно було, що завантажуєш.
+    `path` — інший архів тієї ж навички (нова версія на розгляді)."""
+    path = path or skill.package_path
+    if not path or not os.path.exists(path):
         return []
-    with open(skill.package_path, "rb") as fh:
+    with open(path, "rb") as fh:
         zf = _read_zip(fh.read())
     return [{"name": i.filename, "size": i.file_size}
             for i in zf.infolist() if not i.filename.endswith("/")]

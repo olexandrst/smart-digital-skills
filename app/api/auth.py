@@ -9,7 +9,7 @@ from app.extensions import db
 from app.core.security import verify_password, current_user
 from app.core.permissions import require_auth
 from app.core.errors import ApiError
-from app.models import User, Role, UserRole
+from app.models import User
 from app.services import entra_service
 
 bp = Blueprint("auth", __name__)
@@ -127,8 +127,8 @@ def entra_callback():
 def upsert_entra_user(claims):
     """Створює або оновлює користувача за даними каталогу.
 
-    Ролі перераховуються при кожному вході: членство в групі каталогу — єдине
-    джерело правди, тож видалення з групи одразу знімає доступ.
+    Ролі вхід не змінює: їх призначає адміністратор вручну в «Користувачах»
+    (фідбек тестування, п. 11). Новий співробітник отримує роль «Користувач».
     """
     profile = entra_service.profile_from_claims(claims)
     if not profile["external_id"]:
@@ -155,14 +155,6 @@ def upsert_entra_user(claims):
     user.is_active = True
     user.last_login_at = datetime.utcnow()
     db.session.flush()
-
-    codes = entra_service.role_codes_for(claims)
-    roles = {r.code: r.id for r in Role.query.all()}
-    UserRole.query.filter_by(user_id=user.id).delete(synchronize_session=False)
-    for code in codes:
-        if code in roles:
-            db.session.add(UserRole(user_id=user.id, role_id=roles[code]))
-    user.is_system_admin = "admin" in codes
 
     db.session.commit()
     return user

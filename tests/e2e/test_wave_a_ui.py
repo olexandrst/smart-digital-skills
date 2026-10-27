@@ -18,7 +18,12 @@ def _relogin(page, base, username):
 # ---- П. 5 і 8: головна — привітання з рівнем і два блоки ----
 
 def test_home_has_level_line_and_two_blocks(page, live_url):
-    login(page, live_url)
+    # Свіжий матеріал публікує адміністратор: у користувача він пройшов би розгляд.
+    login(page, live_url, "admin")
+    page.evaluate("""() => api('/catalog/resources', { method: 'POST', body: {
+        resource_type: 'instruction', name: 'Свіжа інструкція', description: 'Нове.',
+        body: 'Текст.', status: 'published' } })""")
+    _relogin(page, live_url, "tester")
     level = page.locator("#home-level")
     expect(level).to_be_visible()
     expect(level).to_contain_text("Визначити рівень")
@@ -29,15 +34,13 @@ def test_home_has_level_line_and_two_blocks(page, live_url):
     expect(page.locator("#cat-grid")).to_have_count(0)
     expect(page.locator("#cat-kinds")).to_have_count(0)
     fresh = page.locator("#fresh-row article.mdc")
-    assert 1 <= fresh.count() <= 8
+    assert fresh.count() <= 8
+    if not fresh.count():   # малий каталог: усе нове вже серед рекомендацій
+        expect(page.locator("#cat-personal")).to_contain_text("вже серед рекомендованих")
     # Те, що вже є серед рекомендацій, у новинках не повторюється.
     recs = set(page.locator("#rec-row .mdc-title").all_text_contents())
     assert not recs & set(page.locator("#fresh-row .mdc-title").all_text_contents())
     # Щойно опублікований матеріал одразу видно на головній.
-    page.evaluate("""() => api('/catalog/resources', { method: 'POST', body: {
-        resource_type: 'instruction', name: 'Свіжа інструкція', description: 'Нове.',
-        body: 'Текст.', status: 'published' } })""")
-    page.reload()
     expect(page.locator("#cat-personal")).to_contain_text("Свіжа інструкція")
 
     # Пошук із головної веде в «Матеріали» й одразу звужує каталог.
@@ -70,8 +73,8 @@ def test_my_development_shows_level_date_next_step_and_paths(page, live_url):
     page.click('#sidebar [data-dest="hub:home"]')
     expect(page.locator("#home-level")).to_contain_text("Ваш рівень: User")
 
-    # Посилання на тест вказує менеджер — тоді з'являється кнопка.
-    _relogin(page, live_url, "manager")
+    # Посилання на тест вказує адміністратор — тоді з'являється кнопка.
+    _relogin(page, live_url, "admin")
     settings(page, maturity_test_url="https://forms.office.com/r/level-test")
     try:
         _relogin(page, live_url, "tester")
@@ -81,7 +84,7 @@ def test_my_development_shows_level_date_next_step_and_paths(page, live_url):
         expect(test_link).to_have_attribute("href", "https://forms.office.com/r/level-test")
         expect(test_link).to_have_attribute("target", "_blank")
     finally:
-        _relogin(page, live_url, "manager")
+        _relogin(page, live_url, "admin")
         settings(page, maturity_test_url="")
 
 
@@ -139,7 +142,7 @@ def _survey_defaults(page):
 
 def test_survey_on_logout_and_at_next_session(page, live_url, live_app):
     from app.models import SurveyResponse
-    login(page, live_url, "manager")
+    login(page, live_url, "admin")
     _survey_always(page)
     try:
         _relogin(page, live_url, "tester")
@@ -175,7 +178,7 @@ def test_survey_on_logout_and_at_next_session(page, live_url, live_app):
         expect(tab.locator(".survey-bar")).to_have_count(0)
         tab.close()
     finally:
-        _relogin(page, live_url, "manager")
+        _relogin(page, live_url, "admin")
         _survey_defaults(page)
 
 

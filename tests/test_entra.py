@@ -18,8 +18,6 @@ def entra_app(app):
         ENTRA_TENANT_ID="tenant-123",
         ENTRA_CLIENT_ID="client-abc",
         ENTRA_REDIRECT_URI="https://hub.example.com/api/auth/entra/callback",
-        ENTRA_ADMIN_GROUPS="grp-admin",
-        ENTRA_MANAGER_GROUPS="grp-managers,grp-knowledge",
     )
     return app
 
@@ -98,28 +96,25 @@ def test_first_login_creates_user_from_directory(client, entra_app):
         assert user.password_hash is None       # пароль такому акаунту не потрібен
 
 
-def test_group_membership_grants_role(client, entra_app):
+def test_new_corporate_user_is_plain_user(client, entra_app):
+    """Ролі з груп каталогу не беруться: новий співробітник — «Користувач»."""
     from app.api.auth import upsert_entra_user
     with entra_app.app_context():
-        user = upsert_entra_user(_claims(groups=["grp-managers"]))
-        assert user.role_codes == ["skill_manager"]
-        assert user.is_system_admin is False
-
-
-def test_admin_group_grants_system_admin(client, entra_app):
-    from app.api.auth import upsert_entra_user
-    with entra_app.app_context():
-        user = upsert_entra_user(_claims(groups=["grp-admin"]))
-        assert "admin" in user.role_codes and user.is_system_admin is True
-
-
-def test_role_revoked_when_group_membership_ends(client, entra_app):
-    """Членство в групі — єдине джерело правди: вихід із групи знімає доступ."""
-    from app.api.auth import upsert_entra_user
-    with entra_app.app_context():
-        upsert_entra_user(_claims(groups=["grp-admin"]))
-        user = upsert_entra_user(_claims(groups=[]))
+        user = upsert_entra_user(_claims(groups=["grp-admin"], roles=["grp-admin"]))
         assert user.role_codes == [] and user.is_system_admin is False
+
+
+def test_login_keeps_roles_assigned_by_admin(client, entra_app):
+    """Ролі призначає адміністратор вручну — корпоративний вхід їх не стирає."""
+    from app.api.auth import upsert_entra_user
+    from app.models import Role, UserRole
+    with entra_app.app_context():
+        user = upsert_entra_user(_claims())
+        role = Role.query.filter_by(code="section_manager").one()
+        db.session.add(UserRole(user_id=user.id, role_id=role.id))
+        db.session.commit()
+        user = upsert_entra_user(_claims(groups=[]))
+        assert user.role_codes == ["section_manager"]
 
 
 def test_existing_password_account_is_linked_not_duplicated(client, entra_app):
@@ -197,10 +192,3 @@ def test_pkce_pair_is_unique_and_well_formed(app):
         v2, _c2 = entra_service.new_pkce_pair()
         assert v1 != v2 and len(v1) >= 43
         assert "=" not in c1 and "+" not in c1 and "/" not in c1
-
-
-def test_role_mapping_reads_both_groups_and_roles_claims(entra_app):
-    with entra_app.app_context():
-        assert entra_service.role_codes_for({"roles": ["grp-knowledge"]}) \
-            == ["skill_manager"]
-        assert entra_service.role_codes_for({"groups": ["невідома"]}) == []

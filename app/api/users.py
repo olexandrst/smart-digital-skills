@@ -1,4 +1,9 @@
-"""Менеджмент користувачів (тільки Admin): CRUD, скидання пароля, ролі."""
+"""Менеджмент користувачів (тільки адміністратор): CRUD, скидання пароля,
+ролі, розділи менеджера й ознаки «Експерт» і «Відповідальний за ідеї».
+
+Ролі призначаються вручну (фідбек тестування, п. 11): адміністратор,
+менеджер розділу (з переліком розділів) або користувач — без ролі.
+"""
 import os
 import shutil
 from flask import Blueprint, request, jsonify, current_app
@@ -8,6 +13,7 @@ from app.core.security import hash_password, current_user
 from app.core.errors import ApiError
 from app.models import (
     User, Role, UserRole, RefreshToken, UserFile, Notification, CatalogFavorite,
+    CatalogSection, CatalogResource, Skill,
     LearningProgress, HiddenRecommendation, SurveyPrompt, UserSession,
     Idea, ReviewLog, SearchQueryLog, SkillFeedback, SurveyResponse, ResourceView,
 )
@@ -23,7 +29,10 @@ _OWNED_BY_USER = (RefreshToken, UserFile, Notification, CatalogFavorite,
 # відв'язуються. (колонка, модель)
 _REFERENCES_TO_USER = ((Idea, "author_id"), (ReviewLog, "actor_user_id"),
                        (SearchQueryLog, "user_id"), (SkillFeedback, "user_id"),
-                       (SurveyResponse, "user_id"), (ResourceView, "user_id"))
+                       (SurveyResponse, "user_id"), (ResourceView, "user_id"),
+                       (CatalogResource, "pending_by"), (Skill, "pending_by"))
+# Ролі, які призначає адміністратор. Користувач — це відсутність ролі.
+ASSIGNABLE_ROLES = ("admin", "section_manager")
 
 
 @bp.get("")
@@ -55,7 +64,7 @@ def create_user():
     )
     db.session.add(user)
     db.session.flush()
-    _set_roles(user, data.get("roles"))
+    _apply_access(user, data)
     db.session.commit()
     return jsonify(user.to_dict()), 201
 
@@ -77,9 +86,11 @@ def update_user(user_id):
     if "full_name" in data:
         user.full_name = data["full_name"]
     if "is_active" in data:
+        if user.id == current_user().id and not data["is_active"]:
+            raise ApiError("Не можна деактивувати власний обліковий запис",
+                           400, "self_deactivate")
         user.is_active = bool(data["is_active"])
-    if "roles" in data:
-        _set_roles(user, data["roles"])
+    _apply_access(user, data)
     db.session.commit()
     return jsonify(user.to_dict())
 
@@ -116,6 +127,7 @@ def delete_user(user_id):
 
     storage_uid = user.storage_uid
     user.roles = []
+    user.managed_sections = []
     for model in _OWNED_BY_USER:
         model.query.filter_by(user_id=user_id).delete(synchronize_session=False)
     for model, column in _REFERENCES_TO_USER:
@@ -134,11 +146,51 @@ def delete_user(user_id):
     return jsonify({"message": "Користувача та його дані видалено"})
 
 
+def _apply_access(user, data):
+    """Роль, розділи менеджера й ознаки з запиту (лише передані поля)."""
+    if "roles" in data:
+        _set_roles(user, data["roles"])
+    if "managed_section_ids" in data:
+        _set_sections(user, data["managed_section_ids"])
+    # Розділи без ролі менеджера нічого не дають — не лишаємо їх висіти.
+    if not user.has_global_role("section_manager"):
+        user.managed_sections = []
+    for flag in ("is_expert", "is_ideas_owner"):
+        if flag in data:
+            setattr(user, flag, bool(data[flag]))
+
+
 def _set_roles(user, role_codes):
     if role_codes is None:
         return
+    codes = [c for c in role_codes if c in ASSIGNABLE_ROLES]
+    unknown = [c for c in role_codes if c not in ASSIGNABLE_ROLES]
+    if unknown:
+        raise ApiError("Невідома роль: " + ", ".join(map(str, unknown)),
+                       400, "validation_error")
+    me = current_user()
+    if user.id == me.id and "admin" not in codes and not user.is_system_admin:
+        raise ApiError("Не можна зняти з себе роль адміністратора — інакше хаб "
+                       "може лишитися без адміністратора", 400, "self_demote")
     UserRole.query.filter_by(user_id=user.id).delete()
-    for code in role_codes:
+    for code in codes:
         role = Role.query.filter_by(code=code).first()
         if role:
             db.session.add(UserRole(user_id=user.id, role_id=role.id))
+    db.session.flush()
+    db.session.expire(user, ["roles"])
+
+
+def _set_sections(user, section_ids):
+    if section_ids is None:
+        section_ids = []
+    if not isinstance(section_ids, list):
+        raise ApiError("managed_section_ids має бути списком", 400, "validation_error")
+    try:
+        ids = {int(x) for x in section_ids}
+    except (TypeError, ValueError):
+        raise ApiError("Некоректний розділ", 400, "validation_error")
+    sections = CatalogSection.query.filter(CatalogSection.id.in_(ids)).all() if ids else []
+    if len(sections) != len(ids):
+        raise ApiError("Розділ не знайдено", 404, "not_found")
+    user.managed_sections = sections

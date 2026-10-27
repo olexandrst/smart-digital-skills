@@ -734,6 +734,7 @@ tbody tr:hover { background: var(--soft); }
 .badge.published { color: var(--ok); background: var(--ok-soft); }
 .badge.draft { color: var(--muted); }
 .badge.delisted { color: var(--danger); background: var(--danger-soft); }
+.badge.review { color: var(--warn); background: var(--warn-soft); }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 
@@ -1231,6 +1232,36 @@ button.mdc-tag-link:focus-visible { outline: 2px solid var(--primary); outline-o
 .sm-manage .ghost-act svg { width: 14px; height: 14px; }
 .sm-manage .danger-act { color: var(--danger); }
 .sm-manage .danger-act:hover { background: var(--danger-soft); }
+.sm-manage .accent-act { color: #fff; background: var(--primary); border-color: transparent; }
+.sm-manage .accent-act:hover { background: var(--primary-strong); }
+
+/* ----- Пропозиція змін до опублікованого: було → стало ----- */
+.chg-modal { max-width: 760px; }
+.chg-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 16px; }
+.chg-row {
+  display: grid; grid-template-columns: 160px minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px 12px; align-items: start; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--soft);
+}
+.chg-k { font-size: var(--fs-foot); font-weight: 600; color: var(--muted); }
+.chg-old-v { color: var(--muted); text-decoration: line-through; overflow-wrap: anywhere; }
+.chg-new-v { font-weight: 540; overflow-wrap: anywhere; }
+.chg-arrow { color: var(--faint); }
+.chg-row .small { grid-column: 2 / -1; justify-self: start; }
+.chg-text { grid-template-columns: 160px minmax(0, 1fr); }
+.chg-text .chg-new { max-height: 320px; overflow: auto; background: var(--panel);
+  padding: 8px 12px; border-radius: var(--r-sm); }
+.chg-text .chg-old { grid-column: 2; font-size: var(--fs-foot); color: var(--muted); }
+.chg-text .chg-old .md-doc { max-height: 240px; overflow: auto; }
+@media (max-width: 640px) {
+  .chg-row, .chg-text { grid-template-columns: minmax(0, 1fr); }
+  .chg-arrow { display: none; }
+  .chg-text .chg-old, .chg-row .small { grid-column: 1; }
+}
+
+/* ----- Редактор користувача: розділи менеджера й ознаки ----- */
+.ue-checks { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 6px; }
+.ue-hint { margin: 6px 0 0; font-size: var(--fs-foot); }
 
 /* ----- Обговорення під карткою: коментарі й оцінка ----- */
 .cm h3 { margin: 0; font-size: var(--fs-call); font-weight: 600; }
@@ -2027,6 +2058,7 @@ a.btn .btn-ext { width: 14px; height: 14px; }
 .res-acts select.res-status { width: auto; }
 .sm-draft.returned { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 .sm-draft.returned b { color: inherit; }
+.sm-draft.review { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
 
 /* Дзвіночок у верхній панелі */
 .notif-wrap { position: relative; flex: 0 0 auto; }

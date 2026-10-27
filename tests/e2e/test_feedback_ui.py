@@ -41,7 +41,8 @@ def test_wizard_finishes_with_two_explicit_buttons(page, live_url):
     page.fill("#wiz-desc", "Звіт за тиждень у трьох абзацах.")
     expect(page.locator("#wiz-pub")).to_have_count(0)
     expect(page.locator("#wiz-draft")).to_have_text("Зберегти чернетку")
-    expect(page.locator("#wiz-next")).to_have_text("Опублікувати")
+    # Попередня модерація: користувач подає матеріал менеджерові розділу.
+    expect(page.locator("#wiz-next")).to_have_text("Подати на розгляд")
 
     page.click("#wiz-draft")
     # Після збереження хаб відкриває «Наповнення каталогу» й картку чернетки.
@@ -54,13 +55,18 @@ def test_wizard_finishes_with_two_explicit_buttons(page, live_url):
     open_wizard_at_describe(page, "prompt", "Склади місячний звіт за даними: {дані}")
     page.fill("#wiz-name", "Місячний звіт")
     page.fill("#wiz-desc", "Звіт за місяць.")
+    # Без розділу подати нікому — майстер просить його обрати.
+    page.click("#wiz-next")
+    expect(page.locator("#wiz-err")).to_contain_text("Оберіть розділ")
+    page.select_option("#wiz-section", label="Матеріали для тестів")
     page.click("#wiz-next")
     page.wait_for_selector(".md-modal")
+    expect(page.locator(".md-modal .sm-draft.review")).to_contain_text("На розгляді")
 
     statuses = dict(page.evaluate(
         "async () => (await api('/catalog/resources?mine=1')).map(r => [r.name, r.status])"))
     assert statuses["Тижневий звіт"] == "draft"
-    assert statuses["Місячний звіт"] == "published"
+    assert statuses["Місячний звіт"] == "review"
 
 
 # ---- П. 2: попередження про матеріал із тією самою назвою ----
