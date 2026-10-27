@@ -8,8 +8,16 @@
 //
 // Вставка з Word, Google Docs чи сайту очищується до того, що вміє картка:
 // заголовки, абзаци, жирний і курсив, списки, посилання, цитати, код,
-// таблиці. Стилі, шрифти й кольори відкидаються, щоб картки виглядали
-// однаково.
+// таблиці. Стилі й шрифти відкидаються, щоб картки виглядали однаково.
+//
+// Колір, розмір і виділення (фідбек тестування, п. 2–3) — лише з
+// фіксованого набору: колір тексту — один із TEXT_COLORS, розмір — дрібний,
+// звичайний чи великий, виділення — підкреслення й маркер. У Markdown вони
+// лягають безпечним HTML із назвою, а не кодом кольору:
+// <span class="tc-red">, <span class="ts-large">, <u>, <mark>. Тож зміна
+// палітри — це лише CSS, а збережені матеріали не міняються. Кольори з Word
+// підбираються до найближчого з набору (nearestColor); чорний і білий —
+// це звичайний текст.
 //
 // Зображення в тексті (фідбек, п. 3.2) — це файли хабу: кнопка «Зображення»,
 // вставка знімка з буфера чи перетягнутий файл завантажуються через
@@ -40,7 +48,74 @@
     table: '<rect x="3.5" y="5" width="17" height="14" rx="1.5"/><path d="M3.5 10h17M3.5 14.5h17M9.5 5v14M15 5v14"/>',
     hr: '<path d="M4 12h16"/><path d="M8 7.5h8M8 16.5h8" opacity=".45"/>',
     image: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4.5 17.5 5-5 4 4 2.5-2.5 4 4"/>',
+    mark: '<path d="m14.5 4.5 5 5-8 8H6.5v-5l8-8Z"/><path d="M4 20.5h16" stroke-width="2.4"/>',
+    size: '<path d="M3.5 18 8 6l4.5 12M5.2 14h5.6"/><path d="M14 18l3-7.5 3 7.5M15.1 15.6h3.8"/>',
   };
+  // Набір кольорів тексту: назва → [підпис, колір-ознака для execCommand].
+  // Ознака — службове значення, за яким нормалізація впізнає, що саме обрали;
+  // на екрані колір дає CSS-клас tc-<назва> (style.css, --tc-*). Значення
+  // тимчасові, остаточні дасть дизайнерка.
+  const TEXT_COLORS = {
+    red: ["Червоний", "#d70015"], orange: ["Помаранчевий", "#c25e00"],
+    green: ["Зелений", "#1e8e3e"], blue: ["Синій", "#0064d2"],
+    purple: ["Фіолетовий", "#8e44ad"], gray: ["Сірий", "#6e6e73"],
+  };
+  const TEXT_SIZES = { small: "Дрібний", normal: "Звичайний", large: "Великий" };
+  // execCommand("fontSize") ставить <font size="N">: 2 — дрібний, 5 — великий.
+  const SIZE_BY_FONT = { 2: "small", 5: "large" };
+  const FONT_BY_SIZE = { small: "2", large: "5" };
+  const MARK_HEX = "#fff3a3";
+  const FMT_CLASS_RE = /^(tc-(red|orange|green|blue|purple|gray)|ts-(small|large))$/;
+
+  function rgbOf(value) {
+    const v = String(value || "").trim().toLowerCase();
+    let m = v.match(/^#?([0-9a-f]{6})$/);
+    if (m) return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+    m = v.match(/^#([0-9a-f]{3})$/);
+    if (m) return [...m[1]].map(c => parseInt(c + c, 16));
+    m = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    return m ? [+m[1], +m[2], +m[3]] : null;
+  }
+  const sameRgb = (a, b) => a && b && a.every((x, i) => Math.abs(x - b[i]) <= 1);
+
+  // Колір, який точно обрали в панелі (за ознакою), або null.
+  function pickedColor(value) {
+    const rgb = rgbOf(value);
+    return Object.keys(TEXT_COLORS).find(k => sameRgb(rgb, rgbOf(TEXT_COLORS[k][1]))) || null;
+  }
+
+  // Найближчий колір набору до довільного (Word, Google Docs). Чорний,
+  // темно-сірий і білий — звичайний текст: так у документах пишуть основний текст.
+  function nearestColor(value) {
+    const rgb = rgbOf(value);
+    if (!rgb) return null;
+    const [r, g, b] = rgb.map(x => x / 255);
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const light = (max + min) / 2;
+    const sat = max === min ? 0 : (max - min) / (1 - Math.abs(2 * light - 1));
+    if (sat < 0.2) return light < 0.3 || light > 0.85 ? null : "gray";
+    let hue;
+    if (max === r) hue = 60 * (((g - b) / (max - min)) % 6);
+    else if (max === g) hue = 60 * ((b - r) / (max - min) + 2);
+    else hue = 60 * ((r - g) / (max - min) + 4);
+    hue = (hue + 360) % 360;
+    const HUES = { red: 355, orange: 30, green: 140, blue: 212, purple: 285 };
+    const dist = (h) => Math.min(Math.abs(hue - h), 360 - Math.abs(hue - h));
+    return Object.keys(HUES).sort((a, b2) => dist(HUES[a]) - dist(HUES[b2]))[0];
+  }
+
+  // Промпт копіюють у модель як текст: оформлення з документа чи з
+  // інструкції, перетвореної на промпт, прибираємо, лишаючи слова.
+  function stripFormatting(md) {
+    let prev, out = String(md || "");
+    do {
+      prev = out;
+      out = out.replace(/<span class="t[cs]-[a-z]+">([\s\S]*?)<\/span>/g, "$1")
+        .replace(/<(u|mark)>([\s\S]*?)<\/\1>/g, "$2");
+    } while (out !== prev);
+    return out;
+  }
+
   // Своя картинка: постійне посилання на файл хабу (у src — ще й підпис).
   const FILE_IMG_RE = /\/api\/catalog\/files\/(\d+)\/preview/;
   const IMAGE_FILE_RE = /\.(png|jpe?g|gif|webp|avif)$/i;
@@ -65,11 +140,13 @@
     }
 
     // Розмітку ставимо щільно до слова: «** слово**» Markdown не розпізнає.
-    function wrap(inner, mark) {
+    function wrap(inner, mark, close = mark) {
       const m = inner.match(/^(\s*)([\s\S]*?)(\s*)$/);
       if (!m[2]) return inner;
-      return m[1] + mark + m[2] + mark + m[3];
+      return m[1] + mark + m[2] + close + m[3];
     }
+    // Колір, розмір і виділення — у промпті їх немає: текст іде в модель.
+    const fmtClass = (el) => [...el.classList].find(c => FMT_CLASS_RE.test(c));
 
     function safeHref(href) {
       const v = (href || "").trim();
@@ -91,6 +168,12 @@
         case "BR": return "\n";
         case "STRONG": case "B": return wrap(inline(ch), "**");
         case "EM": case "I": return wrap(inline(ch), "*");
+        case "U": return prompt ? inline(ch) : wrap(inline(ch), "<u>", "</u>");
+        case "MARK": return prompt ? inline(ch) : wrap(inline(ch), "<mark>", "</mark>");
+        case "SPAN": {
+          const cls = prompt ? null : fmtClass(ch);
+          return cls ? wrap(inline(ch), `<span class="${cls}">`, "</span>") : inline(ch);
+        }
         case "CODE": {
           const t = ch.textContent;
           return t && !t.includes("`") ? "`" + t + "`" : escapeText(t);
@@ -219,7 +302,7 @@
   // ------------------------------------------------------------------
   const KEEP = new Set(["P", "BR", "H1", "H2", "H3", "H4", "H5", "H6", "STRONG", "B", "EM",
     "I", "A", "UL", "OL", "LI", "BLOCKQUOTE", "PRE", "CODE", "TABLE", "THEAD", "TBODY",
-    "TFOOT", "TR", "TH", "TD", "HR"]);
+    "TFOOT", "TR", "TH", "TD", "HR", "SPAN", "U", "MARK"]);
   const DROP = new Set(["SCRIPT", "STYLE", "META", "LINK", "TITLE", "HEAD", "IMG", "SVG",
     "IFRAME", "OBJECT", "EMBED", "VIDEO", "AUDIO", "CANVAS", "BUTTON", "INPUT", "SELECT",
     "TEXTAREA", "FORM", "NOSCRIPT", "TEMPLATE"]);
@@ -287,9 +370,15 @@
     body.querySelectorAll("b").forEach(b => {
       if (/font-weight:\s*(normal|[1-4]00)/i.test(b.getAttribute("style") || "")) unwrap(b);
     });
-    // Жирний і курсив, задані стилем (Google Docs, сайти).
+    // Жирний і курсив, задані стилем (Google Docs, сайти); колір — до
+    // найближчого з набору, підкреслення й заливка (маркер Word) — як є.
     body.querySelectorAll("span, font").forEach(sp => {
       const st = (sp.getAttribute("style") || "").toLowerCase();
+      const color = nearestColor(sp.getAttribute("color")
+        || (st.match(/(?:^|;)\s*color:\s*([^;]+)/) || [])[1]);
+      const marked = /mso-highlight:\s*(?!none)\w/.test(st)
+        || /background(?:-color)?:\s*(?!transparent|#fff\b|#ffffff|white|rgb\(255,\s*255,\s*255\))[#\w]/.test(st);
+      const under = /text-decoration[^;]*underline/.test(st);
       let el = sp;
       if (/font-style:\s*italic/.test(st)) el = rename(el, "em");
       if (/font-weight:\s*(bold|[6-9]00)/.test(st)) {
@@ -297,6 +386,14 @@
         el.replaceWith(strong);
         strong.appendChild(el);
       }
+      // Обгортки — всередині: сам span (якщо лишився span) розгорнеться нижче.
+      [color && ["span", "tc-" + color], under && ["u"], marked && ["mark"]].filter(Boolean)
+        .forEach(([tag, cls]) => {
+          const w = doc.createElement(tag);
+          if (cls) w.className = cls;
+          while (el.firstChild) w.appendChild(el.firstChild);
+          el.appendChild(w);
+        });
     });
     const clean = (node) => {
       [...node.childNodes].forEach(ch => {
@@ -311,8 +408,12 @@
           return;
         }
         if (!KEEP.has(tag)) { unwrap(ch); return; }
+        // Span лишається, лише якщо несе колір чи розмір із набору.
+        const fmt = tag === "SPAN" ? [...ch.classList].find(c => FMT_CLASS_RE.test(c)) : null;
+        if (tag === "SPAN" && !fmt) { unwrap(ch); return; }
         const href = tag === "A" ? ch.getAttribute("href") : null;
         [...ch.attributes].forEach(a => ch.removeAttribute(a.name));
+        if (fmt) ch.className = fmt;
         if (href && /^(https?:|mailto:)/i.test(href.trim())) ch.setAttribute("href", href.trim());
         else if (tag === "A") unwrap(ch);
       });
@@ -367,7 +468,7 @@
   function create({ value = "", kind = "doc", placeholder = "", label = "Текст", onChange, onFiles,
                    onImage } = {}) {
     let mode = "visual";
-    let current = String(value || "");
+    let current = kind === "prompt" ? stripFormatting(value) : String(value || "");
     let dirty = false;
     let toMd = makeConverter(kind);
     let opts = { html: kind !== "prompt" };
@@ -382,6 +483,12 @@
           <span class="rte-sep"></span>
           <button type="button" class="rte-btn rte-b" data-cmd="bold" title="Жирний (Ctrl+B)" aria-label="Жирний">Ж</button>
           <button type="button" class="rte-btn rte-i" data-cmd="italic" title="Курсив (Ctrl+I)" aria-label="Курсив">К</button>
+          <span class="rte-fmt">
+            <button type="button" class="rte-btn rte-u" data-cmd="underline" title="Підкреслений (Ctrl+U)" aria-label="Підкреслений">Ч</button>
+            <button type="button" class="rte-btn" data-cmd="mark" title="Маркер" aria-label="Маркер">${svg("mark")}</button>
+            <button type="button" class="rte-btn rte-color" data-pop="color" title="Колір тексту" aria-label="Колір тексту" aria-haspopup="true">A<i></i></button>
+            <button type="button" class="rte-btn rte-size" data-pop="size" title="Розмір тексту" aria-label="Розмір тексту" aria-haspopup="true">${svg("size")}</button>
+          </span>
           <button type="button" class="rte-btn" data-cmd="code" title="Код" aria-label="Код">${svg("code")}</button>
           <span class="rte-sep"></span>
           <button type="button" class="rte-btn" data-cmd="ul" title="Маркований список" aria-label="Маркований список">${svg("ul")}</button>
@@ -406,12 +513,19 @@
            spellcheck="true"></div>
       <textarea class="rte-src hidden" spellcheck="false" aria-label="${esc(label)}: розмітка Markdown"></textarea>
       <input type="file" class="rte-file" hidden multiple
-             accept="image/png,image/jpeg,image/gif,image/webp,image/avif">`;
+             accept="image/png,image/jpeg,image/gif,image/webp,image/avif">
+      <div class="rte-pop hidden" role="menu"></div>`;
     const area = root.querySelector(".rte-area");
     const fileInput = root.querySelector(".rte-file");
     const imgBtn = root.querySelector(".rte-img-btn");
     const imagesOn = () => !!onImage && kind !== "prompt";
-    const paintImageBtn = () => imgBtn.classList.toggle("hidden", !imagesOn());
+    const fmtBox = root.querySelector(".rte-fmt");
+    const pop = root.querySelector(".rte-pop");
+    // У промпті кольорів, розміру й картинок немає: текст копіюють у модель.
+    const paintImageBtn = () => {
+      imgBtn.classList.toggle("hidden", !imagesOn());
+      fmtBox.classList.toggle("hidden", kind === "prompt");
+    };
     paintImageBtn();
     const src = root.querySelector(".rte-src");
     const tblTools = root.querySelector(".rte-tbl");
@@ -445,7 +559,7 @@
     }
 
     function setValue(md) {
-      current = String(md || "");
+      current = kind === "prompt" ? stripFormatting(md) : String(md || "");
       dirty = false;
       if (mode === "source") src.value = current; else render();
       notify();
@@ -565,6 +679,121 @@
       exec("insertHTML", `<code>${esc(text)}</code>`);
     }
 
+    // --- Колір, розмір, маркер ---
+    // Браузер сам розрізає виділення на шматки (execCommand), а ми одразу
+    // замінюємо його <font>/<span style> на класи з набору — інших кольорів
+    // у тексті не буває.
+    function selectionRange() {
+      const sel = window.getSelection();
+      if (!sel.rangeCount || sel.isCollapsed) return null;
+      const r = sel.getRangeAt(0);
+      return area.contains(r.commonAncestorContainer) ? r : null;
+    }
+    function needSelection() {
+      if (selectionRange()) return true;
+      if (typeof toast === "function") toast("Спершу виділіть текст");
+      return false;
+    }
+    function wrapChildren(el, chain) {
+      const frag = document.createDocumentFragment();
+      let holder = frag;
+      chain.forEach(([tag, cls]) => {
+        const w = document.createElement(tag);
+        if (cls) w.className = cls;
+        holder.appendChild(w);
+        holder = w;
+      });
+      while (el.firstChild) holder.appendChild(el.firstChild);
+      el.replaceWith(frag);
+    }
+    function normalizeFormatting() {
+      area.querySelectorAll("font").forEach(f => {
+        const color = pickedColor(f.getAttribute("color"));
+        const size = SIZE_BY_FONT[f.getAttribute("size")];
+        wrapChildren(f, [color && ["span", "tc-" + color], size && ["span", "ts-" + size]].filter(Boolean));
+      });
+      area.querySelectorAll("span[style]").forEach(sp => {
+        const st = sp.style;
+        const color = pickedColor(st.color);
+        const marked = sameRgb(rgbOf(st.backgroundColor), rgbOf(MARK_HEX));
+        const keep = fmtClass(sp);
+        wrapChildren(sp, [keep && ["span", keep], color && ["span", "tc-" + color],
+                          marked && ["mark"]].filter(Boolean));
+      });
+      // Колір у кольорі: зовнішній, що весь складається з внутрішнього, — зайвий.
+      area.querySelectorAll("span").forEach(sp => {
+        const cls = fmtClass(sp);
+        const only = sp.childNodes.length === 1 && sp.firstChild.nodeType === 1
+          && sp.firstChild.tagName === "SPAN" && fmtClass(sp.firstChild);
+        if (cls && only && cls.slice(0, 3) === fmtClass(sp.firstChild).slice(0, 3)) unwrap(sp);
+        else if (!cls && !sp.attributes.length) unwrap(sp);
+      });
+    }
+    const fmtClass = (el) => [...el.classList].find(c => FMT_CLASS_RE.test(c));
+    // Прибрати колір чи розмір (або маркер) з усього, чого торкається виділення.
+    function clearFormat(test) {
+      const r = selectionRange();
+      if (!r) return;
+      [...area.querySelectorAll("span, mark")].filter(el => test(el) && r.intersectsNode(el))
+        .forEach(unwrap);
+    }
+    function setColor(name) {
+      if (!needSelection()) return;
+      if (!name) { clearFormat(el => /^tc-/.test(fmtClass(el) || "")); return; }
+      try { document.execCommand("styleWithCSS", false, false); } catch (e) { /* ні */ }
+      exec("foreColor", TEXT_COLORS[name][1]);
+      normalizeFormatting();
+    }
+    function setSize(name) {
+      if (!needSelection()) return;
+      clearFormat(el => /^ts-/.test(fmtClass(el) || ""));
+      if (name === "normal") return;
+      try { document.execCommand("styleWithCSS", false, false); } catch (e) { /* ні */ }
+      exec("fontSize", FONT_BY_SIZE[name]);
+      normalizeFormatting();
+    }
+    function toggleMark() {
+      if (!needSelection()) return;
+      const r = selectionRange();
+      const inside = (n) => (n.nodeType === 3 ? n.parentNode : n).closest("mark");
+      if (inside(r.startContainer)) { clearFormat(el => el.tagName === "MARK"); return; }
+      exec("hiliteColor", MARK_HEX);
+      normalizeFormatting();
+    }
+
+    function openPop(kindOf, btn) {
+      if (!pop.classList.contains("hidden") && pop.dataset.kind === kindOf) { closePop(); return; }
+      pop.dataset.kind = kindOf;
+      pop.innerHTML = kindOf === "color"
+        ? Object.entries(TEXT_COLORS).map(([k, [label]]) =>
+            `<button type="button" class="rte-swatch" data-color="${k}" title="${label}" aria-label="${label}"><i style="background: var(--tc-${k})"></i></button>`).join("")
+          + `<button type="button" class="rte-pop-txt" data-color="">Без кольору</button>`
+        : Object.entries(TEXT_SIZES).map(([k, label]) =>
+            `<button type="button" class="rte-pop-txt rte-size-${k}" data-size="${k}">${label}</button>`).join("");
+      pop.classList.remove("hidden");
+      const b = btn.getBoundingClientRect(), box = root.getBoundingClientRect();
+      pop.style.left = `${Math.max(4, Math.min(b.left - box.left, box.width - pop.offsetWidth - 4))}px`;
+      pop.style.top = `${b.bottom - box.top + 4}px`;
+      pop.querySelectorAll("button").forEach(x => {
+        x.addEventListener("mousedown", e => e.preventDefault());
+        x.addEventListener("click", () => {
+          area.focus();
+          if ("color" in x.dataset) setColor(x.dataset.color); else setSize(x.dataset.size);
+          closePop();
+          changed();
+        });
+      });
+    }
+    function closePop() { pop.classList.add("hidden"); }
+    root.querySelectorAll("[data-pop]").forEach(btn => {
+      btn.addEventListener("mousedown", e => e.preventDefault());
+      btn.addEventListener("click", () => { if (mode === "visual") openPop(btn.dataset.pop, btn); });
+    });
+    document.addEventListener("mousedown", e => {
+      if (!root.isConnected) return;
+      if (!pop.contains(e.target) && !e.target.closest("[data-pop]")) closePop();
+    });
+
     // --- Зображення ---
     let savedRange = null;
     function saveRange() {
@@ -609,6 +838,7 @@
     const COMMANDS = {
       image: () => { saveRange(); fileInput.click(); },
       bold: () => exec("bold"), italic: () => exec("italic"), code: inlineCode,
+      underline: () => exec("underline"), mark: toggleMark,
       h2: () => toggleBlock("h2"), h3: () => toggleBlock("h3"), quote: () => toggleBlock("blockquote"),
       ul: () => exec("insertUnorderedList"), ol: () => exec("insertOrderedList"),
       link, table: insertTable, hr: () => exec("insertHorizontalRule"), row: addRow, col: addCol,
@@ -636,12 +866,19 @@
         el.classList.toggle("on", !!v);
         el.setAttribute("aria-pressed", String(!!v));
       };
-      let bold = false, italic = false;
-      try { bold = document.queryCommandState("bold"); italic = document.queryCommandState("italic"); }
-      catch (e) { /* старі браузери */ }
+      let bold = false, italic = false, under = false;
+      try {
+        bold = document.queryCommandState("bold"); italic = document.queryCommandState("italic");
+        under = document.queryCommandState("underline");
+      } catch (e) { /* старі браузери */ }
       // Заголовки й шапка таблиці жирні самі по собі — «Ж» там не підсвічуємо.
       on("bold", b && bold && !/^(H\d|TH)$/.test(b.tagName));
       on("italic", b && italic);
+      on("underline", b && under);
+      const sel = window.getSelection();
+      const at = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+      const el = at && (at.nodeType === 3 ? at.parentNode : at);
+      on("mark", el && area.contains(el) && !!el.closest("mark"));
       on("h2", b && b.tagName === "H2");
       on("h3", b && b.tagName === "H3");
       on("quote", b && !!b.closest("blockquote"));
@@ -666,6 +903,10 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault(); e.stopPropagation(); link(); changed();
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "u" && kind === "prompt") {
+        e.preventDefault();   // у промпті підкреслення немає
+      }
+      if (e.key === "Escape") closePop();
     });
 
     function insertContent(dt) {
@@ -731,7 +972,7 @@
         toMd = makeConverter(kind);
         opts = { html: kind !== "prompt" };
         paintImageBtn();
-        current = md;
+        current = kind === "prompt" ? stripFormatting(md) : md;
         dirty = false;
         if (mode === "visual") render();
       },
@@ -744,5 +985,8 @@
     create,
     htmlToMarkdown: (root, kind = "doc") => makeConverter(kind)(root),
     cleanPastedHtml,
+    nearestColor,
+    stripFormatting,
+    TEXT_COLORS,
   };
 })();

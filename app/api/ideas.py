@@ -12,8 +12,9 @@ from app.core.permissions import require_auth, require_check
 from app.core.security import current_user
 from app.core.errors import ApiError
 from app.models import (
-    Idea, CatalogResource, ReviewLog, IDEA_STATUSES, IDEA_CLOSED_STATUSES,
+    Idea, CatalogResource, ReviewLog, User, IDEA_STATUSES, IDEA_CLOSED_STATUSES,
 )
+from app.services import review_service
 
 bp = Blueprint("ideas", __name__)
 
@@ -133,8 +134,21 @@ def create_idea():
     db.session.add(idea)
     db.session.flush()
     _log_idea(idea, None, "submitted", None)
+    _notify_new_idea(idea, user)
     db.session.commit()
     return jsonify(idea.to_dict()), 201
+
+
+def _notify_new_idea(idea, author):
+    """Про нову ідею дізнаються ті, хто її опрацьовує: адміністратори й
+    відповідальні за ідеї (фідбек тестування, п. 17). Менеджерам розділів
+    ідеї не надходять."""
+    for user in User.query.filter_by(is_active=True).all():
+        if user.id != author.id and access.can_manage_ideas(user):
+            review_service.push_notice(
+                user, "idea_submitted", "Нова ідея",
+                f"«{idea.title}» — {idea.author_name}. Перегляньте її в «Керування → Ідеї».",
+                f"idea:{idea.id}")
 
 
 @bp.patch("/<int:idea_id>")

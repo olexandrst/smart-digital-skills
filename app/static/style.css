@@ -65,6 +65,12 @@
   --ok:     #2a9d57; --ok-soft:     rgba(42, 157, 87, 0.10);
   --warn:   #c86a00; --warn-soft:   rgba(200, 106, 0, 0.10);
 
+  /* ---- Кольори тексту матеріалів (editor.js, TEXT_COLORS). Тимчасові:
+     остаточні дасть дизайнерка; збережені матеріали від цього не зміняться */
+  --tc-red: #d70015; --tc-orange: #c25e00; --tc-green: #1e8e3e;
+  --tc-blue: #0064d2; --tc-purple: #8e44ad; --tc-gray: #6e6e73;
+  --mark-bg: #fff3a3;
+
   /* ---- Відтінки видів матеріалів ---- */
   --blue:   #0071e3; --blue-t:   rgba(0, 113, 227, 0.10);
   --green:  #2a9d57; --green-t:  rgba(42, 157, 87, 0.10);
@@ -148,6 +154,10 @@ body.theme-dark {
   --danger: #ff6961; --danger-soft: rgba(255, 105, 97, 0.16);
   --ok:     #30d158; --ok-soft:     rgba(48, 209, 88, 0.16);
   --warn:   #ff9f0a; --warn-soft:   rgba(255, 159, 10, 0.16);
+
+  --tc-red: #ff6b6b; --tc-orange: #ffad55; --tc-green: #4cd27a;
+  --tc-blue: #5aa9ff; --tc-purple: #d18cf5; --tc-gray: #a1a1a6;
+  --mark-bg: rgba(255, 214, 10, 0.32);
 
   --blue:   #0a84ff; --blue-t:   rgba(10, 132, 255, 0.18);
   --green:  #30d158; --green-t:  rgba(48, 209, 88, 0.18);
@@ -327,7 +337,13 @@ table td, table th {
   .auth-sub { font-size: var(--fs-foot); margin-bottom: 12px; }
   .input-wrap input { padding-top: 11px; padding-bottom: 11px; }
 }
-@media (max-width: 760px) { .auth-left { max-width: none; } }
+@media (max-width: 760px) {
+  .auth-left { max-width: none; }
+  /* Примусовий перенос підзаголовка потрібен лише на широкому екрані: на
+     телефоні він лишав рядок «інструкції,» самотнім (перелік екранів, E03) */
+  .auth-sub br { display: none; }
+  .auth-sub { text-wrap: pretty; }
+}
 
 .input-wrap { position: relative; display: flex; align-items: center; }
 .input-wrap .input-icon {
@@ -1663,6 +1679,10 @@ body.theme-dark .modal-overlay { background: rgba(0, 0, 0, 0.5); }
 .cat-empty { grid-column: 1 / -1; text-align: center; padding: 28px 0; }
 .cat-empty-acts { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .cat-empty-acts .mdc-act, .cat-empty-acts .ghost-act { width: auto; }
+/* Дві кнопки однакової висоти, по центру під текстом (перелік екранів, E10):
+   .mdc-act у плитці притискається праворуч — тут це зайве */
+.cat-empty-acts .mdc-act { margin-left: 0; height: 34px; padding: 0 16px; }
+.cat-empty .cat-empty-title { margin: 0 0 4px; font-size: var(--fs-body); font-weight: 600; }
 .cat-empty-acts .ghost-act {
   height: 34px; padding: 0 16px; border-radius: var(--r-sm); font-weight: 540;
   background: var(--fill); color: var(--text);
@@ -1729,6 +1749,14 @@ button.link-btn:hover { background: none; color: var(--primary-strong); text-dec
 @media (max-width: 620px) {
   .dev-level { padding: 16px; }
 }
+
+/* Аналітика менеджера: які розділи враховано (фідбек, п. 15) */
+.an-scope {
+  margin: 0 0 14px; padding: 11px 14px; border-radius: var(--r-md);
+  font-size: var(--fs-foot); line-height: 1.5;
+  background: var(--panel); border: 1px solid var(--border); color: var(--muted);
+}
+.an-scope b { color: var(--text); font-weight: 580; }
 
 .test-url-row { display: flex; gap: 8px; margin-top: 12px; }
 .test-url-row input { flex: 1; min-width: 0; }
@@ -2339,6 +2367,37 @@ button.link-btn:hover { background: none; color: var(--primary-strong); text-dec
   .rte-modes { margin-left: auto; }
   .rte-area, .rte-src { max-height: 46vh; }
 }
+
+/* Колір, розмір і виділення в тексті матеріалу — лише з набору (editor.js) */
+.tc-red { color: var(--tc-red); } .tc-orange { color: var(--tc-orange); }
+.tc-green { color: var(--tc-green); } .tc-blue { color: var(--tc-blue); }
+.tc-purple { color: var(--tc-purple); } .tc-gray { color: var(--tc-gray); }
+.ts-small { font-size: .86em; } .ts-large { font-size: 1.22em; line-height: 1.4; }
+.md-doc mark, .md-p mark, .rte-area mark, .md-quote mark {
+  background: var(--mark-bg); color: inherit; padding: 0 2px; border-radius: 3px;
+}
+.rte { position: relative; }
+.rte-fmt { display: inline-flex; align-items: center; gap: 2px; }
+.rte-fmt.hidden { display: none; }
+.rte-u { text-decoration: underline; text-underline-offset: 2px; }
+.rte-color { flex-direction: column; gap: 1px; line-height: 1; font-weight: 650; }
+.rte-color i { display: block; width: 14px; height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--tc-red), var(--tc-orange), var(--tc-green), var(--tc-blue), var(--tc-purple)); }
+.rte-pop {
+  position: absolute; z-index: 5; display: flex; flex-wrap: wrap; gap: 6px; max-width: 240px;
+  padding: 8px; border-radius: var(--r-md); background: var(--panel);
+  border: 1px solid var(--border-strong); box-shadow: var(--shadow-lg);
+}
+.rte-pop.hidden { display: none; }
+.rte-swatch { width: 28px; height: 28px; min-width: 0; padding: 0; border-radius: 7px;
+  background: var(--fill); display: inline-flex; align-items: center; justify-content: center; }
+.rte-swatch i { width: 16px; height: 16px; border-radius: 50%; }
+.rte-swatch:hover { background: var(--fill-2); }
+.rte-pop-txt { height: 28px; width: auto; padding: 0 9px; border-radius: 7px;
+  background: var(--fill); color: var(--text); font-size: var(--fs-foot); font-weight: 520; }
+.rte-pop-txt:hover { background: var(--fill-2); color: var(--text); }
+.rte-pop .rte-size-small { font-size: var(--fs-micro); }
+.rte-pop .rte-size-large { font-size: var(--fs-body); }
 
 /* Промпт у картці — оформлений, але копіюється як текст */
 .md-doc.md-prompt { padding: 12px 14px; max-height: 340px; overflow: auto; }

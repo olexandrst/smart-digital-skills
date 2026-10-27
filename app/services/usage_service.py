@@ -96,9 +96,24 @@ def active_users(since, until=None):
     return int(query.scalar() or 0)
 
 
-def views_count(since, until=None):
+def view_scope(targets):
+    """Умова «перегляд стосується цих об'єктів» для аналітики менеджера
+    розділу. `targets` — {вид: множина id}; None — без обмеження (весь хаб)."""
+    if targets is None:
+        return None
+    conds = [db.and_(ResourceView.target_type == kind, ResourceView.target_id.in_(ids))
+             for kind, ids in targets.items() if ids]
+    return db.or_(*conds) if conds else db.false()
+
+
+def _scoped(query, scope):
+    return query if scope is None else query.filter(scope)
+
+
+def views_count(since, until=None, scope=None):
     query = db.session.query(func.count(ResourceView.id)) \
         .filter(ResourceView.day >= since)
+    query = _scoped(query, scope)
     if until is not None:
         query = query.filter(ResourceView.day <= until)
     return int(query.scalar() or 0)
@@ -135,12 +150,13 @@ def returning_gap(days, now=None):
     return sum(1 for _uid, last_day in rows if last_day and last_day < cutoff)
 
 
-def top_viewed(since, until=None, limit=10):
+def top_viewed(since, until=None, limit=10, scope=None):
     """Топ матеріалів за кількістю переглядів у проміжку."""
     query = (db.session.query(ResourceView.target_type, ResourceView.target_id,
                               func.max(ResourceView.target_name),
                               func.count(ResourceView.id))
              .filter(ResourceView.day >= since))
+    query = _scoped(query, scope)
     if until is not None:
         query = query.filter(ResourceView.day <= until)
     rows = (query.group_by(ResourceView.target_type, ResourceView.target_id)
@@ -149,11 +165,12 @@ def top_viewed(since, until=None, limit=10):
             for r in rows]
 
 
-def daily_series(since, until=None):
+def daily_series(since, until=None, scope=None):
     """Перегляди та унікальні користувачі по днях — для динаміки на дашборді."""
     query = (db.session.query(ResourceView.day, func.count(ResourceView.id),
                               func.count(distinct(ResourceView.user_id)))
              .filter(ResourceView.day >= since))
+    query = _scoped(query, scope)
     if until is not None:
         query = query.filter(ResourceView.day <= until)
     rows = query.group_by(ResourceView.day).order_by(ResourceView.day).all()

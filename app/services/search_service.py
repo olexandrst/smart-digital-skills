@@ -91,9 +91,13 @@ def stem(word):
     return word
 
 
+# Оформлення тексту з редактора (колір, розмір, маркер) — не слова матеріалу.
+_FMT_TAG_RE = re.compile(r'</?(?:u|mark)>|<span class="t[cs]-[a-z]+">|</span>')
+
+
 def tokenize(text):
     """Слова тексту без пунктуації, службових слів і закінчень."""
-    words = [w for w in _WORD_RE.split(_fold(text)) if w]
+    words = [w for w in _WORD_RE.split(_fold(_FMT_TAG_RE.sub(" ", text or ""))) if w]
     return [stem(w) for w in words if w not in STOP_WORDS and len(w) > 1]
 
 

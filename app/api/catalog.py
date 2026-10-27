@@ -1796,6 +1796,61 @@ def set_catalog_settings():
     return jsonify(catalog_settings().get_json())
 
 
+# ---- Аналітика за розділами (фідбек тестування, п. 15) ----
+#
+# Менеджер розділу бачить наповнення й перегляди лише своїх розділів;
+# адміністратор — увесь хаб. Аудиторія, пошук і опитування до розділу не
+# прив'язані (запит чи оцінку хабу не віднесеш до розділу), тож вони лишаються
+# загальними, а відповідь прямо каже, що саме обмежено (`scope`).
+
+def _section_scope(user):
+    """id розділів, якими обмежена аналітика, або None — увесь хаб."""
+    if access.is_admin(user):
+        return None
+    return set(access.managed_section_ids(user))
+
+
+def _scope_payload(scope):
+    if scope is None:
+        return {"all": True, "section_ids": None, "section_names": None}
+    names = [s.name for s in CatalogSection.query.filter(CatalogSection.id.in_(scope))
+             .order_by(CatalogSection.position, CatalogSection.id)] if scope else []
+    return {"all": False, "section_ids": sorted(scope), "section_names": names}
+
+
+def _scoped_items(scope):
+    """Матеріали, навички й розділи в межах аналітики."""
+    resources, skills = CatalogResource.query, Skill.query
+    sections = CatalogSection.query.order_by(CatalogSection.position, CatalogSection.id)
+    if scope is not None:
+        ids = scope or {-1}
+        resources = resources.filter(CatalogResource.section_id.in_(ids))
+        skills = skills.filter(Skill.section_id.in_(ids))
+        sections = sections.filter(CatalogSection.id.in_(ids))
+    return resources.all(), skills.all(), sections.all()
+
+
+def _view_targets(scope, resources, skills):
+    """Що з переглядів рахувати: матеріали, навички, розділи й колекції зі scope."""
+    if scope is None:
+        return None
+    folders = ({f.id for f in CatalogFolder.query.filter(CatalogFolder.section_id.in_(scope))}
+               if scope else set())
+    return usage_service.view_scope({
+        "resource": {r.id for r in resources}, "skill": {k.id for k in skills},
+        "section": set(scope), "folder": folders,
+    })
+
+
+def _feedback_query(resources, skills, scope):
+    query = SkillFeedback.query
+    if scope is None:
+        return query
+    return query.filter(db.or_(
+        SkillFeedback.resource_id.in_([r.id for r in resources] or [-1]),
+        SkillFeedback.skill_id.in_([k.id for k in skills] or [-1])))
+
+
 @bp.get("/analytics")
 @require_moderator
 def analytics():
@@ -1803,9 +1858,10 @@ def analytics():
 
     Свідомо містить лише метрики, які чесно рахуються з наявних даних.
     MAU/DAU/NPS потребують посесійного трекінгу переглядів — його немає.
+    Менеджер розділу бачить наповнення лише своїх розділів (див. _section_scope).
     """
-    resources = CatalogResource.query.all()
-    skills = Skill.query.all()
+    scope = _section_scope(current_user())
+    resources, skills, sections = _scoped_items(scope)
     now = datetime.utcnow()
 
     by_type = {t: 0 for t in RESOURCE_TYPES}
@@ -1815,8 +1871,6 @@ def analytics():
         by_status[r.status] = by_status.get(r.status, 0) + 1
     by_type["skill"] = len(skills)
 
-    sections = CatalogSection.query.order_by(CatalogSection.position,
-                                             CatalogSection.id).all()
     by_section = []
     for s in sections:
         by_section.append({
@@ -1862,11 +1916,13 @@ def analytics():
         SearchQueryLog.opened_item_type.isnot(None)).count()
     zero_results = SearchQueryLog.query.filter_by(results_count=0).count()
 
-    rating_row = (db.session.query(func.avg(SkillFeedback.rating),
-                                   func.count(SkillFeedback.rating))
-                  .filter(SkillFeedback.rating.isnot(None)).one())
+    feedback = _feedback_query(resources, skills, scope)
+    rated = feedback.filter(SkillFeedback.rating.isnot(None))
+    rating_row = (rated.with_entities(func.avg(SkillFeedback.rating),
+                                      func.count(SkillFeedback.rating)).one())
 
     return jsonify({
+        "scope": _scope_payload(scope),
         "by_type": by_type,
         "by_section": by_section,
         "unassigned": unassigned,
@@ -1883,7 +1939,7 @@ def analytics():
             "avg": round(float(rating_row[0]), 2) if rating_row[0] is not None else None,
             "count": int(rating_row[1]),
         },
-        "feedback_unread": SkillFeedback.query.filter_by(is_read=False).count(),
+        "feedback_unread": feedback.filter(SkillFeedback.is_read.is_(False)).count(),
         "strict_publish": strict_publish_enabled(),
     })
 
@@ -1926,6 +1982,8 @@ def kpi():
 
     `?period=7d|30d|90d`. Кожне число рахується запитом до бази; перебору
     історії в Python немає, тому дашборд не «важчає» з накопиченням переглядів.
+    Менеджер розділу бачить наповнення й перегляди своїх розділів; аудиторія,
+    пошук і опитування — загальні для хабу (`scope`).
     """
     period = request.args.get("period", DEFAULT_KPI_PERIOD)
     if period not in KPI_PERIODS:
@@ -1936,30 +1994,29 @@ def kpi():
     now = datetime.utcnow()
     cur_from, cur_to, prev_from, prev_to = _kpi_range(period, now)
     today = now.date()
+    scope = _section_scope(current_user())
+    resources, skills, sections = _scoped_items(scope)
+    views_scope = _view_targets(scope, resources, skills)
 
     dau = usage_service.active_users(today)
     wau = usage_service.active_users(today - timedelta(days=6))
     mau = usage_service.active_users(today - timedelta(days=29))
 
-    views_now = usage_service.views_count(cur_from, cur_to)
-    views_prev = usage_service.views_count(prev_from, prev_to)
+    views_now = usage_service.views_count(cur_from, cur_to, scope=views_scope)
+    views_prev = usage_service.views_count(prev_from, prev_to, scope=views_scope)
     users_now = usage_service.active_users(cur_from, cur_to)
     users_prev = usage_service.active_users(prev_from, prev_to)
 
     sessions_now = usage_service.session_metrics(cur_from, cur_to)
     sessions_prev = usage_service.session_metrics(prev_from, prev_to)
 
-    resources = CatalogResource.query.all()
     published = [r for r in resources if r.status in PUBLIC_STATUSES]
     by_type = {t: 0 for t in RESOURCE_TYPES}
     for r in resources:
         by_type[r.resource_type] = by_type.get(r.resource_type, 0) + 1
-    by_type["skill"] = Skill.query.count()
+    by_type["skill"] = len(skills)
     total_items = sum(by_type.values())
 
-    sections = CatalogSection.query.order_by(CatalogSection.position,
-                                             CatalogSection.id).all()
-    skills = Skill.query.all()
     by_section = [{
         "id": s.id, "name": s.name,
         "items": sum(1 for r in resources if r.section_id == s.id)
@@ -2001,6 +2058,7 @@ def kpi():
 
     return jsonify({
         "period": period,
+        "scope": _scope_payload(scope),
         "range": {"from": cur_from.isoformat(), "to": cur_to.isoformat(),
                   "previous_from": prev_from.isoformat(),
                   "previous_to": prev_to.isoformat()},
@@ -2023,8 +2081,8 @@ def kpi():
             "avg_depth": sessions_now["avg_depth"],
             "sessions": _delta(sessions_now["sessions"], sessions_prev["sessions"]),
             "reuse_views": reuse_views,
-            "top_viewed": usage_service.top_viewed(cur_from, cur_to),
-            "daily": usage_service.daily_series(cur_from, cur_to),
+            "top_viewed": usage_service.top_viewed(cur_from, cur_to, scope=views_scope),
+            "daily": usage_service.daily_series(cur_from, cur_to, scope=views_scope),
         },
         "content": {
             "total": total_items,
@@ -2077,6 +2135,9 @@ def kpi_export():
 
     a, e, c, s = data["audience"], data["engagement"], data["content"], data["search"]
     writer.writerow([f"Період: {data['range']['from']} — {data['range']['to']}", "", "", ""])
+    if not data["scope"]["all"]:
+        writer.writerow(["Розділи: " + (", ".join(data["scope"]["section_names"]) or "не призначено")
+                         + ". Аудиторія, пошук і опитування — по всьому хабу", "", "", ""])
     row("Унікальні користувачі за день", a["dau"])
     row("Унікальні користувачі за тиждень", a["wau"])
     row("Унікальні користувачі за місяць", a["mau"])

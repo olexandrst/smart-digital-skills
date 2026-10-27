@@ -10,8 +10,11 @@ PDF — вимагати перенабрати текст у поле озна�
   cp1251 (старі документи з Windows);
 - .docx — читається стандартним zipfile + xml, без сторонніх бібліотек, і
   перетворюється на Markdown з оформленням: заголовки, жирний і курсив,
-  посилання, марковані й нумеровані списки, таблиці. Редактор картки
-  показує його оформленим;
+  посилання, марковані й нумеровані списки, таблиці. Колір тексту
+  підбирається до найближчого з набору хабу, підкреслення й маркер
+  переносяться (ті самі <span class="tc-…">, <u>, <mark>, що ставить
+  редактор, див. app/static/editor.js). Редактор картки показує його
+  оформленим;
 - .pdf — через pypdf, якщо він установлений; сканований PDF без текстового
   шару повертає порожній рядок, і майстер пропонує прикріпити файл як
   вкладення замість тексту.
@@ -180,6 +183,52 @@ def _docx_images(zf, on_image):
     return image
 
 
+# Набір кольорів тексту — той самий, що в редакторі (editor.js, TEXT_COLORS):
+# назва → відтінок (градуси) для підбору найближчого.
+_HUES = {"red": 355, "orange": 30, "green": 140, "blue": 212, "purple": 285}
+
+
+def nearest_color(hex_value):
+    """Найближчий колір набору до кольору Word. Чорний, темно-сірий і білий —
+    звичайний текст (None): так у документах пишуть основний текст."""
+    m = re.fullmatch(r"#?([0-9a-fA-F]{6})", (hex_value or "").strip())
+    if not m:
+        return None
+    r, g, b = (int(m.group(1)[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    hi, lo = max(r, g, b), min(r, g, b)
+    light = (hi + lo) / 2
+    sat = 0 if hi == lo else (hi - lo) / (1 - abs(2 * light - 1))
+    if sat < 0.2:
+        return None if light < 0.3 or light > 0.85 else "gray"
+    if hi == r:
+        hue = 60 * (((g - b) / (hi - lo)) % 6)
+    elif hi == g:
+        hue = 60 * ((b - r) / (hi - lo) + 2)
+    else:
+        hue = 60 * ((r - g) / (hi - lo) + 4)
+    hue %= 360
+    return min(_HUES, key=lambda k: min(abs(hue - _HUES[k]), 360 - abs(hue - _HUES[k])))
+
+
+def _run_fmt(rpr):
+    """(колір, підкреслення, маркер) відрізка тексту Word."""
+    if rpr is None:
+        return (None, False, False)
+    color = rpr.find(_W + "color")
+    under = rpr.find(_W + "u")
+    hl = rpr.find(_W + "highlight")
+    shd = rpr.find(_W + "shd")
+    marked = ((hl is not None and (hl.get(_W + "val") or "none") != "none")
+              or (shd is not None and (shd.get(_W + "fill") or "auto").lower()
+                  not in ("auto", "ffffff", "")))
+    return (nearest_color(color.get(_W + "val")) if color is not None else None,
+            under is not None and (under.get(_W + "val") or "single") != "none",
+            marked)
+
+
+_NO_FMT = (None, False, False)
+
+
 def _flag(rpr, tag):
     if rpr is None:
         return False
@@ -191,16 +240,16 @@ def _md_escape(text):
     return text.replace("\\", "\\\\").replace("*", "\\*").replace("`", "\\`")
 
 
-def _wrap(text, mark):
+def _wrap(text, mark, close=None):
     """Розмітка щільно до слова: «** слово**» Markdown не розпізнає."""
     m = re.match(r"^(\s*)(.*?)(\s*)$", text, re.S)
     if not m.group(2):
         return text
-    return f"{m.group(1)}{mark}{m.group(2)}{mark}{m.group(3)}"
+    return f"{m.group(1)}{mark}{m.group(2)}{mark if close is None else close}{m.group(3)}"
 
 
 def _docx_runs(node, ctx, link=None, out=None):
-    """Відрізки тексту абзацу: (текст, жирний, курсив, посилання)."""
+    """Відрізки тексту абзацу: (текст, жирний, курсив, посилання, оформлення)."""
     if out is None:
         out = []
     for ch in node:
@@ -208,15 +257,16 @@ def _docx_runs(node, ctx, link=None, out=None):
         if tag == _W + "r":
             rpr = ch.find(_W + "rPr")
             bold, italic = _flag(rpr, "b"), _flag(rpr, "i")
+            fmt = _run_fmt(rpr)
             for part in ch:
                 if part.tag == _W + "t":
-                    out.append((part.text or "", bold, italic, link))
+                    out.append((part.text or "", bold, italic, link, fmt))
                 elif part.tag in (_W + "tab", _W + "ptab"):
-                    out.append((" ", bold, italic, link))
+                    out.append((" ", bold, italic, link, fmt))
                 elif part.tag in (_W + "br", _W + "cr"):
-                    out.append(("\n", False, False, None))
+                    out.append(("\n", False, False, None, _NO_FMT))
                 elif part.tag == _W + "noBreakHyphen":
-                    out.append(("-", bold, italic, link))
+                    out.append(("-", bold, italic, link, fmt))
                 elif part.tag in (_W + "drawing", _W + "pict"):
                     # Картинка: сучасна (a:blip) або стара VML (v:imagedata).
                     for el in part.iter():
@@ -224,7 +274,7 @@ def _docx_runs(node, ctx, link=None, out=None):
                                else el.get(_R + "id") if el.tag == _V + "imagedata" else None)
                         ref = ctx["image"](rid) if rid else None
                         if ref:
-                            out.append(("", False, False, ("img", ref, len(out))))
+                            out.append(("", False, False, ("img", ref, len(out)), _NO_FMT))
         elif tag == _W + "hyperlink":
             target = ctx["links"].get(ch.get(_R + "id"), "")
             _docx_runs(ch, ctx, target if re.match(r"(?i)^(https?:|mailto:)", target) else None, out)
@@ -242,13 +292,13 @@ def _docx_runs(node, ctx, link=None, out=None):
 def _docx_inline(p, ctx):
     """Текст абзацу з Markdown-оформленням."""
     merged = []
-    for text, bold, italic, link in _docx_runs(p, ctx):
-        if merged and merged[-1][1:] == (bold, italic, link) and text != "\n":
-            merged[-1] = (merged[-1][0] + text, bold, italic, link)
+    for text, bold, italic, link, fmt in _docx_runs(p, ctx):
+        if merged and merged[-1][1:] == (bold, italic, link, fmt) and text != "\n":
+            merged[-1] = (merged[-1][0] + text, bold, italic, link, fmt)
         else:
-            merged.append((text, bold, italic, link))
+            merged.append((text, bold, italic, link, fmt))
     parts = []
-    for text, bold, italic, link in merged:
+    for text, bold, italic, link, (color, under, marked) in merged:
         if isinstance(link, tuple):        # картинка
             parts.append(f"![]({link[1]})")
             continue
@@ -259,6 +309,12 @@ def _docx_inline(p, ctx):
             piece = _wrap(piece, "**")
         elif italic:
             piece = _wrap(piece, "*")
+        if color:
+            piece = _wrap(piece, f'<span class="tc-{color}">', "</span>")
+        if under and not link:      # посилання й так підкреслене
+            piece = _wrap(piece, "<u>", "</u>")
+        if marked:
+            piece = _wrap(piece, "<mark>", "</mark>")
         if link:
             label = piece.strip()
             piece = link if not label or label == link else f"[{label}]({link})"
@@ -275,7 +331,7 @@ def _docx_plain(p, ctx):
 def _docx_bold_only(p, ctx):
     """Абзац, увесь текст якого жирний, — так у Word часто оформлюють
     заголовки замість стилю «Заголовок»."""
-    runs = [(t, b) for t, b, _i, link in _docx_runs(p, ctx) if t.strip() and not link]
+    runs = [(t, b) for t, b, _i, link, _f in _docx_runs(p, ctx) if t.strip() and not link]
     return bool(runs) and all(b for _t, b in runs)
 
 

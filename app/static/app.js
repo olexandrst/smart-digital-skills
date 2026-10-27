@@ -760,6 +760,7 @@ async function openNotification(id) {
   }
   if (nt.kind === "review_due" || nt.kind === "review_overdue") { openMyContent(); return; }
   if (nt.kind === "contact_message") { go("admin:contact"); return; }
+  if (nt.kind === "idea_submitted") { go("admin:ideas"); return; }
   // Картку відкриваємо поверх поточної сторінки — звідти й діють.
   if (nt.skill_id) { openSkillModal(nt.skill_id); return; }
   if (nt.resource_id) { openResourceModal(nt.resource_id); return; }
@@ -1288,6 +1289,9 @@ function applyHubScope(dest) {
 
 async function renderHubDest(dest) {
   await ensureHubData();
+  // Поки вантажився каталог, людина могла перейти деінде (наприклад, одразу
+  // після входу в «Керування») — тоді стара сторінка не має її перекрити.
+  if (nav.dest !== dest) return;
   if (dest === "hub:dev") { buildSidebar(); return viewDevelopment(); }
   if (dest === "hub:contrib") { buildSidebar(); return viewContributions(); }
   applyHubScope(dest);
@@ -1953,6 +1957,17 @@ function renderCatalogGrid() {
   }
   if (!list.length && catalogState.scope === "fav" && !query) {
     return;   // підзаголовок сторінки вже пояснює, як наповнити «Обране»
+  }
+  if (!list.length && catalogState.scope === "recent" && !query) {
+    // Пояснення замість «Нічого не знайдено» (перелік екранів, E13b).
+    grid.innerHTML = `<div class="cat-empty">
+        <p class="cat-empty-title">Тут з'являться матеріали, які ви відкривали</p>
+        <p class="muted">Останні дванадцять, найсвіжіші першими. Список живе в цьому
+        браузері, тож на іншому пристрої він свій.</p>
+        <div class="cat-empty-acts"><button class="mdc-act" id="empty-all">Перейти до матеріалів</button></div>
+      </div>`;
+    $("#empty-all").addEventListener("click", () => go("hub:all"));
+    return;
   }
   if (!list.length) {
     // Глухий кут — найгірше, що може статися в базі знань. Тому замість
@@ -4159,7 +4174,8 @@ function reuseBlockHtml(r) {
 // завантаження й видалення — автору картки та менеджерам.
 // Зображення й відео з вкладень — прямо в картці, одразу під описом:
 // мініатюри (клік — на весь екран) і вбудований плеєр. Посилання на перегляд
-// підписані сервером, бо <img> і <video> не передають JWT.
+// підписані сервером, бо <img> і <video> не передають JWT. «#t=0.1» у відео —
+// щоб без обкладинки браузер показав перший кадр, а не порожнє поле (E15).
 function paintMedia(overlay, files) {
   const box = overlay.querySelector("#res-media");
   if (!box) return;
@@ -4173,7 +4189,7 @@ function paintMedia(overlay, files) {
             <img src="${esc(f.preview_url)}" alt="${esc(f.filename)}" loading="lazy"></button>`).join("")
       }</div>` : ""}
       ${videos.map(f => `<figure class="res-video">
-          <video controls playsinline preload="metadata" src="${esc(f.preview_url)}"></video>
+          <video controls playsinline preload="metadata" src="${esc(f.preview_url)}#t=0.1"></video>
           <figcaption>${esc(f.filename)}</figcaption>
         </figure>`).join("")}
     </div>`;
@@ -4730,12 +4746,23 @@ function statTile(value, label, tone = "") {
   return `<div class="an-tile ${tone}"><b>${value}</b><span>${esc(label)}</span></div>`;
 }
 
+// Менеджер розділу бачить аналітику своїх розділів (фідбек, п. 15): кажемо
+// прямо, що саме обмежено, а що лишається спільним для хабу.
+function analyticsScopeHtml(scope, hubWide) {
+  if (!scope || scope.all) return "";
+  const names = (scope.section_names || []).join(", ");
+  return `<p class="an-scope">${names
+    ? `Дані по ваших розділах: <b>${esc(names)}</b>.` : "Вам ще не призначено розділів."}${
+    hubWide ? ` ${esc(hubWide)}` : ""}</p>`;
+}
+
 async function renderHubAnalytics() {
   const panel = panelEl();
   panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
   let a;
   try { a = await api("/catalog/analytics"); }
   catch (err) { panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`; return; }
+  if (!panel.isConnected) return;
 
   const f = a.freshness;
   const totalItems = Object.values(a.by_type).reduce((x, y) => x + y, 0);
@@ -4759,6 +4786,7 @@ async function renderHubAnalytics() {
     : `<p class="muted">Матеріали ще не відкривали.</p>`;
 
   panel.innerHTML = `
+    ${analyticsScopeHtml(a.scope, "Пошукові запити — по всьому хабу.")}
     <div class="card">
       <h2>Наповнення хабу</h2>
       <p class="muted">Скільки матеріалів і як вони розподілені за видами та розділами.</p>
@@ -4873,6 +4901,7 @@ async function renderKpiDashboard() {
                                 api("/catalog/search-analytics")]);
   }
   catch (err) { panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`; return; }
+  if (!panel.isConnected) return;
 
   const a = k.audience, e = k.engagement, c = k.content, s = k.search, sv = k.survey;
   const pct = v => v == null ? "—" : `${v}%`;
@@ -4914,6 +4943,7 @@ async function renderKpiDashboard() {
     : `<p class="muted">Коментарів ще не залишали.</p>`;
 
   panel.innerHTML = `
+    ${analyticsScopeHtml(k.scope, "Аудиторія, пошук і опитування — по всьому хабу: їх не віднесеш до розділу.")}
     <div class="card">
       <div class="fb-head">
         <div>
