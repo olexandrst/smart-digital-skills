@@ -24,11 +24,12 @@ def _iso(value):
 # content_updated — менеджерам розділу: до опублікованого матеріалу додали файл;
 # content_moderated — авторові: рішення менеджера (схвалено, повернуто, знято
 #   з публікації, перенесено в архів, видалено) з причиною, якщо вказана;
-# comment_added — авторові: новий коментар до його матеріалу.
+# comment_added — авторові: новий коментар до його матеріалу;
+# contact_message — адміністраторам: нове повідомлення «Зворотний зв'язок».
 # content_published лишається в історії з часів пост-модерації.
 NOTIFICATION_KINDS = ("review_due", "review_overdue", "review_requested",
                       "content_published", "content_updated", "content_moderated",
-                      "comment_added")
+                      "comment_added", "contact_message")
 
 
 class Notification(db.Model):

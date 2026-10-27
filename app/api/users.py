@@ -1,11 +1,13 @@
 """Менеджмент користувачів (тільки адміністратор): CRUD, скидання пароля,
-ролі, розділи менеджера й ознаки «Експерт» і «Відповідальний за ідеї».
+ролі, розділи менеджера, ознаки «Експерт» і «Відповідальний за ідеї» та
+рівень AI-зрілості з датою визначення.
 
 Ролі призначаються вручну (фідбек тестування, п. 11): адміністратор,
 менеджер розділу (з переліком розділів) або користувач — без ролі.
 """
 import os
 import shutil
+from datetime import date, datetime
 from flask import Blueprint, request, jsonify, current_app
 from app.extensions import db
 from app.core.permissions import require_global_role
@@ -13,9 +15,10 @@ from app.core.security import hash_password, current_user
 from app.core.errors import ApiError
 from app.models import (
     User, Role, UserRole, RefreshToken, UserFile, Notification, CatalogFavorite,
-    CatalogSection, CatalogResource, Skill,
+    CatalogSection, CatalogResource, CatalogTerm, Skill,
     LearningProgress, HiddenRecommendation, SurveyPrompt, UserSession,
     Idea, ReviewLog, SearchQueryLog, SkillFeedback, SurveyResponse, ResourceView,
+    ContactMessage,
 )
 
 bp = Blueprint("users", __name__)
@@ -30,7 +33,8 @@ _OWNED_BY_USER = (RefreshToken, UserFile, Notification, CatalogFavorite,
 _REFERENCES_TO_USER = ((Idea, "author_id"), (ReviewLog, "actor_user_id"),
                        (SearchQueryLog, "user_id"), (SkillFeedback, "user_id"),
                        (SurveyResponse, "user_id"), (ResourceView, "user_id"),
-                       (CatalogResource, "pending_by"), (Skill, "pending_by"))
+                       (CatalogResource, "pending_by"), (Skill, "pending_by"),
+                       (ContactMessage, "user_id"), (ContactMessage, "handled_by"))
 # Ролі, які призначає адміністратор. Користувач — це відсутність ролі.
 ASSIGNABLE_ROLES = ("admin", "section_manager")
 
@@ -158,6 +162,40 @@ def _apply_access(user, data):
     for flag in ("is_expert", "is_ideas_owner"):
         if flag in data:
             setattr(user, flag, bool(data[flag]))
+    _apply_level(user, data)
+
+
+def _apply_level(user, data):
+    """Рівень за результатами корпоративного тестування й дата, коли його
+    визначено. Без дати береться сьогоднішня — якщо рівень справді змінився."""
+    if "maturity_level_id" in data:
+        raw = data.get("maturity_level_id")
+        level = None
+        if raw not in (None, ""):
+            try:
+                term = db.session.get(CatalogTerm, int(raw))
+            except (TypeError, ValueError):
+                term = None
+            if term is None or term.kind != "maturity":
+                raise ApiError("Рівень зрілості не знайдено", 400, "validation_error")
+            level = term.id
+        if level != user.maturity_level_id:
+            user.maturity_assessed_at = datetime.utcnow() if level else None
+        user.maturity_level_id = level
+    if "maturity_assessed_at" in data and user.maturity_level_id:
+        raw = (data.get("maturity_assessed_at") or "").strip()
+        if raw:
+            try:
+                day = date.fromisoformat(raw[:10])
+            except ValueError:
+                raise ApiError("Дата визначення рівня має бути у форматі РРРР-ММ-ДД",
+                               400, "validation_error")
+            if day > date.today():
+                raise ApiError("Дата визначення рівня не може бути в майбутньому",
+                               400, "validation_error")
+            user.maturity_assessed_at = datetime(day.year, day.month, day.day)
+    if not user.maturity_level_id:
+        user.maturity_assessed_at = None
 
 
 def _set_roles(user, role_codes):

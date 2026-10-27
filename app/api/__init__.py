@@ -6,6 +6,7 @@ from app.api.categories import bp as categories_bp
 from app.api.catalog import bp as catalog_bp
 from app.api.ideas import bp as ideas_bp
 from app.api.paths import bp as paths_bp
+from app.api.contact import bp as contact_bp
 
 
 def register_blueprints(app):
@@ -16,3 +17,4 @@ def register_blueprints(app):
     app.register_blueprint(catalog_bp, url_prefix="/api/catalog")
     app.register_blueprint(ideas_bp, url_prefix="/api/ideas")
     app.register_blueprint(paths_bp, url_prefix="/api/paths")
+    app.register_blueprint(contact_bp, url_prefix="/api/contact")

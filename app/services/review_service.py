@@ -113,6 +113,12 @@ def _who(user):
     return user.full_name or user.username
 
 
+def push_notice(user, kind, title, body, key):
+    """Сповіщення, не прив'язане до матеріалу (наприклад, повідомлення
+    адміністратору). Сесію, як і решта, фіксує ендпоінт."""
+    return _push(user, kind, title, body, key)
+
+
 def _push(user, kind, title, body, key, item_type=None, item=None):
     if Notification.query.filter_by(user_id=user.id, dedupe_key=key).first():
         return False

@@ -20,6 +20,8 @@ class Skill(db.Model):
     name = db.Column(db.String, nullable=False)
     description = db.Column(db.Text, nullable=False)
     author = db.Column(db.String)        # автор навички (зі skill.md або редагується)
+    # Чи був автор «Експертом» на момент першої публікації (див. CatalogResource).
+    author_is_expert = db.Column(db.Boolean, nullable=False, default=False)
     category = db.Column(db.String)      # категорія навички
     section_id = db.Column(db.Integer, db.ForeignKey("catalog_sections.id"))
     folder_id = db.Column(db.Integer, db.ForeignKey("catalog_folders.id"))
@@ -61,6 +63,7 @@ class Skill(db.Model):
             "name": self.name,
             "description": self.description,
             "author": self.author,
+            "author_is_expert": bool(self.author_is_expert),
             "category": self.category,
             "section_id": self.section_id,
             "folder_id": self.folder_id,

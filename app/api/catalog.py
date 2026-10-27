@@ -43,9 +43,17 @@ MAX_BODY = 100_000
 MAX_QUERY = 200
 # Ключ налаштування «сувора публікація» (BR-05): вимагати обов'язкові поля.
 STRICT_PUBLISH_KEY = "catalog_publish_strict"
-# Посилання на тест рівня AI-обізнаності: з'являється кнопкою на сторінці
-# «Мій розвиток», щойно адміністратор його вкаже (фідбек тестування, п. 4).
+# Посилання на тест рівня AI-обізнаності. Поки тест проходить поза хабом
+# (фідбек тестування, п. 4), кнопки й поля для нього в інтерфейсі немає;
+# налаштування лишається для майбутнього підключення.
 MATURITY_TEST_KEY = "maturity_test_url"
+# AI SD агент у Teams — канал технічної підтримки (фідбек, п. 21). Типово
+# посилання з системи розробки; робоче адміністратор вкаже в «Керуванні»
+# без нового випуску. Порожнє значення ховає посилання.
+SUPPORT_AGENT_KEY = "support_agent_url"
+SUPPORT_AGENT_DEFAULT = ("https://teams.microsoft.com/l/app/"
+                         "8c837748-c270-4056-bee7-d481b370943d"
+                         "?source=app-bar-share-entrypoint")
 # Поля, без яких матеріал не публікується при увімкненій суворій публікації.
 REQUIRED_ON_PUBLISH = (
     ("description", "короткий опис"),
@@ -1137,6 +1145,7 @@ def _publish_resource(res, user):
     author = db.session.get(User, res.created_by) if res.created_by else None
     _default_ownership(res, author or user)
     _require_publish_ready(res)
+    moderation_service.snapshot_expert(res)
     res.status = "published"
     if res.published_at is None:
         res.published_at = datetime.utcnow()
@@ -1734,7 +1743,8 @@ def log_search_opened(log_id):
 def catalog_settings():
     """Налаштування каталогу для UI (разом із частотою опитувань)."""
     out = {"strict_publish": strict_publish_enabled(),
-           MATURITY_TEST_KEY: AppSetting.get(MATURITY_TEST_KEY, "") or ""}
+           MATURITY_TEST_KEY: AppSetting.get(MATURITY_TEST_KEY, "") or "",
+           SUPPORT_AGENT_KEY: AppSetting.get(SUPPORT_AGENT_KEY, SUPPORT_AGENT_DEFAULT) or ""}
     out.update({key: _survey_setting(key) for key in SURVEY_SETTINGS})
     return jsonify(out)
 
@@ -1744,7 +1754,7 @@ def catalog_settings():
 def set_catalog_settings():
     """Зміна налаштувань. Частота опитувань керується звідси, а не з коду."""
     data = request.get_json(silent=True) or {}
-    known = {"strict_publish", MATURITY_TEST_KEY, *SURVEY_SETTINGS}
+    known = {"strict_publish", MATURITY_TEST_KEY, SUPPORT_AGENT_KEY, *SURVEY_SETTINGS}
     if not known & set(data):
         raise ApiError("Вкажіть щонайменше одне налаштування: "
                        + ", ".join(sorted(known)), 400, "validation_error")
@@ -1757,6 +1767,14 @@ def set_catalog_settings():
             raise ApiError("Посилання на тест має починатися з https:// або http://",
                            400, "validation_error")
         AppSetting.set(MATURITY_TEST_KEY, url)
+    if SUPPORT_AGENT_KEY in data:
+        url = (data.get(SUPPORT_AGENT_KEY) or "").strip()
+        if url and not re.match(r"^https?://\S+$", url, re.I):
+            raise ApiError("Посилання на AI SD агента має починатися з https:// або http://",
+                           400, "validation_error")
+        if len(url) > 2000:
+            raise ApiError("Посилання завелике", 400, "validation_error")
+        AppSetting.set(SUPPORT_AGENT_KEY, url)
     for key in SURVEY_SETTINGS:
         if key not in data:
             continue
@@ -2485,18 +2503,20 @@ def search_analytics():
 @bp.patch("/profile")
 @require_auth
 def update_profile():
-    """Користувач сам вказує свій рівень AI-зрілості та підрозділ.
+    """Підрозділ і знайомство з інтерфейсом — те, що людина змінює сама.
 
     `tour_completed: true` — знайомство з інтерфейсом пройдено (або
     пропущено), більше не показувати; `false` — показати знову.
+
+    Рівень AI-зрілості визначає корпоративне тестування (фідбек, п. 4), тож
+    сам користувач його не змінює: рівень і дату встановлює адміністратор
+    у редакторі користувача (PATCH /api/users/<id>).
     """
     data = request.get_json(silent=True) or {}
     user = current_user()
     if "maturity_level_id" in data:
-        level = _resolve_term("maturity", data.get("maturity_level_id"), "рівень зрілості")
-        if level != user.maturity_level_id:
-            user.maturity_assessed_at = datetime.utcnow() if level else None
-        user.maturity_level_id = level
+        raise ApiError("Рівень визначається за результатами корпоративного тестування. "
+                       "Змінити його може адміністратор хабу", 403, "level_locked")
     if "department" in data:
         value = (data.get("department") or "").strip()
         user.department = value[:200] or None

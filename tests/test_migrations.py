@@ -244,3 +244,34 @@ def test_section_moderation_migration_keeps_managers_access(tmp_path):
         assert conn.execute(text("SELECT code FROM roles WHERE id = 2")).scalar() == \
             "skill_manager"
         assert conn.execute(text("SELECT status FROM catalog_resources")).scalar() == "draft"
+
+
+def test_expert_and_contact_migration(tmp_path):
+    """Позначку «Експерт» отримує опубліковане авторів, що вже мають ознаку;
+    чернетки й матеріали інших авторів — ні. З'являється таблиця повідомлень
+    адміністратору, відкат її прибирає."""
+    from sqlalchemy import text
+    path = tmp_path / "expert.db"
+    _alembic(path, "upgrade", "e7a9c1d3f5b8", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        _insert(conn, "users", id=1, username="expert", is_expert=1)
+        _insert(conn, "users", id=2, username="plain", is_expert=0)
+        _insert(conn, "catalog_resources", id=1, name="Від експерта", status="published",
+                published_at="2026-10-01 10:00:00", created_by=1)
+        _insert(conn, "catalog_resources", id=2, name="Чернетка експерта", status="draft",
+                published_at=None, created_by=1)
+        _insert(conn, "catalog_resources", id=3, name="Від користувача", status="published",
+                published_at="2026-10-01 10:00:00", created_by=2)
+        _insert(conn, "skills", id=1, name="Навичка експерта", status="published",
+                published_at="2026-10-01 10:00:00", created_by=1)
+    _alembic(path, "upgrade", "f8b0d2e4a6c9", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        flags = dict(conn.execute(text(
+            "SELECT id, author_is_expert FROM catalog_resources")).all())
+        assert flags == {1: 1, 2: 0, 3: 0}
+        assert conn.execute(text("SELECT author_is_expert FROM skills")).scalar() == 1
+        assert "contact_messages" in inspect(conn).get_table_names()
+    _alembic(path, "downgrade", "e7a9c1d3f5b8", tmp_path=tmp_path)
+    tables = set(inspect(create_engine(f"sqlite:///{path}")).get_table_names())
+    assert "contact_messages" not in tables

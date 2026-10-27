@@ -82,6 +82,7 @@ def skill_payload(skill, user):
 def _publish(skill, user):
     """Позначає навичку опублікованою; власником стає автор (якщо власника
     ще не вказано), а не менеджер, що її схвалив."""
+    moderation_service.snapshot_expert(skill)
     skill.status = "published"
     if skill.published_at is None:
         skill.published_at = datetime.utcnow()

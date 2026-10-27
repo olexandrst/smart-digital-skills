@@ -458,6 +458,7 @@ async function showApp() {
   $("#user-roles").textContent = roleLabel(state.user);
   $("#user-avatar").textContent = (display[0] || "?").toUpperCase();
   buildNav();
+  refreshHubSettings();
   maybeStartTour();   // новому користувачу — знайомство з інтерфейсом
   // Попередній сеанс скінчився закриттям вкладки — питаємо, як він минув.
   // Знайомство з інтерфейсом має перевагу: воно вже позначило surveyShown.
@@ -492,6 +493,8 @@ const GLYPH = {
   list: '<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.9" cy="6.5" r="1"/><circle cx="4.9" cy="12" r="1"/><circle cx="4.9" cy="17.5" r="1"/>',
   pen: '<path d="M4.5 19.5h3.6L18.4 9.2a2.2 2.2 0 0 0-3.1-3.1L5 16.4v3.1Z"/><path d="M13.4 8l3.1 3.1"/>',
   upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15.5v2.6c0 .8.7 1.4 1.4 1.4h12.2c.8 0 1.4-.6 1.4-1.4v-2.6"/>',
+  chat: '<path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5V15a1.5 1.5 0 0 1-1.5 1.5h-8.5L6 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V6.5A1.5 1.5 0 0 1 5 5Z"/><path d="M8 10.8h.01M12 10.8h.01M16 10.8h.01"/>',
+  mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7 7.5 6 7.5-6"/>',
   help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="16.9" r=".4"/>',
 };
 const gsvg = (name, cls = "") =>
@@ -534,6 +537,8 @@ const ADMIN_SECTIONS = [
   ]},
   { group: "Система", items: [
     { id: "users", label: "Користувачі", glyph: "person", panel: viewUsers,
+      show: () => isAdmin() },
+    { id: "contact", label: "Зворотний зв'язок", glyph: "mail", panel: renderContactManage,
       show: () => isAdmin() },
   ]},
 ];
@@ -754,6 +759,7 @@ async function openNotification(id) {
     api("/catalog/notifications/read", { method: "POST", body: { ids: [id] } }).catch(() => {});
   }
   if (nt.kind === "review_due" || nt.kind === "review_overdue") { openMyContent(); return; }
+  if (nt.kind === "contact_message") { go("admin:contact"); return; }
   // Картку відкриваємо поверх поточної сторінки — звідти й діють.
   if (nt.skill_id) { openSkillModal(nt.skill_id); return; }
   if (nt.resource_id) { openResourceModal(nt.resource_id); return; }
@@ -891,11 +897,37 @@ function sbItem(dest, label, glyph, count, extra = "") {
     </button>`;
 }
 
-// Інструкція — останній пункт панелі в обох режимах. Це посилання, а не
-// кнопка: вона відкривається в новій вкладці, як і значок «?» угорі.
+// Низ панелі в обох режимах (фідбек тестування, п. 21): підтримка —
+// AI SD агент для технічних питань і «Зворотний зв'язок» адміністратору, —
+// а останнім пунктом інструкція. Посилання відкриваються в новій вкладці,
+// як і значок «?» угорі.
 const GUIDE_URL = "guide/";
+const AGENT_HINT = "Для вирішення технічних питань";
+const CONTACT_HINT = "Нетехнічні питання адміністратору хабу";
+
+// Адресу агента змінює адміністратор у «Керуванні»; порожня ховає посилання.
+function supportAgentUrl() {
+  return (catalogState.settings && catalogState.settings.support_agent_url) || "";
+}
+
+// Налаштування, потрібні на кожній сторінці (адреса агента), вантажимо одразу
+// після входу, хоч би з якої сторінки людина почала, і після їх зміни.
+async function refreshHubSettings() {
+  try { catalogState.settings = await api("/catalog/settings"); } catch (e) { return; }
+  if ($("#sidebar")) buildSidebar();
+  paintHomeSupport();
+}
+
 function sbGuideHtml() {
+  const agent = supportAgentUrl();
   return `<div class="sb-spacer"></div>
+    ${agent ? `<a class="sb-item sb-guide" href="${esc(agent)}" target="_blank" rel="noopener"
+       title="${AGENT_HINT}" data-support="agent">
+      ${gsvg("chat")}<span class="sb-label">AI SD агент</span>${gsvg("ext", "sb-ext")}
+    </a>` : ""}
+    <button class="sb-item" data-contact title="${CONTACT_HINT}">
+      ${gsvg("mail")}<span class="sb-label">Зворотний зв'язок</span>
+    </button>
     <a class="sb-item sb-guide" href="${GUIDE_URL}" target="_blank" rel="noopener"
        title="Інструкція відкриється в новій вкладці">
       ${gsvg("help")}<span class="sb-label">Інструкція</span>${gsvg("ext", "sb-ext")}
@@ -910,6 +942,10 @@ function buildSidebar() {
     b.addEventListener("click", () => go(b.dataset.dest)));
   box.querySelectorAll("[data-ext]").forEach(b =>
     b.addEventListener("click", () => window.open(b.dataset.ext, "_blank", "noopener")));
+  box.querySelector("[data-contact]").addEventListener("click", () => {
+    document.body.classList.remove("side-open");
+    openContactForm();
+  });
   paintNavActive();
 }
 
@@ -1083,6 +1119,8 @@ const ICO_DOWNLOAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3
 let catalogState = {
   skills: [], resources: [], items: [], sections: [], folders: [], terms: [],
   paths: [], recommendations: [], maturity: null, types: [],
+  // Налаштування хабу (адреса AI SD агента тощо), див. refreshHubSettings.
+  settings: {},
   favorites: { skill: new Set(), resource: new Set() },
   query: "", kind: "all", sectionId: null, folderId: null, favOnly: false,
   // Фільтри за атрибутами картки (BR-06). Порожній рядок = фільтр не активний.
@@ -1132,7 +1170,7 @@ function normSkill(s) {
   return {
     item_type: "skill", kind: "skill", id: s.id, name: s.name,
     description: s.description || "", category: s.category || "",
-    author: s.author || "", version: s.version, tags: [],
+    author: s.author || "", authorExpert: !!s.author_is_expert, version: s.version, tags: [],
     accent: "red", popularity: s.downloads_count || 0, when: pubTime(s),
     featured: false, iconUrl: s.has_icon ? s.icon_url : null, emoji: null,
     url: null, linkScope: null, body: null,
@@ -1148,7 +1186,8 @@ function normResource(r) {
   return {
     item_type: "resource", kind: r.resource_type, id: r.id, name: r.name,
     description: r.description || "", category: r.category || "",
-    author: r.author || "", version: r.version, tags: r.tags || [],
+    author: r.author || "", authorExpert: !!r.author_is_expert,
+    version: r.version, tags: r.tags || [],
     // Колір — лише за видом: однаковий вид завжди виглядає однаково (п. 2.2).
     accent: kindMeta(r.resource_type).accent || "red",
     popularity: r.opens_count || 0, when: pubTime(r),
@@ -1340,9 +1379,94 @@ async function viewHome() {
         ${PAGE_ACTS_HTML}
       </div>
       <div class="cat-personal" id="cat-personal"></div>
+      <div id="home-support"></div>
     </div>`;
   paintCatalog();
+  paintHomeSupport();
   bindPageActs();
+}
+
+// Підтримка на головній (фідбек тестування, п. 21): два канали й пояснення,
+// куди з яким питанням. Ті самі пункти є внизу бічної панелі.
+function paintHomeSupport() {
+  const box = $("#home-support");
+  if (!box) return;
+  const agent = supportAgentUrl();
+  box.innerHTML = `
+    <section class="show-block support-block">
+      <div class="show-head"><div>
+        <h2>Потрібна допомога?</h2>
+        <p class="muted">Технічні питання вирішує AI SD агент, решту — адміністратор хабу.</p>
+      </div></div>
+      <div class="support-row">
+        ${agent ? `<a class="support-card" href="${esc(agent)}" target="_blank" rel="noopener"
+             title="${AGENT_HINT}" data-support="agent">
+          <span class="support-ic">${gsvg("chat")}</span>
+          <span class="support-txt"><b>AI SD агент${gsvg("ext", "btn-ext")}</b>
+            <i>${AGENT_HINT}: помилки, доступ до сервісів, налаштування. Відкриється в Teams.</i></span>
+        </a>` : ""}
+        <button class="support-card" id="home-contact" title="${CONTACT_HINT}">
+          <span class="support-ic">${gsvg("mail")}</span>
+          <span class="support-txt"><b>Зворотний зв'язок</b>
+            <i>${CONTACT_HINT}: ролі й розділи, зміст каталогу, пропозиції.</i></span>
+        </button>
+      </div>
+    </section>`;
+  box.querySelector("#home-contact").addEventListener("click", () => openContactForm());
+}
+
+// «Зворотний зв'язок»: повідомлення адміністратору хабу. Автор, дата й
+// сторінка підставляються самі — людині лишається лише написати.
+function contactPageLabel() {
+  const h1 = document.querySelector("#view .page-h1");
+  const title = h1 ? h1.textContent.trim() : "";
+  return title ? `${title} (${nav.dest})` : nav.dest;
+}
+
+function openContactForm() {
+  const page = contactPageLabel();
+  const agent = supportAgentUrl();
+  const who = (state.user && (state.user.full_name || state.user.username)) || "";
+  const { overlay, close } = catalogModal(`
+    <div class="modal res-editor contact-modal">
+      <div class="modal-head">
+        <h2>Зворотний зв'язок</h2>
+        <button class="modal-x" aria-label="Закрити">×</button>
+      </div>
+      <p class="muted">Питання й пропозиції адміністратору хабу: ролі, розділи, зміст
+      каталогу${agent ? `. З технічними питаннями швидше допоможе
+        <a href="${esc(agent)}" target="_blank" rel="noopener">AI SD агент</a>` : ""}.</p>
+      <label class="contact-field">Повідомлення
+        <textarea id="ct-msg" rows="6" maxlength="5000"
+          placeholder="Ваше питання чи пропозиція"></textarea></label>
+      <p class="contact-meta">Від: <b>${esc(who)}</b> · сторінка: ${esc(page)}</p>
+      <p class="error" id="ct-err"></p>
+      <div class="row">
+        <button class="mdc-act" id="ct-send">Відправити</button>
+        <button class="ghost" id="ct-cancel">Скасувати</button>
+      </div>
+    </div>`);
+  const input = overlay.querySelector("#ct-msg");
+  input.focus();
+  overlay.querySelector("#ct-cancel").addEventListener("click", () => close());
+  const send = overlay.querySelector("#ct-send");
+  send.addEventListener("click", async () => {
+    const message = input.value.trim();
+    if (!message) {
+      overlay.querySelector("#ct-err").textContent = "Напишіть повідомлення";
+      input.focus();
+      return;
+    }
+    send.disabled = true;
+    try {
+      await api("/contact", { method: "POST", body: { message, page } });
+      toast("Дякуємо! Повідомлення надіслано адміністратору");
+      close(true);
+    } catch (err) {
+      overlay.querySelector("#ct-err").textContent = err.message;
+      send.disabled = false;
+    }
+  });
 }
 
 async function viewCatalog() {
@@ -1397,22 +1521,19 @@ function bindFilterPopover() {
   document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
 }
 
-// «Мій розвиток» (фідбек тестування, п. 5 і 8): рівень і дата, тест рівня,
-// наступний крок і навчальні маршрути — окремою сторінкою, щоб головна
-// лишалася короткою. Поки тест не підключено, рівень людина вказує сама;
-// кнопка тесту з'являється, щойно адміністратор вкаже посилання на нього.
+// «Мій розвиток» (фідбек тестування, п. 5 і 8): рівень і дата, наступний
+// крок і навчальні маршрути — окремою сторінкою, щоб головна лишалася
+// короткою. Рівень визначає корпоративне тестування поза хабом, а вносить
+// адміністратор (п. 4): сама людина його не змінює, тож кнопок тут немає.
+const LEVEL_SOURCE = "Рівень визначається за результатами корпоративного тестування";
+
 async function viewDevelopment() {
-  const [paths, settings, maturity] = await Promise.all([
+  const [paths, maturity] = await Promise.all([
     api("/paths").catch(() => []),
-    api("/catalog/settings").catch(() => ({})),
     api("/catalog/maturity").catch(() => catalogState.maturity),
   ]);
   catalogState.maturity = maturity;
   const m = maturity;
-  const testUrl = (settings && settings.maturity_test_url) || "";
-  const test = (label) => testUrl
-    ? `<a class="btn" href="${esc(testUrl)}" target="_blank" rel="noopener">${esc(label)}${gsvg("ext", "btn-ext")}</a>`
-    : "";
 
   const ladder = m && m.levels.length ? `<ol class="dev-ladder">${m.levels.map((l, i) => {
     const at = m.current ? m.levels.findIndex(x => x.id === m.current.id) : -1;
@@ -1426,21 +1547,14 @@ async function viewDevelopment() {
         <span class="dev-eyebrow">Ваш рівень</span>
         <b class="dev-level-name">${esc(m.current.name)}</b>
         <p class="muted">${esc(m.current.description || "")}</p>
-        ${m.assessed_at ? `<span class="dev-date">Визначено ${esc(dateUa(m.assessed_at))}</span>` : ""}
-      </div>
-      <div class="dev-level-acts">
-        ${test("Пройти тест")}
-        <button class="ghost" id="dev-change">Змінити рівень</button>
+        ${m.assessed_at ? `<span class="dev-date">Визначено ${esc(dateUa(m.assessed_at))}</span>`
+          : `<span class="dev-date">${LEVEL_SOURCE}</span>`}
       </div>` : `
       <div class="dev-level-main">
         <span class="dev-eyebrow">Ваш рівень</span>
         <b class="dev-level-name">Ще не визначено</b>
-        <p class="muted">Визначте рівень — і хаб почне підбирати матеріали саме під нього.</p>
-      </div>
-      <div class="dev-level-acts">
-        ${testUrl ? `${test("Визначити мій рівень і пройти тест")}
-          <button class="ghost" id="dev-change">Вказати самостійно</button>`
-          : `<button id="dev-change">Визначити мій рівень</button>`}
+        <p class="muted">${LEVEL_SOURCE}. Щойно адміністратор внесе результат, хаб
+        почне підбирати матеріали саме під ваш рівень.</p>
       </div>`;
 
   const nextHtml = !m || !m.current ? "" : m.next
@@ -1487,8 +1601,6 @@ async function viewDevelopment() {
     const row = $("#dev-items");
     m.items.forEach(r => row.appendChild(catalogCard(normResource(r))));
   }
-  const change = $("#dev-change");
-  if (change) change.addEventListener("click", () => openMaturityPicker());
   document.querySelectorAll("#view [data-path]").forEach(b =>
     b.addEventListener("click", () => openPath(Number(b.dataset.path))));
 }
@@ -1629,7 +1741,7 @@ function renderHomeLevel() {
     ? `<span>Ваш рівень: <b>${esc(m.current.name)}</b></span>
        <button class="link-btn" id="home-dev">Мій розвиток →</button>`
     : `<span>Рівень роботи з AI ще не визначено.</span>
-       <button class="link-btn" id="home-dev">Визначити рівень →</button>`;
+       <button class="link-btn" id="home-dev">Мій розвиток →</button>`;
   box.querySelector("#home-dev").addEventListener("click", () => go("hub:dev"));
 }
 
@@ -1692,40 +1804,6 @@ function renderPersonal() {
   const freshRow = box.querySelector("#fresh-row");
   if (freshRow) fresh.forEach(i => freshRow.appendChild(catalogCard(i)));
   box.querySelector("#home-all").addEventListener("click", () => go("hub:all"));
-}
-
-// Вибір власного рівня зрілості.
-function openMaturityPicker() {
-  const m = catalogState.maturity;
-  if (!m) return;
-  const { overlay, close } = catalogModal(`
-    <div class="modal sm-modal">
-      <div class="modal-head">
-        <h2>Ваш рівень роботи з AI</h2>
-        <button class="modal-x" aria-label="Закрити">×</button>
-      </div>
-      <p class="muted">Рівень ні на що не впливає, крім добірок: він допомагає хабу
-      показувати вам доречні матеріали.</p>
-      <div class="lvl-list">${m.levels.map(l => `
-        <button class="lvl-opt${m.current && m.current.id === l.id ? " active" : ""}"
-                data-lvl="${l.id}">
-          <b>${esc(l.name)}</b><span>${esc(l.description || "")}</span>
-        </button>`).join("")}</div>
-    </div>`);
-
-  overlay.querySelectorAll("[data-lvl]").forEach(b =>
-    b.addEventListener("click", async () => {
-      try {
-        await api("/catalog/profile", { method: "PATCH",
-          body: { maturity_level_id: Number(b.dataset.lvl) } });
-        catalogState.maturity = await api("/catalog/maturity");
-        catalogState.recommendations =
-          (await api("/catalog/recommendations").catch(() => ({ items: [] }))).items || [];
-        toast("Рівень збережено");
-        close();
-        if (nav.dest === "hub:dev") viewDevelopment(); else paintCatalog();
-      } catch (err) { toast(err.message, "err"); }
-    }));
 }
 
 function resetCatFilters() {
@@ -2023,6 +2101,14 @@ async function showTag(tag) {
   paintCatalog();
 }
 
+// Автор із позначкою «Експерт» перед ім'ям (фідбек тестування, п. 11).
+// Позначка — ознака автора на момент публікації, її зберігає сам матеріал.
+function authorHtml(name, expert) {
+  if (!name) return "";
+  return `${expert ? `<span class="exp-tag" title="Автор має статус «Експерт»">Експерт</span> ` : ""}${
+    esc(name)}`;
+}
+
 function catalogCard(it) {
   const kind = kindMeta(it.kind);
   const desc = it.description || "";
@@ -2039,8 +2125,8 @@ function catalogCard(it) {
   (it.tags || []).slice(0, 3).forEach(t => tags.push(tagButton(t)));
 
   const meta = it.kind === "skill"
-    ? `Версія ${esc(it.version)} · ${esc(it.author || "—")}`
-    : (it.author ? esc(it.author) : "&nbsp;");
+    ? `Версія ${esc(it.version)} · ${it.author ? authorHtml(it.author, it.authorExpert) : "—"}`
+    : (it.author ? authorHtml(it.author, it.authorExpert) : "&nbsp;");
 
   const act = cardAction(it);
   const card = el(`<article class="mdc${it.featured ? " featured" : ""}" tabindex="0" role="button" title="Детальніше">
@@ -4274,7 +4360,7 @@ async function openResourceModal(resourceId) {
             <div class="sm-meta">
               ${it.category ? `<span class="mdc-tag primary"><i class="md-dot"></i>${esc(it.category)}</span>` : ""}
               ${tags}
-              <span class="muted">Версія: <b>${esc(it.version)}</b>${it.author ? ` · Автор: <b>${esc(it.author)}</b>` : ""}</span>
+              <span class="muted">Версія: <b>${esc(it.version)}</b>${it.author ? ` · Автор: <b>${authorHtml(it.author, it.authorExpert)}</b>` : ""}</span>
               <span class="muted" id="res-rating">${it.ratingCount ? `Оцінка: <b>${it.ratingAvg}</b> з 5 (${it.ratingCount})` : ""}</span>
               ${r.section_name ? `<span class="muted">Розділ: <b>${esc(r.section_name)}</b>${
                 r.folder_name ? ` → <b>${esc(r.folder_name)}</b>` : ""}</span>` : ""}
@@ -4405,7 +4491,8 @@ async function openSkillModal(skillId) {
             <h2>${esc(s.name)}</h2>
             <div class="sm-meta">
               <span class="mdc-tag primary"><i class="md-dot"></i>${esc(s.category || "Загальне")}</span>
-              <span class="muted">Версія: <b>${esc(s.version)}</b> · Автор: <b>${esc(s.author || "—")}</b></span>
+              <span class="muted">Версія: <b>${esc(s.version)}</b> · Автор: <b>${
+                s.author ? authorHtml(s.author, s.author_is_expert) : "—"}</b></span>
               ${pkg ? `<span class="muted" id="sm-downloads">${downloadsText(s.downloads_count || 0)}</span>` : ""}
               <span class="muted" id="sm-rating"></span>
             </div>
@@ -4979,6 +5066,13 @@ const REUSE_OPTIONS = [["", "Не вказано"], ["ready", "Готове до
 
 function dateInputValue(iso) { return iso ? String(iso).slice(0, 10) : ""; }
 function dateUa(iso) { return iso ? new Date(iso).toLocaleDateString("uk-UA") : "—"; }
+// Сервер віддає час у UTC без зони — показуємо його в місцевому часі.
+function dateTimeUa(iso) {
+  if (!iso) return "—";
+  const t = new Date(/Z|[+-]\d\d:\d\d$/.test(iso) ? iso : iso + "Z");
+  return t.toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", year: "numeric",
+                                     hour: "2-digit", minute: "2-digit" });
+}
 
 async function renderResourcesManage() {
   const panel = panelEl();
@@ -5104,6 +5198,101 @@ async function renderIdeasManage() {
   panel.querySelectorAll("[data-idea-route]").forEach(b =>
     b.addEventListener("click", () => openIdeaRouting(
       ideas.find(x => x.id === Number(b.dataset.ideaRoute)), resources)));
+}
+
+// «Зворотний зв'язок» (фідбек тестування, п. 21): повідомлення адміністратору
+// зі статусами «нове» й «опрацьовано» і адреса AI SD агента, яку видно внизу
+// бічної панелі й на головній.
+let contactFilter = "new";
+
+async function renderContactManage() {
+  const panel = panelEl();
+  panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
+  let data;
+  try {
+    [data] = await Promise.all([
+      api(`/contact${contactFilter === "all" ? "" : `?status=${contactFilter}`}`),
+      refreshHubSettings(),
+    ]);
+  } catch (err) {
+    panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
+    return;
+  }
+  if (!panel.isConnected) return;
+  const counts = data.counts || {};
+  const chip = (key, label, n) =>
+    `<button class="cat-chipf${contactFilter === key ? " active" : ""}${
+      key === "new" && n ? " warn" : ""}" data-cf="${key}">${esc(label)}${
+      n != null ? ` <b>${n}</b>` : ""}</button>`;
+  const row = (m) => {
+    const done = m.status === "done";
+    return `<div class="contact-row${done ? " done" : ""}" data-msg="${m.id}">
+      <div class="contact-head">
+        <div>
+          <b>${esc(m.author_name || "Користувача видалено")}</b>${m.author_email
+            ? ` · <a href="mailto:${esc(m.author_email)}">${esc(m.author_email)}</a>` : ""}
+          <div class="contact-sub">${dateTimeUa(m.created_at)}${
+            m.page ? ` · сторінка: ${esc(m.page)}` : ""}</div>
+        </div>
+        <span class="badge ${done ? "published" : "review"}">${done ? "Опрацьовано" : "Нове"}</span>
+      </div>
+      <p class="contact-text">${esc(m.message)}</p>
+      <div class="contact-foot">
+        ${done ? `<span class="muted">Опрацював(ла) ${esc(m.handled_by_name || "—")},
+          ${dateTimeUa(m.handled_at)}</span>
+          <button class="small ghost" data-cs="new">Повернути в нові</button>`
+          : `<button class="small" data-cs="done">Позначити опрацьованим</button>`}
+      </div>
+    </div>`;
+  };
+
+  panel.innerHTML = `
+    <div class="card">
+      <h2>Повідомлення адміністратору</h2>
+      <p class="muted">Нетехнічні питання користувачів. Автор, час і сторінку, з якої
+      написали, хаб підставляє сам. Відповідайте листом на пошту автора, а потім
+      позначте повідомлення опрацьованим.</p>
+      <div class="res-health">
+        ${chip("new", "Нові", counts.new || 0)}
+        ${chip("done", "Опрацьовані", counts.done || 0)}
+        ${chip("all", "Усі", null)}
+      </div>
+      <div class="contact-list">${data.items.length ? data.items.map(row).join("")
+        : `<p class="muted" style="margin-top:16px">${contactFilter === "new"
+            ? "Нових повідомлень немає." : "Повідомлень немає."}</p>`}</div>
+    </div>
+    <div class="card">
+      <h2>AI SD агент</h2>
+      <p class="muted">Канал технічної підтримки в Teams. Посилання видно внизу бічної
+      панелі й на головній, підказка: «${AGENT_HINT}». Порожнє поле ховає його.</p>
+      <div class="test-url-row">
+        <input id="agent-url" type="url" value="${esc(supportAgentUrl())}"
+               placeholder="https://teams.microsoft.com/l/app/…" aria-label="Посилання на AI SD агента">
+        <button class="mdc-act" id="agent-url-save">Зберегти</button>
+      </div>
+    </div>`;
+
+  panel.querySelectorAll("[data-cf]").forEach(b =>
+    b.addEventListener("click", () => { contactFilter = b.dataset.cf; renderContactManage(); }));
+  panel.querySelectorAll("[data-cs]").forEach(b =>
+    b.addEventListener("click", async () => {
+      const id = Number(b.closest("[data-msg]").dataset.msg);
+      try {
+        await api(`/contact/${id}`, { method: "PATCH", body: { status: b.dataset.cs } });
+        toast(b.dataset.cs === "done" ? "Позначено опрацьованим" : "Повернуто в нові");
+        renderContactManage();
+      } catch (err) { toast(err.message, "err"); }
+    }));
+  panel.querySelector("#agent-url-save").addEventListener("click", async () => {
+    try {
+      const res = await api("/catalog/settings", { method: "POST",
+        body: { support_agent_url: panel.querySelector("#agent-url").value } });
+      catalogState.settings = res;
+      buildSidebar();
+      toast(res.support_agent_url ? "Посилання на AI SD агента збережено"
+                                  : "Посилання на AI SD агента приховано");
+    } catch (err) { toast(err.message, "err"); }
+  });
 }
 
 // Зміна статусу ідеї з коментарем — автор має розуміти рішення, а не лише
@@ -5543,11 +5732,10 @@ function openTermMerge(term, peers) {
 async function renderPathsManage() {
   const panel = panelEl();
   panel.innerHTML = `<div class="card"><p class="muted">Завантаження…</p></div>`;
-  let paths, resources, terms, settings;
+  let paths, resources, terms;
   try {
-    [paths, resources, terms, settings] = await Promise.all([
+    [paths, resources, terms] = await Promise.all([
       api("/paths"), api("/catalog/resources"), api("/catalog/terms?kind=maturity"),
-      api("/catalog/settings").catch(() => ({})),
     ]);
   } catch (err) {
     panel.innerHTML = `<div class="card"><p class="error">${esc(err.message)}</p></div>`;
@@ -5581,26 +5769,8 @@ async function renderPathsManage() {
           </div>
         </div>`).join("") : `<p class="muted" style="margin-top:12px">Маршрутів ще немає.</p>`}
       </div>
-    </div>
-    <div class="card">
-      <h2>Тест рівня AI-обізнаності</h2>
-      <p class="muted">Посилання з'явиться кнопкою «Пройти тест» на сторінці «Мій розвиток» і
-      відкриється в новій вкладці. Порожнє поле — кнопки немає, рівень користувач
-      вказує сам.</p>
-      <div class="test-url-row">
-        <input id="test-url" type="url" value="${esc((settings && settings.maturity_test_url) || "")}"
-               placeholder="https://forms.office.com/…" aria-label="Посилання на тест рівня">
-        <button class="mdc-act" id="test-url-save">Зберегти</button>
-      </div>
     </div>`;
 
-  $("#test-url-save").addEventListener("click", async () => {
-    try {
-      const res = await api("/catalog/settings", { method: "POST",
-        body: { maturity_test_url: $("#test-url").value } });
-      toast(res.maturity_test_url ? "Посилання на тест збережено" : "Посилання на тест прибрано");
-    } catch (err) { toast(err.message, "err"); }
-  });
   $("#path-add").addEventListener("click", () => openPathEditor(null, terms));
   panel.querySelectorAll("[data-path-edit]").forEach(b =>
     b.addEventListener("click", () => openPathEditor(
@@ -6314,20 +6484,24 @@ function primaryRole(u) {
   return "";
 }
 // Роль, розділи й ознаки одним рядком для таблиці користувачів.
-function userAccessHtml(u, sections) {
+function userAccessHtml(u, sections, levels = []) {
   const names = (u.managed_section_ids || [])
     .map(id => (sections.find(x => x.id === id) || {}).name).filter(Boolean);
   const flags = [u.is_expert ? "Експерт" : "", u.is_ideas_owner ? "Відповідальний за ідеї" : ""]
     .filter(Boolean);
+  const level = levels.find(l => l.id === u.maturity_level_id);
   return `<div>${esc(roleLabel(u))}</div>${
     primaryRole(u) === "section_manager"
       ? `<div class="u-who-login">${names.length ? esc(names.join(", ")) : "розділи не призначено"}</div>` : ""}${
-    flags.length ? `<div class="u-who-login">${esc(flags.join(" · "))}</div>` : ""}`;
+    flags.length ? `<div class="u-who-login">${esc(flags.join(" · "))}</div>` : ""}${
+    level ? `<div class="u-who-login">Рівень: ${esc(level.name)}${
+      u.maturity_assessed_at ? `, ${esc(dateUa(u.maturity_assessed_at))}` : ""}</div>` : ""}`;
 }
 
 async function viewUsers() {
-  const [users, sections] = await Promise.all([
-    api("/users"), api("/catalog/sections").catch(() => [])]);
+  const [users, sections, levels] = await Promise.all([
+    api("/users"), api("/catalog/sections").catch(() => []),
+    api("/catalog/terms?kind=maturity").catch(() => [])]);
   const view = panelEl();
   const roleOpts = (sel) => USER_ROLE_OPTS.map(o =>
     `<option value="${o.v}" ${o.v === sel ? "selected" : ""}>${esc(o.label)}</option>`).join("");
@@ -6344,7 +6518,7 @@ async function viewUsers() {
       </div>
     </div>
     <div id="u-detail"></div>
-    <div class="card"><h2>Користувачі</h2><table class="t-users"><thead><tr><th>ID</th><th>Користувач</th><th>Ролі</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
+    <div class="card"><h2>Користувачі</h2><table class="t-users"><thead><tr><th>ID</th><th>Користувач</th><th>Роль і рівень</th><th>Дії</th></tr></thead><tbody id="u-body"></tbody></table></div>`;
 
   $("#u-add").addEventListener("click", async () => {
     const roles = $("#u-role").value ? [$("#u-role").value] : [];
@@ -6378,7 +6552,7 @@ async function viewUsers() {
           u.is_active ? "" : ` <span class="badge delisted">вимкнений</span>`}</div>
         <div class="u-who-login">${esc(u.username)}${mail ? " · " + esc(mail) : ""}</div>
       </td>
-      <td>${userAccessHtml(u, sections)}</td>
+      <td>${userAccessHtml(u, sections, levels)}</td>
       <td class="actions">
         <button class="small ghost" data-act="edit">Редагувати</button>
         <button class="small" data-act="reset">Пароль</button>
@@ -6403,10 +6577,17 @@ async function viewUsers() {
   watchTableFit(body.closest("table"));
 }
 
-// Редактор користувача: ім'я, пошта, роль, розділи менеджера, ознаки й стан.
+// Редактор користувача: ім'я, пошта, роль, розділи менеджера, ознаки, стан
+// і рівень AI-зрілості за результатами корпоративного тестування (фідбек, п. 4).
 async function openUserEditor(userId) {
-  const [u, sections] = await Promise.all([
-    api(`/users/${userId}`), api("/catalog/sections").catch(() => [])]);
+  const [u, sections, levels] = await Promise.all([
+    api(`/users/${userId}`), api("/catalog/sections").catch(() => []),
+    api("/catalog/terms?kind=maturity").catch(() => [])]);
+  const levelOpts = `<option value="">Не визначено</option>` + levels.filter(l => l.is_active !== false
+    || l.id === u.maturity_level_id).map(l =>
+    `<option value="${l.id}" ${l.id === u.maturity_level_id ? "selected" : ""}>${esc(l.name)}</option>`).join("");
+  const today = new Date().toISOString().slice(0, 10);
+  const assessed = u.maturity_assessed_at ? u.maturity_assessed_at.slice(0, 10) : "";
   const roleOpts = USER_ROLE_OPTS.map(o =>
     `<option value="${o.v}" ${o.v === primaryRole(u) ? "selected" : ""}>${esc(o.label)}</option>`).join("");
   const mine = new Set(u.managed_section_ids || []);
@@ -6423,6 +6604,14 @@ async function openUserEditor(userId) {
         <div class="field" style="flex:1"><label>Статус</label>
           <select id="ue-active"><option value="1" ${u.is_active ? "selected" : ""}>Активний</option><option value="0" ${!u.is_active ? "selected" : ""}>Деактивований</option></select></div>
       </div>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Рівень AI-зрілості</label>
+          <select id="ue-level">${levelOpts}</select></div>
+        <div class="field" style="flex:1"><label>Дата визначення</label>
+          <input id="ue-level-date" type="date" max="${today}" value="${esc(assessed)}"></div>
+      </div>
+      <p class="muted ue-hint">Рівень — за результатами корпоративного тестування; сам
+      користувач його не змінює. Без дати збережеться сьогоднішня.</p>
       <div class="field ue-sections" id="ue-sections">
         <span class="field-k">Розділи, які модерує</span>
         <div class="ue-checks">${sections.filter(x => !x.url).map(x => `
@@ -6434,7 +6623,7 @@ async function openUserEditor(userId) {
         <span class="field-k">Ознаки</span>
         <div class="ue-checks">
           <label class="ind-toggle"><input type="checkbox" id="ue-expert"${u.is_expert ? " checked" : ""}>
-            <span><b>Експерт</b> — позначка біля автора на його матеріалах</span></label>
+            <span><b>Експерт</b> — позначка біля автора на матеріалах, які він опублікує відтепер</span></label>
           <label class="ind-toggle"><input type="checkbox" id="ue-ideas"${u.is_ideas_owner ? " checked" : ""}>
             <span><b>Відповідальний за ідеї</b> — опрацьовує ідеї в «Керуванні»</span></label>
         </div>
@@ -6450,6 +6639,14 @@ async function openUserEditor(userId) {
   };
   paintSections();
   $("#ue-role").addEventListener("change", paintSections);
+  // Дата має сенс лише разом із рівнем.
+  const paintLevelDate = () => {
+    const none = !$("#ue-level").value;
+    $("#ue-level-date").disabled = none;
+    if (none) $("#ue-level-date").value = "";
+  };
+  paintLevelDate();
+  $("#ue-level").addEventListener("change", paintLevelDate);
 
   $("#ue-close").addEventListener("click", () => { box.innerHTML = ""; });
   $("#ue-save").addEventListener("click", async () => {
@@ -6460,12 +6657,16 @@ async function openUserEditor(userId) {
       toast("Оберіть розділи, які модеруватиме менеджер", "err");
       return;
     }
+    const level = $("#ue-level").value;
+    const levelDate = $("#ue-level-date").value;
     try {
       await api(`/users/${userId}`, { method: "PATCH", body: {
         full_name: $("#ue-name").value, email: $("#ue-email").value || null,
         is_active: $("#ue-active").value === "1", roles: role ? [role] : [],
         managed_section_ids: sectionIds,
-        is_expert: $("#ue-expert").checked, is_ideas_owner: $("#ue-ideas").checked }});
+        is_expert: $("#ue-expert").checked, is_ideas_owner: $("#ue-ideas").checked,
+        maturity_level_id: level ? Number(level) : null,
+        ...(level && levelDate ? { maturity_assessed_at: levelDate } : {}) }});
       toast("Користувача оновлено"); openTab("users");
     } catch (err) { toast(err.message, "err"); }
   });
@@ -6512,6 +6713,13 @@ function tourSections() {
   return out;
 }
 
+// «Підтримка» — агент і «Зворотний зв'язок» унизу бічної панелі.
+function tourSupport() {
+  const items = [...document.querySelectorAll('#sidebar [data-support="agent"], #sidebar [data-contact]')]
+    .filter(tourVisible);
+  return items.length ? items : null;
+}
+
 function tourSteps() {
   const phone = window.matchMedia("(max-width: 760px)").matches;
   return [
@@ -6528,8 +6736,8 @@ function tourSteps() {
                   : "Каталог за темами. Розділ зі стрілкою відкриває зовнішній портал." },
     { at: () => tourPick('#sidebar [data-dest="hub:dev"]', "#home-level"), side: "right",
       title: "Мій розвиток",
-      text: "Ваш рівень роботи з AI, наступний крок і навчальні маршрути. Рівень видно й на "
-        + "головній — під привітанням." },
+      text: "Ваш рівень роботи з AI за результатами корпоративного тестування, наступний "
+        + "крок і навчальні маршрути. Рівень видно й на головній — під привітанням." },
     { at: () => tourPick("#view article.mdc"), title: "Картка матеріалу",
       text: "Клацніть картку, щоб відкрити опис. Кнопка внизу копіює промпт чи завантажує "
         + "навичку, а зірочка зберігає матеріал в «Обране»." },
@@ -6552,6 +6760,9 @@ function tourSteps() {
     { at: () => tourPick("#me-btn"), title: "Профіль",
       text: "Обране, ваші ідеї й контент, світла чи темна тема. Тут же можна ще раз пройти "
         + "це знайомство." },
+    { at: () => tourSupport(), side: "right", title: "Підтримка",
+      text: "AI SD агент у Teams допоможе з технічними питаннями. «Зворотний зв'язок» — "
+        + "для нетехнічних питань адміністратору хабу: ролі, розділи, зміст каталогу." },
     { at: () => tourPick("#help-btn"), title: "Інструкція", guide: true,
       text: "Детальна інструкція з кроками й знімками екрана. Відкривається в новій вкладці; "
         + "посилання на неї є й останнім пунктом бічної панелі." },

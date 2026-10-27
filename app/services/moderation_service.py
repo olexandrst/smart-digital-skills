@@ -49,6 +49,17 @@ def target_status(user, item, requested):
     return requested
 
 
+def snapshot_expert(item):
+    """Позначка «Експерт» біля автора — ознака автора на момент першої
+    публікації (фідбек, п. 11). Повторна публікація (з архіву, після
+    «потребує оновлення») її не перераховує: зняту згодом галочку раніше
+    опубліковане не відчує. Викликати до того, як заповнено published_at."""
+    if item.published_at is not None:
+        return
+    author = db.session.get(User, item.created_by) if item.created_by else None
+    item.author_is_expert = bool(author and author.is_expert)
+
+
 def log(item_type, item, user, from_status, to_status, note=None):
     """Запис у журнал життєвого циклу (FR-08)."""
     db.session.add(ReviewLog(

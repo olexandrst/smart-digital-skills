@@ -19,6 +19,16 @@ def _seed_terms(app):
         seed_catalog_terms()
 
 
+def _set_level(client, headers, level_id, **extra):
+    """Рівень вносить адміністратор у редакторі користувача (фідбек, п. 4);
+    тут адміністратор встановлює рівень самому собі."""
+    me = client.get("/api/auth/me", headers=headers).get_json()
+    res = client.patch(f"/api/users/{me['id']}",
+                       json={"maturity_level_id": level_id, **extra}, headers=headers)
+    assert res.status_code == 200, res.get_json()
+    return res.get_json()
+
+
 def _levels(client, headers):
     rows = client.get("/api/catalog/terms?kind=maturity", headers=headers).get_json()
     return {r["name"]: r["id"] for r in rows}
@@ -92,10 +102,9 @@ def test_profile_level_saved_and_next_level_suggested(client, app):
     _seed_terms(app)
     h = _admin(client)
     lv = _levels(client, h)
-    assert client.patch("/api/catalog/profile",
-                        json={"maturity_level_id": lv["User"],
-                              "department": "Закупівлі"},
+    assert client.patch("/api/catalog/profile", json={"department": "Закупівлі"},
                         headers=h).status_code == 200
+    _set_level(client, h, lv["User"])
 
     data = client.get("/api/catalog/maturity", headers=h).get_json()
     assert data["current"]["name"] == "User"
@@ -110,10 +119,10 @@ def test_level_date_shown_on_my_development(client, app):
     h = _admin(client)
     lv = _levels(client, h)
     assert client.get("/api/catalog/maturity", headers=h).get_json()["assessed_at"] is None
-    client.patch("/api/catalog/profile", json={"maturity_level_id": lv["User"]}, headers=h)
+    _set_level(client, h, lv["User"])
     first = client.get("/api/catalog/maturity", headers=h).get_json()["assessed_at"]
     assert first and first.startswith("20")
-    client.patch("/api/catalog/profile", json={"maturity_level_id": lv["User"]}, headers=h)
+    _set_level(client, h, lv["User"])
     assert client.get("/api/catalog/maturity", headers=h).get_json()["assessed_at"] == first
 
 
@@ -137,8 +146,7 @@ def test_top_level_has_no_next(client, app):
     _seed_terms(app)
     h = _admin(client)
     lv = _levels(client, h)
-    client.patch("/api/catalog/profile",
-                 json={"maturity_level_id": lv["Transformer"]}, headers=h)
+    _set_level(client, h, lv["Transformer"])
     assert client.get("/api/catalog/maturity", headers=h).get_json()["next"] is None
 
 
@@ -148,8 +156,7 @@ def test_maturity_selection_matches_user_level(client, app):
     lv = _levels(client, h)
     _resource(client, h, name="Для Aware", maturity_ids=[lv["Aware"]])
     _resource(client, h, name="Для Innovator", maturity_ids=[lv["Innovator"]])
-    client.patch("/api/catalog/profile", json={"maturity_level_id": lv["Aware"]},
-                 headers=h)
+    _set_level(client, h, lv["Aware"])
 
     data = client.get("/api/catalog/maturity", headers=h).get_json()
     assert [i["name"] for i in data["items"]] == ["Для Aware"]
@@ -426,8 +433,7 @@ def test_recommendation_reason_mentions_user_level(client, app):
     _seed_terms(app)
     h = _admin(client)
     lv = _levels(client, h)
-    client.patch("/api/catalog/profile", json={"maturity_level_id": lv["User"]},
-                 headers=h)
+    _set_level(client, h, lv["User"])
     _resource(client, h, name="Під рівень", maturity_ids=[lv["User"]])
 
     item = next(i for i in client.get("/api/catalog/recommendations",

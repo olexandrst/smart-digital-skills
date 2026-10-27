@@ -26,7 +26,8 @@ def test_home_has_level_line_and_two_blocks(page, live_url):
     _relogin(page, live_url, "tester")
     level = page.locator("#home-level")
     expect(level).to_be_visible()
-    expect(level).to_contain_text("Визначити рівень")
+    expect(level).to_contain_text("Рівень роботи з AI ще не визначено")
+    expect(level.locator("#home-dev")).to_have_text("Мій розвиток →")
     titles = page.locator("#cat-personal h2")
     expect(titles.last).to_have_text("Нещодавно додані")
     assert set(titles.all_text_contents()) <= {"Рекомендовано вам", "Нещодавно додані"}
@@ -54,38 +55,43 @@ def test_home_has_level_line_and_two_blocks(page, live_url):
     expect(page.locator(".page-h1")).to_have_text("Матеріали")
 
 
+def _set_tester_level(page, level_name, date=None):
+    """Рівень вносить адміністратор у редакторі користувача (фідбек, п. 4)."""
+    page.evaluate("""async ([name, date]) => {
+        const uid = (await api('/users')).find(u => u.username === 'tester').id;
+        const lv = name ? (await api('/catalog/terms?kind=maturity')).find(t => t.name === name).id : null;
+        await api(`/users/${uid}`, { method: 'PATCH', body: Object.assign(
+            { maturity_level_id: lv }, date ? { maturity_assessed_at: date } : {}) });
+    }""", [level_name, date])
+
+
 def test_my_development_shows_level_date_next_step_and_paths(page, live_url):
     login(page, live_url)
     page.click('#sidebar [data-dest="hub:dev"]')
     expect(page.locator(".page-h1")).to_have_text("Мій розвиток")
     expect(page.locator(".dev-level-name")).to_have_text("Ще не визначено")
-    expect(page.locator(".dev-level-acts a.btn")).to_have_count(0)   # тесту ще немає
+    expect(page.locator(".dev-level")).to_contain_text(
+        "Рівень визначається за результатами корпоративного тестування")
+    # Сам користувач рівень не змінює, а тесту в хабі поки немає — кнопок теж.
+    expect(page.locator(".dev-level button, .dev-level a")).to_have_count(0)
 
-    page.click("#dev-change")
-    page.click('.lvl-opt:has-text("User")')
-    expect(page.locator(".dev-level-name")).to_have_text("User")
-    expect(page.locator(".dev-date")).to_contain_text("Визначено")
-    expect(page.locator(".dev-ladder li.on")).to_have_text("User")
-    expect(page.locator(".dev-ladder li.done")).to_have_text("Aware")
-    expect(page.locator(".dev-next")).to_contain_text("Наступний крок — Integrator")
-    expect(page.locator(".dev h2").last).to_have_text("Навчальні маршрути")
-
-    page.click('#sidebar [data-dest="hub:home"]')
-    expect(page.locator("#home-level")).to_contain_text("Ваш рівень: User")
-
-    # Посилання на тест вказує адміністратор — тоді з'являється кнопка.
     _relogin(page, live_url, "admin")
-    settings(page, maturity_test_url="https://forms.office.com/r/level-test")
+    _set_tester_level(page, "User", "2026-09-15")
     try:
         _relogin(page, live_url, "tester")
         page.click('#sidebar [data-dest="hub:dev"]')
-        test_link = page.locator(".dev-level-acts a.btn")
-        expect(test_link).to_have_text("Пройти тест")
-        expect(test_link).to_have_attribute("href", "https://forms.office.com/r/level-test")
-        expect(test_link).to_have_attribute("target", "_blank")
+        expect(page.locator(".dev-level-name")).to_have_text("User")
+        expect(page.locator(".dev-date")).to_have_text("Визначено 15.09.2026")
+        expect(page.locator(".dev-ladder li.on")).to_have_text("User")
+        expect(page.locator(".dev-ladder li.done")).to_have_text("Aware")
+        expect(page.locator(".dev-next")).to_contain_text("Наступний крок — Integrator")
+        expect(page.locator(".dev h2").last).to_have_text("Навчальні маршрути")
+
+        page.click('#sidebar [data-dest="hub:home"]')
+        expect(page.locator("#home-level")).to_contain_text("Ваш рівень: User")
     finally:
         _relogin(page, live_url, "admin")
-        settings(page, maturity_test_url="")
+        _set_tester_level(page, None)
 
 
 def test_tag_opens_all_materials_with_it(page, live_url):

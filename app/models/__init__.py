@@ -26,8 +26,11 @@ from app.models.survey import (
 from app.models.notification import Notification, NOTIFICATION_KINDS
 from app.models.file import UserFile
 from app.models.setting import AppSetting
+from app.models.contact import ContactMessage, CONTACT_STATUSES
 
 __all__ = [
+    "ContactMessage",
+    "CONTACT_STATUSES",
     "User",
     "Role",
     "UserRole",

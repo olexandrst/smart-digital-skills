@@ -365,6 +365,9 @@ class CatalogResource(db.Model):
     description = db.Column(db.Text, nullable=False, default="")
     category = db.Column(db.String)
     author = db.Column(db.String)
+    # Чи був автор «Експертом» на момент першої публікації (фідбек, п. 11):
+    # якщо галочку згодом знімуть, уже опубліковане не зміниться.
+    author_is_expert = db.Column(db.Boolean, nullable=False, default=False)
     # Спадщина: теги рядком через кому. Тепер джерело правди — catalog_resource_tags;
     # ця колонка лишена тільки як вхід для одноразового перенесення старих даних
     # (app/core/schema.py) і більше не пишеться.
@@ -448,6 +451,7 @@ class CatalogResource(db.Model):
             "business_value_name": (self.business_value.name
                                     if self.business_value else None),
             "author": self.author,
+            "author_is_expert": bool(self.author_is_expert),
             "owner": self.owner,
             "owner_contact": self.owner_contact,
             "tools": self.tools,

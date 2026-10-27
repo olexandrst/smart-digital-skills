@@ -60,7 +60,8 @@ class User(db.Model):
     is_system_admin = db.Column(db.Boolean, nullable=False, default=False)
     # GUID-назва підкаталогу для файлів користувача (instance/user_files/<uid>).
     storage_uid = db.Column(db.String, unique=True, default=_uid)
-    # Рівень AI-зрілості з довідника (BR-9): користувач вказує його сам.
+    # Рівень AI-зрілості з довідника (BR-9). Визначає корпоративне тестування,
+    # вносить адміністратор; рівні, які люди вказали самі до цього, лишаються.
     maturity_level_id = db.Column(db.Integer, db.ForeignKey("catalog_terms.id"))
     # Коли рівень визначено востаннє — сторінка «Мій розвиток» показує дату.
     maturity_assessed_at = db.Column(db.DateTime)
@@ -144,6 +145,8 @@ class User(db.Model):
             "is_expert": bool(self.is_expert),
             "is_ideas_owner": bool(self.is_ideas_owner),
             "maturity_level_id": self.maturity_level_id,
+            "maturity_assessed_at": (self.maturity_assessed_at.isoformat()
+                                     if self.maturity_assessed_at else None),
             "department": self.department,
             "tour_completed_at": (self.tour_completed_at.isoformat()
                                   if self.tour_completed_at else None),
