@@ -130,8 +130,14 @@ def browser():
     with sync_api.sync_playwright() as pw:
         try:
             chromium = pw.chromium.launch()
-        except Exception as exc:   # браузер не встановлено
-            pytest.skip(f"Chromium недоступний: {exc}")
+        except Exception as exc:
+            # Збірки браузера для іншої версії Playwright немає — пробуємо
+            # Chromium, встановлений у середовищі (CHROMIUM_PATH або типовий шлях).
+            path = os.environ.get("CHROMIUM_PATH", "/opt/pw-browsers/chromium")
+            try:
+                chromium = pw.chromium.launch(executable_path=path)
+            except Exception:
+                pytest.skip(f"Chromium недоступний: {exc}")
         yield chromium
         chromium.close()
 

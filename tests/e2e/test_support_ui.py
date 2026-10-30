@@ -37,10 +37,10 @@ def test_support_links_and_contact_message(page, live_url):
         "title", "Нетехнічні питання адміністратору хабу")
 
     # Повідомлення: автор і сторінка підставляються самі.
-    page.click('#sidebar [data-dest="hub:dev"]')
+    page.click('#sidebar [data-dest="hub:fav"]')
     page.click("#sidebar [data-contact]")
     expect(page.locator(".contact-meta")).to_contain_text("Тестувальник")
-    expect(page.locator(".contact-meta")).to_contain_text("Мій розвиток")
+    expect(page.locator(".contact-meta")).to_contain_text("Обране")
     page.click("#ct-send")
     expect(page.locator("#ct-err")).to_have_text("Напишіть повідомлення")
     page.fill("#ct-msg", "Хочу стати менеджером розділу")
@@ -54,7 +54,7 @@ def test_support_links_and_contact_message(page, live_url):
     expect(page.locator(".page-h1")).to_have_text("Зворотний зв'язок")
     row = page.locator(".contact-row", has_text="Хочу стати менеджером розділу")
     expect(row).to_contain_text("Тестувальник")
-    expect(row).to_contain_text("Мій розвиток (hub:dev)")
+    expect(row).to_contain_text("Обране (hub:fav)")
     row.locator('[data-cs="done"]').click()
     expect(page.locator(".contact-row", has_text="Хочу стати менеджером розділу")).to_have_count(0)
     page.click('[data-cf="done"]')

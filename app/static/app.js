@@ -551,6 +551,12 @@ function adminHome() {
   return "hub:home";
 }
 
+// Тимчасово приховані можливості (рішення колег, 30.10.2026): «Поділитися
+// ідеєю» й «Мій розвиток» поки не показуємо. Код, ендпоінти й дані лишаються —
+// щоб повернути, досить поставити true. Опрацювання вже поданих ідей
+// («Керування → Ідеї») і маршрути в «Керуванні» не ховаються.
+const FEATURES = { ideas: false, development: false };
+
 // Поточне місце. `dest` — рядок виду "hub:sec:12"; перший сегмент — режим.
 let nav = { mode: "hub", dest: "hub:home" };
 
@@ -656,6 +662,7 @@ function bindProfileMenu() {
   document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
   menu.querySelectorAll("[data-go]").forEach(b =>
     b.addEventListener("click", () => { close(); go(b.dataset.go); }));
+  menu.querySelector('[data-act="my-ideas"]').hidden = !FEATURES.ideas;
   menu.querySelectorAll("[data-act]").forEach(b =>
     b.addEventListener("click", () => {
       close();
@@ -852,6 +859,7 @@ function bindSideToggle() {
 // ---- Маршрутизація ----
 async function go(dest) {
   if (dest === "hub:paths") dest = "hub:dev";   // колишні «Мої маршрути»
+  if (dest === "hub:dev" && !FEATURES.development) dest = "hub:home";
   const mode = destMode(dest);
   nav.lastIn = nav.lastIn || {};
   nav.lastIn[mode] = dest;
@@ -972,7 +980,8 @@ function hubSidebarHtml() {
   // тому виділений і стоїть над розділами, а не губиться серед них.
   html += sbItem("hub:all", "Матеріали", "list", catalogState.items.length || "", "sb-feature");
 
-  const sections = catalogState.sections.filter(s => s.items_count > 0 || s.url);
+  const sections = catalogState.sections
+    .filter(s => s.is_active !== false && (s.items_count > 0 || s.url));
   if (sections.length) {
     html += `<div class="sb-group">Розділи</div>`;
     for (const sec of sections) {
@@ -1004,8 +1013,10 @@ function hubSidebarHtml() {
   }
 
   // Рівень, наступний крок і маршрути — одна сторінка (фідбек, п. 5 і 8).
-  html += `<div class="sb-group">Навчання</div>`
-    + sbItem("hub:dev", "Мій розвиток", "grow");
+  if (FEATURES.development) {
+    html += `<div class="sb-group">Навчання</div>`
+      + sbItem("hub:dev", "Мій розвиток", "grow");
+  }
   // Наповнення каталогу — особисте для кожного: лічильник — власні матеріали
   // й навички. Черга модерації менеджера — у «Керуванні».
   const mine = (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
@@ -1353,14 +1364,15 @@ function hubHead() {
 const PAGE_ACTS_HTML = `
   <div class="page-acts">
     <button class="ghost hidden" id="cat-my-content">Мій контент</button>
-    <button class="ghost" id="cat-idea">Поділитися ідеєю</button>
+    ${FEATURES.ideas ? `<button class="ghost" id="cat-idea">Поділитися ідеєю</button>` : ""}
     <button class="ghost" id="cat-add">${gsvg("plus")}Додати матеріал</button>
     <button id="cat-assistant">Опишіть задачу</button>
   </div>`;
 
 function bindPageActs() {
   $("#cat-assistant").addEventListener("click", () => openAssistant());
-  $("#cat-idea").addEventListener("click", () => openIdeaForm());
+  const idea = $("#cat-idea");
+  if (idea) idea.addEventListener("click", () => openIdeaForm());
   $("#cat-add").addEventListener("click", () => openContentWizard());
   paintMyContentButton();
 }
@@ -1738,7 +1750,7 @@ function paintCatalog() {
 function renderHomeLevel() {
   const box = $("#home-level");
   if (!box) return;
-  const m = catalogState.maturity;
+  const m = FEATURES.development ? catalogState.maturity : null;
   box.classList.toggle("hidden", !m);
   if (!m) return;
   box.innerHTML = m.current
@@ -1978,7 +1990,7 @@ function renderCatalogGrid() {
           query ? ` за запитом «${esc(catalogState.query)}»` : ""}.</p>
         ${query ? `<div class="cat-empty-acts">
           <button class="mdc-act" id="empty-assistant">Спитати помічника</button>
-          <button class="ghost-act" id="empty-idea">Поділитися ідеєю</button>
+          ${FEATURES.ideas ? `<button class="ghost-act" id="empty-idea">Поділитися ідеєю</button>` : ""}
         </div>` : ""}
       </div>`;
     const askBtn = $("#empty-assistant");
@@ -2377,6 +2389,9 @@ async function paintMyContentButton() {
   btn.classList.toggle("warn", data.overdue > 0);
   btn.classList.remove("hidden");
   btn.addEventListener("click", () => openMyContent());
+  // Пункт меню профілю — теж лише тим, хто має свій контент.
+  const item = document.querySelector('#me-menu [data-act="my-content"]');
+  if (item) item.hidden = false;
 }
 
 async function openMyContent() {
@@ -3818,7 +3833,7 @@ function renderAssistantAnswer(out, data, close) {
     </button>`).join("");
 
   out.innerHTML = `<p class="asst-reply">${esc(data.reply)}</p>${cards}
-    ${data.suggest_idea ? `<button class="ghost-act asst-idea">Поділитися ідеєю</button>` : ""}
+    ${data.suggest_idea && FEATURES.ideas ? `<button class="ghost-act asst-idea">Поділитися ідеєю</button>` : ""}
     ${data.items.length ? `<div class="asst-rate">
         <span class="muted">Відповідь допомогла?</span>
         <button class="small" data-rate="1">Так</button>
@@ -4400,7 +4415,7 @@ async function openResourceModal(resourceId) {
         <div class="sm-files" id="res-files"></div>
       </div>
       <div class="sm-actions" id="res-actions">
-        <button class="ghost-act" id="res-idea">Поділитися ідеєю</button>
+        ${FEATURES.ideas ? `<button class="ghost-act" id="res-idea">Поділитися ідеєю</button>` : ""}
       </div>
       <hr class="md-hr">
       ${commentsBlockHtml()}
@@ -4449,7 +4464,8 @@ async function openResourceModal(resourceId) {
   trackView("resource", it.id, it.name);
 
   const actions = overlay.querySelector("#res-actions");
-  overlay.querySelector("#res-idea").addEventListener("click", () => {
+  const ideaBtn = overlay.querySelector("#res-idea");
+  if (ideaBtn) ideaBtn.addEventListener("click", () => {
     close();
     openIdeaForm({ id: it.id, name: it.name });
   });
@@ -6764,7 +6780,8 @@ function tourSteps() {
       title: phone ? "Бічна панель" : "Розділи",
       text: phone ? "Тут розділи каталогу, ваші публікації й інструкція."
                   : "Каталог за темами. Розділ зі стрілкою відкриває зовнішній портал." },
-    { at: () => tourPick('#sidebar [data-dest="hub:dev"]', "#home-level"), side: "right",
+    { when: () => FEATURES.development,
+      at: () => tourPick('#sidebar [data-dest="hub:dev"]', "#home-level"), side: "right",
       title: "Мій розвиток",
       text: "Ваш рівень роботи з AI за результатами корпоративного тестування, наступний "
         + "крок і навчальні маршрути. Рівень видно й на головній — під привітанням." },
@@ -6788,7 +6805,8 @@ function tourSteps() {
       text: "Коментарі до ваших матеріалів, рішення менеджера й нагадування про перевірку. "
         + "Клік відкриває потрібну картку." },
     { at: () => tourPick("#me-btn"), title: "Профіль",
-      text: "Обране, ваші ідеї й контент, світла чи темна тема. Тут же можна ще раз пройти "
+      text: (FEATURES.ideas ? "Обране, ваші ідеї й контент" : "Обране й ваш контент")
+        + ", світла чи темна тема. Тут же можна ще раз пройти "
         + "це знайомство." },
     { at: () => tourSupport(), side: "right", title: "Підтримка",
       text: "AI SD агент у Teams допоможе з технічними питаннями. «Зворотний зв'язок» — "

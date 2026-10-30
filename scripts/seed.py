@@ -178,10 +178,12 @@ def _seed_package_skill(admin):
 # Розділи каталогу — дзеркало меню корпоративного AI Knowledge Hub.
 # `url` заповнено там, де розділ поки живе у зовнішньому порталі (гібридний режим):
 # плитка веде туди. Коли контент переїде до нас — посилання прибирається.
+# Три зовнішні розділи колеги вирішили поки не показувати (30.10.2026):
+# вони приховані, а повернути їх можна в «Керування → Структура каталогу».
 CATALOG_SECTIONS = [
     {"name": "Про проєкт «AI Culture Acceleration»", "icon_emoji": "🚀", "accent": "red",
      "description": "Мета, етапи та команда програми розвитку AI-культури.",
-     "url": "/portal/ai-culture-acceleration"},
+     "url": "/portal/ai-culture-acceleration", "is_active": False},
     {"name": "Toolbox", "icon_emoji": "🧰", "accent": "ink",
      "description": "Доступні ШІ-інструменти компанії та умови їх використання."},
     {"name": "FAQ", "icon_emoji": "❓", "accent": "steel",
@@ -196,13 +198,13 @@ CATALOG_SECTIONS = [
      "description": "Політики, правила та безпека використання ШІ."},
     {"name": "AI Partners Network", "icon_emoji": "🤝", "accent": "ink",
      "description": "Спільнота AI-партнерів у Viva Engage.",
-     "url": "https://web.yammer.com/main/groups/ai-partners-network"},
+     "url": "https://web.yammer.com/main/groups/ai-partners-network", "is_active": False},
     {"name": "AI Community", "icon_emoji": "☕", "accent": "green",
      "description": "AI Hub Weekly та зустрічі спільноти: "
                     "розклад, записи та матеріали заходів."},
     {"name": "Help & Feedback", "icon_emoji": "🆘", "accent": "amber",
      "description": "Технічна підтримка та зворотний зв'язок щодо хабу.",
-     "url": "/portal/ai-help-feedback"},
+     "url": "/portal/ai-help-feedback", "is_active": False},
 ]
 
 

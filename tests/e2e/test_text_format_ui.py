@@ -96,10 +96,11 @@ def test_empty_recent_and_search_states(page, live_url):
     page.click("#empty-all")
     expect(page.locator(".page-h1")).to_have_text("Матеріали")
     page.fill("#global-q", "жирафиквантові")
+    # «Поділитися ідеєю» поки приховано — лишається «Спитати помічника».
     acts = page.locator(".cat-empty-acts button")
-    expect(acts).to_have_count(2)
-    boxes = [acts.nth(i).bounding_box() for i in range(2)]
-    assert boxes[0]["height"] == boxes[1]["height"]
+    expect(acts).to_have_text(["Спитати помічника"])
+    box = acts.first.bounding_box()
+    assert box["height"] == 34
     grid = page.locator("#cat-grid").bounding_box()
-    middle = (boxes[0]["x"] + boxes[1]["x"] + boxes[1]["width"]) / 2
+    middle = box["x"] + box["width"] / 2
     assert abs(middle - (grid["x"] + grid["width"] / 2)) < 20   # по центру під текстом

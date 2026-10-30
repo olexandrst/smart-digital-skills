@@ -275,3 +275,23 @@ def test_expert_and_contact_migration(tmp_path):
     _alembic(path, "downgrade", "e7a9c1d3f5b8", tmp_path=tmp_path)
     tables = set(inspect(create_engine(f"sqlite:///{path}")).get_table_names())
     assert "contact_messages" not in tables
+
+
+def test_external_sections_hidden(tmp_path):
+    """Три зовнішні розділи стають прихованими, решта — ні; відкат їх повертає."""
+    from sqlalchemy import text
+    path = tmp_path / "hide.db"
+    _alembic(path, "upgrade", "f8b0d2e4a6c9", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        for i, name in enumerate(("Про проєкт «AI Culture Acceleration»", "AI Partners Network",
+                                  "Help & Feedback", "Toolbox"), start=1):
+            _insert(conn, "catalog_sections", id=i, name=name, is_active=1)
+    _alembic(path, "upgrade", "a9c1e3f5b7d0", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert dict(conn.execute(text("SELECT id, is_active FROM catalog_sections")).all()) \
+            == {1: 0, 2: 0, 3: 0, 4: 1}
+    _alembic(path, "downgrade", "f8b0d2e4a6c9", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert conn.execute(text(
+            "SELECT COUNT(*) FROM catalog_sections WHERE is_active = 1")).scalar() == 4

@@ -15,6 +15,12 @@ def _relogin(page, base, username):
     login(page, base, username)
 
 
+def _show_development(page):
+    """«Мій розвиток» поки приховано (FEATURES.development); логіку сторінки
+    перевіряємо, увімкнувши її на час тесту."""
+    page.evaluate("() => { FEATURES.development = true; buildSidebar(); paintCatalog(); }")
+
+
 # ---- П. 5 і 8: головна — привітання з рівнем і два блоки ----
 
 def test_home_has_level_line_and_two_blocks(page, live_url):
@@ -25,6 +31,9 @@ def test_home_has_level_line_and_two_blocks(page, live_url):
         body: 'Текст.', status: 'published' } })""")
     _relogin(page, live_url, "tester")
     level = page.locator("#home-level")
+    # Рядок рівня веде в «Мій розвиток», тож поки сторінку приховано, ховається й він.
+    expect(level).to_be_hidden()
+    _show_development(page)
     expect(level).to_be_visible()
     expect(level).to_contain_text("Рівень роботи з AI ще не визначено")
     expect(level.locator("#home-dev")).to_have_text("Мій розвиток →")
@@ -67,6 +76,7 @@ def _set_tester_level(page, level_name, date=None):
 
 def test_my_development_shows_level_date_next_step_and_paths(page, live_url):
     login(page, live_url)
+    _show_development(page)
     page.click('#sidebar [data-dest="hub:dev"]')
     expect(page.locator(".page-h1")).to_have_text("Мій розвиток")
     expect(page.locator(".dev-level-name")).to_have_text("Ще не визначено")
@@ -79,6 +89,7 @@ def test_my_development_shows_level_date_next_step_and_paths(page, live_url):
     _set_tester_level(page, "User", "2026-09-15")
     try:
         _relogin(page, live_url, "tester")
+        _show_development(page)
         page.click('#sidebar [data-dest="hub:dev"]')
         expect(page.locator(".dev-level-name")).to_have_text("User")
         expect(page.locator(".dev-date")).to_have_text("Визначено 15.09.2026")
