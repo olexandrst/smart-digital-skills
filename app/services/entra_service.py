@@ -83,9 +83,11 @@ def _http_post(url, data):
         return json.loads(resp.read().decode())
 
 
-def _http_get(url):
+def _http_get(url, token=None):
     import urllib.request
-    with urllib.request.urlopen(url, timeout=20) as resp:
+    req = urllib.request.Request(url, headers=(
+        {"Authorization": f"Bearer {token}"} if token else {}))
+    with urllib.request.urlopen(req, timeout=20) as resp:
         return json.loads(resp.read().decode())
 
 
@@ -146,3 +148,91 @@ def profile_from_claims(claims):
         "full_name": claims.get("name") or email,
         "department": claims.get("department") or None,
     }
+
+
+# ----------------------- Ролі з груп корпоративного входу -----------------------
+#
+# Масовим користувачам ролі не призначають вручну (DEV-05): адміністратор
+# каталогу додає людей у групи Entra, а застосунок при кожному вході зводить
+# ролі з членством. Групова роль має джерело 'entra': вихід із групи її
+# знімає, а ролі, які адміністратор хабу призначив вручну, вхід не чіпає.
+
+GRAPH_GROUPS_URL = ("https://graph.microsoft.com/v1.0/me/transitiveMemberOf/"
+                    "microsoft.graph.group?$select=id&$top=999")
+GROUP_SETTINGS = (("admin", "ENTRA_GROUP_ADMIN"),
+                  ("section_manager", "ENTRA_GROUP_SECTION_MANAGER"),
+                  ("expert", "ENTRA_GROUP_EXPERT"))
+
+
+def group_mapping():
+    """{роль: множина ідентифікаторів груп чи значень App roles} з налаштувань."""
+    cfg = current_app.config
+    out = {}
+    for role, key in GROUP_SETTINGS:
+        values = {v.strip().lower() for v in (cfg.get(key) or "").split(",") if v.strip()}
+        if values:
+            out[role] = values
+    return out
+
+
+def member_of(claims, access_token=None):
+    """Групи й ролі застосунку людини з токена; None — якщо дізнатися не вдалося.
+
+    Коли груп забагато (понад 200), Entra кладе в токен не перелік, а
+    посилання (`_claim_names`) — тоді питаємо Microsoft Graph. Щоб цього
+    уникати, у реєстрації застосунку варто видавати лише групи, призначені
+    застосунку («Groups assigned to the application»)."""
+    values = {str(v).lower() for v in (claims.get("groups") or [])}
+    values |= {str(v).lower() for v in (claims.get("roles") or [])}
+    if "groups" in (claims.get("_claim_names") or {}):
+        if not access_token:
+            return None
+        try:
+            url = GRAPH_GROUPS_URL
+            while url:
+                page = _http_get(url, token=access_token)
+                values |= {str(g["id"]).lower() for g in page.get("value", [])}
+                url = page.get("@odata.nextLink")
+        except Exception:  # noqa: BLE001 — без Graph ролі просто не змінюємо
+            current_app.logger.warning("Не вдалося отримати групи користувача з Graph")
+            return None
+    return values
+
+
+def sync_roles(user, membership):
+    """Зводить ролі й «Експерта» з членством у групах. Повертає перелік змін.
+
+    `membership` None (груп не дізналися) — нічого не змінюємо: краще лишити
+    вчорашні ролі, ніж зняти адміністратора через збій мережі."""
+    from app.extensions import db
+    from app.models import Role, UserRole
+    mapping = group_mapping()
+    if membership is None or not mapping:
+        return []
+    changes = []
+    for code, groups in mapping.items():
+        inside = bool(groups & membership)
+        if code == "expert":
+            if inside and not user.is_expert:
+                user.is_expert, user.expert_source = True, "entra"
+                changes.append("+expert")
+            elif not inside and user.is_expert and user.expert_source == "entra":
+                user.is_expert, user.expert_source = False, None
+                changes.append("-expert")
+            continue
+        role = Role.query.filter_by(code=code).first()
+        if role is None:
+            continue
+        link = UserRole.query.filter_by(user_id=user.id, role_id=role.id).first()
+        if inside and link is None:
+            db.session.add(UserRole(user_id=user.id, role_id=role.id, source="entra"))
+            changes.append(f"+{code}")
+        elif not inside and link is not None and link.source == "entra":
+            db.session.delete(link)
+            changes.append(f"-{code}")
+    if changes:
+        db.session.flush()
+        db.session.expire(user, ["roles"])
+        if not user.has_global_role("section_manager"):
+            user.managed_sections = []
+    return changes

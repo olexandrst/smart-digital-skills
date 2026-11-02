@@ -69,10 +69,17 @@ def test_admin_assigns_sections_to_manager(page, live_url):
     expect(page.locator("#ue-sections")).to_be_hidden()
     page.select_option("#ue-role", "section_manager")
     expect(page.locator("#ue-sections")).to_be_visible()
-    page.locator('#ue-sections label:has-text("Матеріали для тестів") input').check()
+    row = page.locator('#ue-sections .ue-sec-row:has-text("Матеріали для тестів")')
+    # Модератор розділу вже є — видно, хто він; цьому користувачу лишається місце заступника.
+    expect(row).to_contain_text("модератор: Менеджер Розділу")
+    row.locator("select").select_option("moderator")
+    page.click("#ue-save")
+    expect(page.locator("#toast")).to_contain_text("уже є модератор")
+    row.locator("select").select_option("deputy")
     page.check("#ue-expert")
     page.click("#ue-save")
-    expect(page.locator('#u-body tr:has-text("tester")')).to_contain_text("Матеріали для тестів")
+    expect(page.locator('#u-body tr:has-text("tester")')).to_contain_text(
+        "Матеріали для тестів (заступник)")
     expect(page.locator('#u-body tr:has-text("tester")')).to_contain_text("Експерт")
     # Повертаємо роль, щоб інші тести бачили звичайного користувача.
     uid = page.evaluate("async () => (await api('/users')).find(u => u.username === 'tester').id")

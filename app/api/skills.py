@@ -20,16 +20,17 @@ from app.core import access
 from app.core.permissions import require_auth, require_moderator
 from app.core.security import current_user
 from app.core.errors import ApiError
-from app.models import Skill, SkillFeedback, CatalogFavorite, Notification, User
+from app.models import Skill, SkillFeedback, CatalogFavorite, Notification, ReviewLog, User
 from app.services import (package_service, review_service, comment_service,
                           moderation_service)
 
 bp = Blueprint("skills", __name__)
 
 # Статуси навички: 'draft' = «Чернетка», 'review' = «На розгляді»,
-# 'published' = «Опублікована». published від того, хто не модерує розділ,
-# означає подання на розгляд.
-VALID_STATUS = {"draft", "review", "published"}
+# 'published' = «Опублікована», 'archived' = «Архів» (лише модератор, DEV-04).
+# published від того, хто не модерує розділ, означає подання на розгляд.
+VALID_STATUS = {"draft", "review", "published", "archived"}
+AUTHOR_STATUS = {"draft", "review", "published"}
 PUBLIC = ("published",)
 ALLOWED_PACKAGE_EXT = (".zip", ".skill")
 DEFAULT_CATEGORY = "Загальне"
@@ -65,8 +66,9 @@ def _editable_skill(skill_id):
     return skill
 
 
-def skill_payload(skill, user):
-    """Навичка для відповіді: з пропозицією змін (автору й модератору)."""
+def skill_payload(skill, user, detail=True):
+    """Навичка для відповіді: з пропозицією змін (автору й модератору).
+    `detail` — ще й журнал рішень і контакт автора (для відкритої картки)."""
     out = skill.to_dict()
     pending = moderation_service.pending_payload(skill, user)
     if pending and "package" in pending["data"]:
@@ -76,6 +78,8 @@ def skill_payload(skill, user):
                                       "meta": pkg.get("meta")}
     out["pending"] = pending
     out["can_moderate"] = access.can_moderate(user, skill)
+    if detail:
+        out.update(moderation_service.detail_payload("skill", skill, user))
     return out
 
 
@@ -129,7 +133,8 @@ def list_skills():
         query = query.filter_by(created_by=user.id)
     else:
         query = query.filter(moderation_service.visible_filter(Skill, user, PUBLIC))
-    return jsonify([skill_payload(s, user) for s in query.order_by(Skill.id).all()])
+    return jsonify([skill_payload(s, user, detail=False)
+                    for s in query.order_by(Skill.id).all()])
 
 
 @bp.get("/<int:skill_id>")
@@ -157,6 +162,7 @@ def update_skill(skill_id):
     old_section = skill.section_id
     require_stays_moderated(user, skill, data)
     _apply_attrs(skill, data)
+    moderation_service.mark_moderator_edit(skill, user)
     if skill.status == "review" and skill.section_id != old_section:
         moderation_service.require_section(user, skill)
         review_service.notify_review_requested("skill", skill, user)
@@ -177,11 +183,12 @@ def change_status(skill_id):
     user = current_user()
     data = request.get_json(silent=True) or {}
     new_status = data.get("status")
-    if new_status not in VALID_STATUS:
-        raise ApiError("Статус має бути 'draft' (чернетка), 'review' (на розгляд) або "
-                       "'published' (опублікована)", 400, "validation_error")
-    note = moderation_service.clean_note(data)
     moderator = access.can_moderate(user, skill)
+    if new_status not in (VALID_STATUS if moderator else AUTHOR_STATUS):
+        raise ApiError("Статус має бути 'draft' (чернетка), 'review' (на розгляд) або "
+                       "'published' (опублікована); в архів переносить модератор розділу",
+                       400, "validation_error")
+    note = moderation_service.clean_note(data)
     author = _is_author(skill, user)
     old_status = skill.status
     if old_status == new_status:
@@ -192,22 +199,43 @@ def change_status(skill_id):
     elif new_status == "review":
         moderation_service.submit("skill", skill, user, "review", lambda item: None)
     elif new_status == "published":
+        agreed = moderation_service.require_author_agreement(skill, user, data)
         _publish(skill, user)
-        moderation_service.log("skill", skill, user, old_status, "published", note)
+        moderation_service.clear_moderator_edit(skill)
+        moderation_service.log("skill", skill, user, old_status, "published",
+                               "; ".join(x for x in (agreed, note) if x) or None)
         if not author:
-            action = "approved" if old_status == "review" else "published"
+            action = ("approved" if old_status == "review"
+                      else "restored" if old_status == "archived" else "published")
             review_service.notify_moderated("skill", skill, user, action, note)
     else:
         if old_status == "published" and skill.pending_data:
-            _merge_pending(skill)
+            if new_status == "archived":
+                _drop_pending_package(skill)
+                moderation_service.clear_pending(skill)
+            else:
+                _merge_pending(skill)
+        moderation_service.clear_moderator_edit(skill)
         skill.status = new_status
         if moderator and not author:
             skill.review_note = note
-            action = "returned" if old_status == "review" else "unpublished"
+            action = ("archived" if new_status == "archived"
+                      else "returned" if old_status == "review" else "unpublished")
             review_service.notify_moderated("skill", skill, user, action, note)
         moderation_service.log("skill", skill, user, old_status, new_status, note)
     db.session.commit()
     return jsonify(skill_payload(skill, user))
+
+
+@bp.get("/<int:skill_id>/review-log")
+@require_auth
+def skill_review_log(skill_id):
+    skill = Skill.query.get_or_404(skill_id)
+    if not access.can_moderate(current_user(), skill):
+        raise ApiError("Журнал бачить модератор розділу", 403, "forbidden")
+    rows = (ReviewLog.query.filter_by(item_type="skill", item_id=skill_id)
+            .order_by(ReviewLog.created_at.desc(), ReviewLog.id.desc()).all())
+    return jsonify([r.to_dict() for r in rows])
 
 
 def _apply_pending(skill, changes):
@@ -364,6 +392,19 @@ def _apply_meta(skill, meta, filename, file_bytes):
     skill.package_path = package_service.store_package(skill.id, file_bytes)
 
 
+@bp.post("/inspect")
+@require_auth
+def inspect_package():
+    """Перевірка пакета до збереження: майстер викликає її одразу після вибору
+    файла, щоб про відсутній SKILL.md людина дізналася на першому кроці, а не
+    після заповнення решти полів. Нічого не зберігає."""
+    filename, file_bytes = _read_upload()
+    meta = package_service.parse_package(file_bytes)
+    return jsonify({"filename": filename, "name": meta["name"],
+                    "description": meta["description"], "version": meta["version"],
+                    "author": meta.get("author"), "category": meta.get("category")})
+
+
 @bp.post("/upload")
 @require_auth
 def upload_package():
@@ -423,6 +464,7 @@ def upload_new_version(skill_id):
             "package": {"filename": filename, "meta": meta, "path": path}})
     else:
         _apply_meta(skill, meta, filename, file_bytes)
+        moderation_service.mark_moderator_edit(skill, user)
     db.session.commit()
     return jsonify(skill_payload(skill, user))
 

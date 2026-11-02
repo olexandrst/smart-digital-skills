@@ -32,11 +32,17 @@ class UserRole(db.Model):
                         primary_key=True)
     role_id = db.Column(db.Integer, db.ForeignKey("roles.id", ondelete="CASCADE"),
                         primary_key=True)
+    # Звідки роль: 'manual' — призначив адміністратор, 'entra' — з групи
+    # корпоративного входу. Групову роль вхід знімає, коли людину вивели з
+    # групи; ручну не чіпає.
+    source = db.Column(db.String, nullable=False, default="manual",
+                       server_default="manual")
 
 
 class SectionManager(db.Model):
-    """Менеджер розділу ↔ розділ. Одна людина може вести кілька розділів, а
-    в розділу може бути кілька менеджерів (заступник має ті самі права)."""
+    """Менеджер розділу ↔ розділ. Одна людина може вести кілька розділів; у
+    розділу — модератор і заступник (DEV-02). Права в них однакові, різниця
+    лише в тому, хто основний відповідальний."""
     __tablename__ = "section_managers"
 
     user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="CASCADE"),
@@ -44,6 +50,8 @@ class SectionManager(db.Model):
     section_id = db.Column(db.Integer,
                            db.ForeignKey("catalog_sections.id", ondelete="CASCADE"),
                            primary_key=True)
+    is_deputy = db.Column(db.Boolean, nullable=False, default=False,
+                          server_default=db.false())
 
 
 class User(db.Model):
@@ -73,6 +81,8 @@ class User(db.Model):
     # «Відповідальний за ідеї» (доступ до розділу «Ідеї» в «Керуванні»).
     is_expert = db.Column(db.Boolean, nullable=False, default=False)
     is_ideas_owner = db.Column(db.Boolean, nullable=False, default=False)
+    # Звідки «Експерт»: 'manual' чи 'entra' (група корпоративного входу).
+    expert_source = db.Column(db.String)
     last_login_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
     updated_at = db.Column(db.DateTime, nullable=False, default=_now, onupdate=_now)
@@ -126,6 +136,19 @@ class User(db.Model):
         return (cls.query.filter(cls.email == value).first()
                 or cls.query.filter(db.func.lower(cls.email) == value.lower()).first())
 
+    @property
+    def deputy_section_ids(self):
+        """Розділи, де людина — заступник модератора (решта — основний)."""
+        return sorted(r.section_id for r in
+                      SectionManager.query.filter_by(user_id=self.id, is_deputy=True))
+
+    @property
+    def role_sources(self):
+        rows = (db.session.query(Role.code, UserRole.source)
+                .join(UserRole, UserRole.role_id == Role.id)
+                .filter(UserRole.user_id == self.id).all())
+        return {code: source for code, source in rows}
+
     def has_global_role(self, code):
         if code == "admin" and self.is_system_admin:
             return True
@@ -142,6 +165,9 @@ class User(db.Model):
             "is_system_admin": self.is_system_admin,
             "roles": self.role_codes,
             "managed_section_ids": sorted(s.id for s in self.managed_sections),
+            "deputy_section_ids": self.deputy_section_ids,
+            "role_sources": self.role_sources,
+            "expert_source": self.expert_source,
             "is_expert": bool(self.is_expert),
             "is_ideas_owner": bool(self.is_ideas_owner),
             "maturity_level_id": self.maturity_level_id,

@@ -20,7 +20,10 @@ async function api(path, { method = "GET", body, auth = true, signal } = {}) {
     if (res.status === 401 && auth && state.token) {
       sessionExpired();
     }
-    throw new Error((data && data.message) || `Помилка ${res.status}`);
+    const err = new Error((data && data.message) || `Помилка ${res.status}`);
+    err.code = data && data.error;
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -2298,8 +2301,12 @@ function manageBarHtml(ref) {
   if (ref.status === "review") {
     acts.push(...(mod ? [btn("approve", "Схвалити", " accent-act"), btn("return", "Повернути")]
                       : [btn("withdraw", "Забрати з розгляду")]));
+  } else if (ref.status === "archived") {
+    // З архіву повертає лише модератор розділу (DEV-04).
+    if (mod) acts.push(btn("restore", "Повернути з архіву", " accent-act"));
   } else if (itemPublic(ref)) {
     acts.push(btn("unpub", "Зняти з публікації"));
+    if (mod) acts.push(btn("archive", "В архів"));
   } else {
     acts.push(btn("pub", mod ? "Опублікувати" : "Подати на розгляд"));
   }
@@ -2317,12 +2324,56 @@ function bindManageBar(overlay, ref, close) {
   overlay.querySelectorAll("[data-m]").forEach(b => b.addEventListener("click", () => {
     const m = b.dataset.m;
     if (m === "edit") { close(true); editItem(ref, after); }
-    else if (m === "pub" || m === "approve") setItemStatus(ref, "published", after);
+    else if (m === "pub" || m === "approve" || m === "restore") setItemStatus(ref, "published", after);
+    else if (m === "archive") setItemStatus(ref, "archived", after);
     else if (m === "unpub" || m === "return" || m === "withdraw") setItemStatus(ref, "draft", after);
     else if (m === "changes") { close(true); openChangesReview(ref, after); }
     else if (m === "drop-changes") changesAction(ref, "withdraw", "", after);
     else if (m === "del") deleteItem(ref, after);
   }));
+  paintModerationInfo(overlay, ref);
+}
+
+// Хто з модераторів і коли ухвалив останнє рішення, правки модератора, що
+// чекають погодження з автором, і журнал модерації (DEV-02, DEV-03).
+const MOD_ROLE = { moderator: "модератор розділу", deputy: "заступник модератора",
+                   admin: "адміністратор", author: "автор" };
+const MOD_ACTION = { published: "Опубліковано", review: "Подано на розгляд",
+                     draft: "Повернуто в чернетку", archived: "Перенесено в архів",
+                     needs_update: "Позначено: потребує оновлення" };
+async function paintModerationInfo(overlay, ref) {
+  const slot = overlay.querySelector("[data-mod-info]");
+  const own = isOwnItem(ref), mod = canModerate(ref.raw);
+  if (!slot || !(own || mod)) return;
+  let card, log = [];
+  try {
+    [card, log] = await Promise.all([api(itemUrl(ref)),
+      mod ? api(`${itemUrl(ref)}/review-log`).catch(() => []) : Promise.resolve([])]);
+  } catch (e) { return; }
+  if (!slot.isConnected) return;
+  const who = (x) => `${esc(x.by || x.actor_name || "—")}${
+    MOD_ROLE[x.role || x.actor_role] ? ` (${MOD_ROLE[x.role || x.actor_role]})` : ""}`;
+  const out = [];
+  const last = card.last_moderation;
+  if (last) {
+    out.push(`<p class="sm-modinfo">Останнє рішення: <b>${esc(MOD_ACTION[last.to_status] || last.to_status)}</b>
+      · ${who(last)} · ${esc(dateTimeUa(last.at))}</p>`);
+  }
+  if (mod && card.moderator_edit && ref.status === "review") {
+    out.push(`<div class="sm-draft review sm-agree">Матеріал змінено модератором
+      (${esc(card.moderator_edit.by || "—")}, ${esc(dateTimeUa(card.moderator_edit.at))}).
+      Значні правки погодьте з автором${card.author_contact ? ` (${esc(card.author_contact.name)})` : ""}
+      перед публікацією.
+      <div class="agree-links">${authorContactLinks(card.author_contact,
+        `Правки до матеріалу «${ref.name}» в AI Knowledge Hub`)}</div></div>`);
+  }
+  if (mod && log.length) {
+    out.push(`<details class="sm-history"><summary>Історія модерації (${log.length})</summary>
+      <ul>${log.map(r => `<li><b>${esc(r.from_status === r.to_status ? "Рішення щодо змін"
+        : MOD_ACTION[r.to_status] || r.to_status)}</b> · ${who(r)} · ${esc(dateTimeUa(r.created_at))}${
+        r.note ? `<div class="muted">${esc(r.note)}</div>` : ""}</li>`).join("")}</ul></details>`);
+  }
+  slot.innerHTML = out.join("");
 }
 
 // Що бачить автор чи менеджер у картці про стан модерації: на розгляді,
@@ -2350,6 +2401,7 @@ function moderationNoteHtml(ref) {
       ? `<p class="sm-draft review">Ваші зміни на розгляді: у каталозі поки попередня версія.</p>`
       : `<p class="sm-draft review">Автор запропонував зміни до опублікованого — перегляньте їх.</p>`);
   }
+  out.push(`<div class="mod-info" data-mod-info></div>`);
   return out.join("");
 }
 
@@ -2611,6 +2663,8 @@ async function openContentWizard(opts = {}) {
     source: null,   // { file, kind, chars, truncated, keep } — файл, з якого взято текст
     files: [],      // вкладення до картки — завантажуються після її створення
     pkg: null,      // пакет навички (лише для виду skill)
+    pkgMeta: null,  // що сервер прочитав із SKILL.md цього пакета
+    pkgErr: "",     // чому пакет не підходить (напр. немає SKILL.md)
   };
   const kindOf = () => kinds.find(k => k.code === st.kind) || null;
   let bodyEditor = null;   // візуальний редактор тексту на кроці «Зміст»
@@ -2700,13 +2754,15 @@ async function openContentWizard(opts = {}) {
     const k = kindOf();
     if (k.pkg) {
       body.innerHTML = `${kindLine()}
-        <div class="wiz-drop" id="wiz-drop" tabindex="0">${gsvg("upload")}
+        <div class="wiz-drop${st.pkgErr ? " bad" : ""}" id="wiz-drop" tabindex="0">${gsvg("upload")}
           <div><b>${st.pkg ? esc(st.pkg.name) : "Перетягніть пакет навички або <u>оберіть</u>"}</b>
-            <span>.zip або .skill зі SKILL.md — назва, версія, автор, опис і категорія беруться з нього</span></div>
+            <span>${st.pkgMeta ? `Навичка «${esc(st.pkgMeta.name)}», версія ${esc(st.pkgMeta.version)}`
+              : ".zip або .skill зі SKILL.md — назва, версія, автор, опис і категорія беруться з нього"}</span></div>
           <input type="file" id="wiz-file" hidden accept=".zip,.skill"></div>
+        ${st.pkgErr ? `<p class="wiz-pkg-err" role="alert">${esc(st.pkgErr)}</p>` : ""}
         ${placementHtml()}
         <p class="wiz-hint">Іконку, інструкцію та інші деталі можна змінити згодом — з картки навички.</p>`;
-      bindDrop(f => { collect(); st.pkg = f; paint(); });
+      bindDrop(checkPackage);
       bindPlacement();
       backBtn.classList.remove("hidden");
       nextBtn.classList.remove("hidden");
@@ -2786,6 +2842,24 @@ async function openContentWizard(opts = {}) {
     nextBtn.classList.remove("hidden");
     nextBtn.textContent = "Далі";
     nextBtn.disabled = false;
+  }
+
+  // Пакет перевіряємо одразу після вибору: про відсутній SKILL.md людина
+  // дізнається тут, а не після заповнення решти кроків (DEV-0).
+  async function checkPackage(file) {
+    collect();
+    const drop = body.querySelector("#wiz-drop");
+    if (drop) drop.classList.add("busy");
+    try {
+      st.pkgMeta = await inspectSkillPackage(file);
+      st.pkg = file;
+      st.pkgErr = "";
+    } catch (err) {
+      st.pkg = null;
+      st.pkgMeta = null;
+      st.pkgErr = err.message;
+    }
+    paint();
   }
 
   function bindDrop(onFile) {
@@ -2885,11 +2959,22 @@ async function openContentWizard(opts = {}) {
     const opt = (v, label, cur) =>
       `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(label)}</option>`;
     return `<div class="wiz-two">
-        <label class="wiz-label">Розділ <i>його менеджер розгляне матеріал</i>
+        <label class="wiz-label">Розділ <i>його модератор розгляне матеріал</i>
           <select id="wiz-section">${opt("", "— не вказано —", st.sectionId)}${
             sections.filter(s => !s.url).map(s => opt(s.id, s.name, st.sectionId)).join("")}</select></label>
         <label class="wiz-label">Колекція<select id="wiz-folder"></select></label>
-      </div>`;
+      </div>
+      <p class="wiz-hint wiz-who" id="wiz-who">${esc(reviewersText(st.sectionId))}</p>`;
+  }
+  // Хто розгляне подання: модератор і заступник розділу (DEV-02).
+  function reviewersText(sectionId) {
+    const sec = sections.find(x => String(x.id) === String(sectionId));
+    if (!sec) return "";
+    if (canModerateSection(sec.id)) return "Ви модеруєте цей розділ — матеріал опублікується одразу.";
+    const who = [sec.moderator && `модератор ${sec.moderator.name}`,
+                 sec.deputy && `заступник ${sec.deputy.name}`].filter(Boolean);
+    return who.length ? `Матеріал розгляне ${who.join(" або ")}.`
+      : "У розділу ще немає модератора — матеріал розгляне адміністратор.";
   }
   function bindPlacement() {
     const sectionSel = body.querySelector("#wiz-section");
@@ -2903,6 +2988,8 @@ async function openContentWizard(opts = {}) {
     syncFolders(st.folderId);
     sectionSel.addEventListener("change", () => {
       st.sectionId = sectionSel.value; syncFolders(""); paintSubmitLabel();
+      const who = body.querySelector("#wiz-who");
+      if (who) who.textContent = reviewersText(st.sectionId);
     });
   }
   function paintSubmitLabel() {
@@ -3156,6 +3243,48 @@ function askReason({ title, text, confirm, danger = false }) {
   });
 }
 
+// Посилання, щоб зв'язатися з автором: лист і чат у Teams.
+function authorContactLinks(contact, subject) {
+  if (!contact || !contact.email) return "";
+  const mail = `mailto:${encodeURIComponent(contact.email)}?subject=${encodeURIComponent(subject)}`;
+  const teams = `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(contact.email)}`
+    + `&message=${encodeURIComponent(subject)}`;
+  return `<a class="ghost-act" href="${esc(mail)}">${gsvg("mail")}Написати email</a>
+    <a class="ghost-act" href="${esc(teams)}" target="_blank" rel="noopener">Чат у Teams</a>`;
+}
+
+// Модератор змінив поданий матеріал: перед публікацією він погоджує правки з
+// автором і підтверджує це. Відповідь — true, якщо можна публікувати.
+async function askAuthorAgreement(ref) {
+  let card = ref.raw;
+  try { card = await api(itemUrl(ref)); } catch (e) { /* покажемо без контактів */ }
+  const contact = card.author_contact;
+  const subject = `Правки до матеріалу «${ref.name}» в AI Knowledge Hub`;
+  return new Promise(resolve => {
+    const { overlay, close } = catalogModal(`
+      <div class="modal res-editor reason-dlg agree-dlg">
+        <div class="modal-head"><h2>Погодьте правки з автором</h2>
+          <button class="modal-x" aria-label="Закрити">×</button></div>
+        <p class="muted">«${esc(ref.name)}» змінено модератором${card.moderator_edit && card.moderator_edit.by
+          ? ` (${esc(card.moderator_edit.by)}, ${esc(dateTimeUa(card.moderator_edit.at))})` : ""}.
+          Якщо правки значні, зв'яжіться з автором${contact ? ` (<b>${esc(contact.name)}</b>)` : ""} і
+          погодьте їх перед публікацією.</p>
+        ${contact && contact.email ? `<div class="agree-links">${authorContactLinks(contact, subject)}</div>`
+          : `<p class="muted">Пошти автора в профілі немає — зв'яжіться з ним у Teams за іменем.</p>`}
+        <label class="ind-toggle"><input type="checkbox" id="agree-ok">
+          <span>Правки погоджено з автором</span></label>
+        <div class="row">
+          <button id="agree-pub" disabled>Опублікувати</button>
+          <button class="ghost" id="agree-cancel">Скасувати</button>
+        </div>
+      </div>`, { beforeClose: () => { resolve(false); return true; } });
+    const box = overlay.querySelector("#agree-ok"), pub = overlay.querySelector("#agree-pub");
+    box.addEventListener("change", () => { pub.disabled = !box.checked; });
+    overlay.querySelector("#agree-cancel").addEventListener("click", () => close());
+    pub.addEventListener("click", () => { resolve(true); close(true); });
+  });
+}
+
 // Зміна стану. Автор подає на розгляд, забирає з розгляду чи знімає з
 // публікації; менеджер розділу схвалює, повертає, знімає, архівує. Рішення
 // щодо чужого матеріалу менеджер може пояснити — автор отримає причину.
@@ -3181,9 +3310,19 @@ async function setItemStatus(ref, status, onDone) {
     if (note === null) return false;
   }
   try {
-    const res = await api(`${itemUrl(ref)}/status`, { method: "POST", body: { status, note } });
+    let res;
+    try {
+      res = await api(`${itemUrl(ref)}/status`, { method: "POST", body: { status, note } });
+    } catch (err) {
+      // Модератор правив чужий матеріал — спершу погодження з автором (DEV-03).
+      if (err.code !== "author_agreement_required") throw err;
+      if (!await askAuthorAgreement(ref)) return false;
+      res = await api(`${itemUrl(ref)}/status`, { method: "POST",
+                                                 body: { status, note, author_agreed: true } });
+    }
     const now = res.status;
-    toast(now === "review" ? "Подано на розгляд — менеджер розділу отримає сповіщення"
+    toast(now === "review" ? "Подано на розгляд — модератор розділу отримає сповіщення"
+      : now === "published" && ref.status === "archived" ? "Повернуто з архіву й опубліковано"
       : now === "published" ? (foreign && ref.status === "review" ? "Схвалено й опубліковано" : "Опубліковано")
       : now === "archived" ? "Перенесено в архів"
       : now === "needs_update" ? "Позначено: потребує оновлення"
@@ -3586,6 +3725,7 @@ async function renderContentManage() {
     no_owner: refs.filter(r => itemPublic(r) && !r.raw.owner).length,
     overdue: refs.filter(r => r.raw.review_overdue).length,
     draft: refs.filter(r => r.status === "draft").length,
+    archived: refs.filter(r => r.status === "archived").length,
   };
   const healthChip = (key, label, cnt) =>
     `<button class="cat-chipf${contribFilter === key ? " active" : ""}${cnt ? " warn" : ""}" data-f="${key}">${esc(label)} <b>${cnt}</b></button>`;
@@ -3596,6 +3736,7 @@ async function renderContentManage() {
     if (contribFilter === "no_owner") return itemPublic(r) && !r.raw.owner;
     if (contribFilter === "overdue") return !!r.raw.review_overdue;
     if (contribFilter === "draft") return r.status === "draft";
+    if (contribFilter === "archived") return r.status === "archived";
     return true;
   });
   const scope = isAdmin() ? "усі розділи"
@@ -3637,6 +3778,7 @@ async function renderContentManage() {
         ${healthChip("no_owner", "Без власника", health.no_owner)}
         ${healthChip("overdue", "Перегляд прострочено", health.overdue)}
         ${healthChip("draft", "Чернетки", health.draft)}
+        <button class="cat-chipf${contribFilter === "archived" ? " active" : ""}" data-f="archived">Архів <b>${health.archived}</b></button>
       </div>
       <div class="mine-list">${shown.map(ref => contribRow(ref, { manage: true })).join("")
         || `<p class="muted">За цим фільтром матеріалів немає.</p>`}</div>
@@ -4615,6 +4757,22 @@ async function openSkillModal(skillId) {
 
 // ---------- Управління навичками (каталог) ----------
 
+// Перевірка пакета без збереження: назва й версія зі SKILL.md або помилка.
+async function inspectSkillPackage(file) {
+  if (!/\.(zip|skill)$/i.test(file.name)) {
+    throw new Error("Пакет навички — це архів .zip або .skill зі SKILL.md усередині.");
+  }
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API}/skills/inspect`, {
+    method: "POST", headers: { "Authorization": `Bearer ${state.token}` }, body: form,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) { /* без тіла */ }
+  if (!res.ok) throw new Error(data.message || "Не вдалося прочитати пакет");
+  return data;
+}
+
 // Завантаження пакета: без skillId — НОВА навичка (status: published | draft);
 // зі skillId — нова ВЕРСІЯ наявної.
 async function uploadSkillPackage(file, skillId, status, placement = {}) {
@@ -5452,6 +5610,8 @@ function renderSectionRows(sections) {
         <div class="res-name">${esc(s.name)}${s.is_active ? "" : ` <span class="muted">(прихований)</span>`}</div>
         <div class="res-sub">${esc(s.description || "")}${
           s.url ? ` · <span class="res-url">${esc(s.url)}</span>` : ""}</div>
+        ${s.url ? "" : `<div class="res-sub">Модератор: ${esc(s.moderator ? s.moderator.name : "не призначено")}
+          · заступник: ${esc(s.deputy ? s.deputy.name : "не призначено")}</div>`}
       </div>
       <span class="badge ${s.url ? "draft" : "published"}">${s.url ? "Зовнішній" : `${s.items_count} матеріалів`}</span>
       <div class="res-acts">
@@ -6129,6 +6289,16 @@ const ACCENT_OPTIONS = [["", "Типовий для виду"], ["red", "Чер�
                         ["steel", "Сталевий"], ["amber", "Бурштиновий"], ["green", "Зелений"]];
 
 // Редактор матеріалу каталогу (створення або зміна).
+// Модератор відкрив на редагування чужий поданий матеріал: нагадуємо, що
+// значні правки треба погодити з автором до публікації (DEV-03).
+function foreignEditBanner(item) {
+  if (!item || item.status !== "review" || !item.author_contact || !canModerate(item)) return "";
+  return `<div class="sm-draft review sm-agree">Ви редагуєте матеріал автора
+    <b>${esc(item.author_contact.name)}</b>, поданий на розгляд. Значні правки погодьте з автором
+    перед публікацією.<div class="agree-links">${authorContactLinks(item.author_contact,
+      `Правки до матеріалу «${item.name}» в AI Knowledge Hub`)}</div></div>`;
+}
+
 async function openResourceEditor(resourceId, { onSaved } = {}) {
   let r = { resource_type: "prompt", status: "draft", version: "1.0.0",
             link_scope: "external", tags: [] };
@@ -6168,6 +6338,7 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
         <h2>${resourceId ? "Редагувати матеріал" : "Новий матеріал каталогу"}</h2>
         <button class="modal-x" aria-label="Закрити">×</button>
       </div>
+      ${foreignEditBanner(r)}
       <div class="form-grid">
         <label>Вид<select id="re-type">${kindOpts}</select></label>
         <label>Статус<select id="re-status">${statusOpts}</select></label>
@@ -6379,6 +6550,7 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
   box.innerHTML = `
     <div class="sk-edit-in">
       <h2>Навичка: ${esc(s.name)} <span class="muted">v${esc(s.version)}</span></h2>
+      ${foreignEditBanner(loaded)}
       <div class="editor-top">
         <div class="editor-icon">
           <div class="editor-icon-preview" id="se-icon-preview"></div>
@@ -6401,7 +6573,7 @@ async function openSkillEditor(skillId, { onSaved } = {}) {
         </div>
       </div>
       <div class="row">
-        <div class="field" style="flex:1"><label>Розділ <i>його менеджер розгляне навичку</i></label>
+        <div class="field" style="flex:1"><label>Розділ <i>його модератор розгляне навичку</i></label>
           <select id="se-section"><option value="">— не вказано —</option>${sectionOpts}</select></div>
         <div class="field" style="flex:1"><label>Колекція</label><select id="se-folder"></select></div>
       </div>
@@ -6531,8 +6703,11 @@ function primaryRole(u) {
 }
 // Роль, розділи й ознаки одним рядком для таблиці користувачів.
 function userAccessHtml(u, sections, levels = []) {
-  const names = (u.managed_section_ids || [])
-    .map(id => (sections.find(x => x.id === id) || {}).name).filter(Boolean);
+  const deputy = new Set(u.deputy_section_ids || []);
+  const names = (u.managed_section_ids || []).map(id => {
+    const sec = sections.find(x => x.id === id);
+    return sec ? `${sec.name} (${deputy.has(id) ? "заступник" : "модератор"})` : "";
+  }).filter(Boolean);
   const flags = [u.is_expert ? "Експерт" : "", u.is_ideas_owner ? "Відповідальний за ідеї" : ""]
     .filter(Boolean);
   const level = levels.find(l => l.id === u.maturity_level_id);
@@ -6637,6 +6812,11 @@ async function openUserEditor(userId) {
   const roleOpts = USER_ROLE_OPTS.map(o =>
     `<option value="${o.v}" ${o.v === primaryRole(u) ? "selected" : ""}>${esc(o.label)}</option>`).join("");
   const mine = new Set(u.managed_section_ids || []);
+  const deputyOf = new Set(u.deputy_section_ids || []);
+  const sources = u.role_sources || {};
+  const fromGroup = (code) => sources[code] === "entra";
+  // Хто вже займає місце в розділі — щоб адміністратор бачив, кого замінює.
+  const holder = (sec, key) => sec[key] && sec[key].id !== u.id ? sec[key].name : "";
   const box = $("#u-detail");
   box.innerHTML = `
     <div class="card">
@@ -6658,18 +6838,33 @@ async function openUserEditor(userId) {
       </div>
       <p class="muted ue-hint">Рівень — за результатами корпоративного тестування; сам
       користувач його не змінює. Без дати збережеться сьогоднішня.</p>
+      ${fromGroup("admin") || fromGroup("section_manager") ? `<p class="muted ue-hint">Роль
+        «${fromGroup("admin") ? "Адміністратор" : "Менеджер розділу"}» призначено через групу корпоративного
+        входу. Щоб зняти її, виведіть людину з групи: після наступного входу роль зміниться.</p>` : ""}
       <div class="field ue-sections" id="ue-sections">
         <span class="field-k">Розділи, які модерує</span>
-        <div class="ue-checks">${sections.filter(x => !x.url).map(x => `
-          <label class="ind-toggle"><input type="checkbox" value="${x.id}"${mine.has(x.id) ? " checked" : ""}>
-            <span>${esc(x.name)}</span></label>`).join("") || `<p class="muted">Розділів ще немає.</p>`}</div>
-        <p class="muted ue-hint">Заступнику призначте ту саму роль і ті самі розділи — права в них однакові.</p>
+        <div class="ue-sec-list">${sections.filter(x => !x.url).map(x => {
+          const cur = !mine.has(x.id) ? "" : deputyOf.has(x.id) ? "deputy" : "moderator";
+          const busy = [holder(x, "moderator") && `модератор: ${holder(x, "moderator")}`,
+                        holder(x, "deputy") && `заступник: ${holder(x, "deputy")}`].filter(Boolean);
+          return `<div class="ue-sec-row">
+            <span class="ue-sec-name">${esc(x.name)}${busy.length
+              ? `<span class="u-who-login">${esc(busy.join(" · "))}</span>` : ""}</span>
+            <select data-sec="${x.id}" aria-label="Роль у розділі ${esc(x.name)}">
+              <option value="">—</option>
+              <option value="moderator"${cur === "moderator" ? " selected" : ""}>Модератор</option>
+              <option value="deputy"${cur === "deputy" ? " selected" : ""}>Заступник</option>
+            </select></div>`;
+        }).join("") || `<p class="muted">Розділів ще немає.</p>`}</div>
+        <p class="muted ue-hint">У розділу один модератор і один заступник з однаковими правами;
+        журнал модерації фіксує, хто з них ухвалив рішення.</p>
       </div>
       <div class="field">
         <span class="field-k">Ознаки</span>
         <div class="ue-checks">
           <label class="ind-toggle"><input type="checkbox" id="ue-expert"${u.is_expert ? " checked" : ""}>
-            <span><b>Експерт</b> — позначка біля автора на матеріалах, які він опублікує відтепер</span></label>
+            <span><b>Експерт</b> — позначка біля автора на матеріалах, які він опублікує відтепер${
+              u.expert_source === "entra" ? ". Призначено через групу корпоративного входу" : ""}</span></label>
           <label class="ind-toggle"><input type="checkbox" id="ue-ideas"${u.is_ideas_owner ? " checked" : ""}>
             <span><b>Відповідальний за ідеї</b> — опрацьовує ідеї в «Керуванні»</span></label>
         </div>
@@ -6697,8 +6892,10 @@ async function openUserEditor(userId) {
   $("#ue-close").addEventListener("click", () => { box.innerHTML = ""; });
   $("#ue-save").addEventListener("click", async () => {
     const role = $("#ue-role").value;
-    const sectionIds = role === "section_manager"
-      ? [...box.querySelectorAll("#ue-sections input:checked")].map(i => Number(i.value)) : [];
+    const picks = role === "section_manager"
+      ? [...box.querySelectorAll("#ue-sections select[data-sec]")].filter(x => x.value) : [];
+    const sectionIds = picks.map(x => Number(x.dataset.sec));
+    const deputyIds = picks.filter(x => x.value === "deputy").map(x => Number(x.dataset.sec));
     if (role === "section_manager" && !sectionIds.length) {
       toast("Оберіть розділи, які модеруватиме менеджер", "err");
       return;
@@ -6709,7 +6906,7 @@ async function openUserEditor(userId) {
       await api(`/users/${userId}`, { method: "PATCH", body: {
         full_name: $("#ue-name").value, email: $("#ue-email").value || null,
         is_active: $("#ue-active").value === "1", roles: role ? [role] : [],
-        managed_section_ids: sectionIds,
+        managed_section_ids: sectionIds, deputy_section_ids: deputyIds,
         is_expert: $("#ue-expert").checked, is_ideas_owner: $("#ue-ideas").checked,
         maturity_level_id: level ? Number(level) : null,
         ...(level && levelDate ? { maturity_assessed_at: levelDate } : {}) }});

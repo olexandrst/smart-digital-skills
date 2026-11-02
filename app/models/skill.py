@@ -47,6 +47,10 @@ class Skill(db.Model):
     pending_data = db.Column(db.Text)
     pending_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     pending_at = db.Column(db.DateTime)
+    # Модератор (не автор) змінив подане на розгляд: перед публікацією він
+    # має погодити правки з автором (DEV-03). Публікація знімає позначку.
+    mod_edit_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    mod_edit_at = db.Column(db.DateTime)
     version = db.Column(db.String, nullable=False, default="1.0.0")
     # Скільки разів пакет завантажили — міра популярності навички в каталозі
     # (замість колишнього лічильника активацій).

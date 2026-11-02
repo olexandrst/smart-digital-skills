@@ -2,8 +2,11 @@
 ролі, розділи менеджера, ознаки «Експерт» і «Відповідальний за ідеї» та
 рівень AI-зрілості з датою визначення.
 
-Ролі призначаються вручну (фідбек тестування, п. 11): адміністратор,
-менеджер розділу (з переліком розділів) або користувач — без ролі.
+Ролі: адміністратор, менеджер розділу (модератор чи заступник у кожному
+своєму розділі) або користувач — без ролі; «Експерт» — ознака поверх ролі.
+Адміністратор призначає їх тут, а масовим користувачам їх дають групи
+корпоративного входу (див. entra_service.sync_roles): групову роль позначено
+джерелом 'entra', і вручну її тут не прибрати — лише вивівши людину з групи.
 """
 import os
 import shutil
@@ -14,7 +17,7 @@ from app.core.permissions import require_global_role
 from app.core.security import hash_password, current_user
 from app.core.errors import ApiError
 from app.models import (
-    User, Role, UserRole, RefreshToken, UserFile, Notification, CatalogFavorite,
+    User, Role, UserRole, SectionManager, RefreshToken, UserFile, Notification, CatalogFavorite,
     CatalogSection, CatalogResource, CatalogTerm, Skill,
     LearningProgress, HiddenRecommendation, SurveyPrompt, UserSession,
     Idea, ReviewLog, SearchQueryLog, SkillFeedback, SurveyResponse, ResourceView,
@@ -34,6 +37,7 @@ _REFERENCES_TO_USER = ((Idea, "author_id"), (ReviewLog, "actor_user_id"),
                        (SearchQueryLog, "user_id"), (SkillFeedback, "user_id"),
                        (SurveyResponse, "user_id"), (ResourceView, "user_id"),
                        (CatalogResource, "pending_by"), (Skill, "pending_by"),
+                       (CatalogResource, "mod_edit_by"), (Skill, "mod_edit_by"),
                        (ContactMessage, "user_id"), (ContactMessage, "handled_by"))
 # Ролі, які призначає адміністратор. Користувач — це відсутність ролі.
 ASSIGNABLE_ROLES = ("admin", "section_manager")
@@ -154,14 +158,20 @@ def _apply_access(user, data):
     """Роль, розділи менеджера й ознаки з запиту (лише передані поля)."""
     if "roles" in data:
         _set_roles(user, data["roles"])
-    if "managed_section_ids" in data:
-        _set_sections(user, data["managed_section_ids"])
+    if "managed_section_ids" in data or "deputy_section_ids" in data:
+        _set_sections(user, data.get("managed_section_ids",
+                                     [s.id for s in user.managed_sections]),
+                      data.get("deputy_section_ids", user.deputy_section_ids))
     # Розділи без ролі менеджера нічого не дають — не лишаємо їх висіти.
     if not user.has_global_role("section_manager"):
         user.managed_sections = []
-    for flag in ("is_expert", "is_ideas_owner"):
-        if flag in data:
-            setattr(user, flag, bool(data[flag]))
+    if "is_expert" in data:
+        expert = bool(data["is_expert"])
+        if expert != bool(user.is_expert):
+            user.expert_source = "manual" if expert else None
+        user.is_expert = expert
+    if "is_ideas_owner" in data:
+        user.is_ideas_owner = bool(data["is_ideas_owner"])
     _apply_level(user, data)
 
 
@@ -210,25 +220,62 @@ def _set_roles(user, role_codes):
     if user.id == me.id and "admin" not in codes and not user.is_system_admin:
         raise ApiError("Не можна зняти з себе роль адміністратора — інакше хаб "
                        "може лишитися без адміністратора", 400, "self_demote")
-    UserRole.query.filter_by(user_id=user.id).delete()
+    # Ролі, що лишаються, зберігають своє джерело (зокрема групу Entra).
+    current = {r.code: r for r in user.roles}
+    for code, role in current.items():
+        if code not in codes:
+            UserRole.query.filter_by(user_id=user.id, role_id=role.id).delete()
     for code in codes:
+        if code in current:
+            continue
         role = Role.query.filter_by(code=code).first()
         if role:
-            db.session.add(UserRole(user_id=user.id, role_id=role.id))
+            db.session.add(UserRole(user_id=user.id, role_id=role.id, source="manual"))
     db.session.flush()
     db.session.expire(user, ["roles"])
 
 
-def _set_sections(user, section_ids):
-    if section_ids is None:
-        section_ids = []
-    if not isinstance(section_ids, list):
-        raise ApiError("managed_section_ids має бути списком", 400, "validation_error")
+def _id_set(values, field):
+    if values is None:
+        return set()
+    if not isinstance(values, list):
+        raise ApiError(f"{field} має бути списком", 400, "validation_error")
     try:
-        ids = {int(x) for x in section_ids}
+        return {int(x) for x in values}
     except (TypeError, ValueError):
         raise ApiError("Некоректний розділ", 400, "validation_error")
+
+
+def _set_sections(user, section_ids, deputy_ids=None):
+    """Розділи менеджера й у яких із них він заступник (решта — модератор).
+
+    У розділу один модератор і один заступник (DEV-02): система має знати,
+    хто відповідає за розділ. Зайняте місце треба спершу звільнити — тихо
+    підміняти чуже призначення не можна."""
+    ids = _id_set(section_ids, "managed_section_ids")
+    deputies = _id_set(deputy_ids, "deputy_section_ids") & ids
     sections = CatalogSection.query.filter(CatalogSection.id.in_(ids)).all() if ids else []
     if len(sections) != len(ids):
         raise ApiError("Розділ не знайдено", 404, "not_found")
+    if user.has_global_role("section_manager"):
+        for section in sections:
+            deputy = section.id in deputies
+            taken = (SectionManager.query
+                     .filter(SectionManager.section_id == section.id,
+                             SectionManager.user_id != user.id,
+                             SectionManager.is_deputy == deputy).all())
+            for row in taken:
+                other = db.session.get(User, row.user_id)
+                if other is None or not other.is_active \
+                        or not other.has_global_role("section_manager"):
+                    continue
+                slot = "заступник" if deputy else "модератор"
+                raise ApiError(
+                    f"У розділі «{section.name}» уже є {slot}: "
+                    f"{other.full_name or other.username}. Спершу зніміть це "
+                    f"призначення або оберіть іншу роль у розділі.",
+                    409, "section_slot_taken")
     user.managed_sections = sections
+    db.session.flush()
+    for row in SectionManager.query.filter_by(user_id=user.id).all():
+        row.is_deputy = row.section_id in deputies

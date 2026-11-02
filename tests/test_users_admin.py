@@ -15,11 +15,12 @@ def test_create_edit_delete_user(client):
     res = client.post("/api/users", headers=auth(token), json={
         "username": "temp", "full_name": "Тимчасовий", "password": "pass12",
         "roles": ["section_manager"], "managed_section_ids": [sm_section_id()],
-        "is_expert": True})
+        "deputy_section_ids": [sm_section_id()], "is_expert": True})
     assert res.status_code == 201
     uid = res.get_json()["id"]
     assert res.get_json()["roles"] == ["section_manager"]
     assert res.get_json()["managed_section_ids"] == [sm_section_id()]
+    assert res.get_json()["deputy_section_ids"] == [sm_section_id()]
     assert res.get_json()["is_expert"] is True
 
     res = client.patch(f"/api/users/{uid}", headers=auth(token),

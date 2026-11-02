@@ -23,7 +23,12 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None
 
-SKILL_MD_NAMES = ("skill.md", "SKILL.md", "skil.md")
+# Назва файла з описом навички. Регістр не має значення: «SKILL.md»,
+# «skill.md» і «Skill.md» — той самий файл для людини, що пакувала архів.
+SKILL_MD_NAMES = ("skill.md", "skil.md")
+MISSING_SKILL_MD = ("В архіві немає файла SKILL.md. Пакет навички має містити SKILL.md "
+                    "(у корені архіву або в папці навички) з назвою (name) й описом "
+                    "(description) у заголовку між рядками ---.")
 ALLOWED_EXTENSIONS = (".zip", ".skill")
 
 
@@ -42,10 +47,11 @@ def _find_skill_md(zf):
     candidates = []
     for name in zf.namelist():
         base = name.rsplit("/", 1)[-1]
-        if base in SKILL_MD_NAMES:
+        # Службові файли macOS (__MACOSX/._SKILL.md) — не опис навички.
+        if base.lower() in SKILL_MD_NAMES and not name.startswith("__MACOSX/"):
             candidates.append((name.count("/"), name))
     if not candidates:
-        raise ApiError("В архіві відсутній skill.md", 400, "missing_skill_md")
+        raise ApiError(MISSING_SKILL_MD, 400, "missing_skill_md")
     candidates.sort()  # найменша глибина першою
     return candidates[0][1]
 

@@ -2405,3 +2405,42 @@ button.link-btn:hover { background: none; color: var(--primary-strong); text-dec
 .md-doc.md-prompt { padding: 12px 14px; max-height: 340px; overflow: auto; }
 .md-doc.md-prompt > :first-child { margin-top: 0; }
 .md-doc.md-prompt > :last-child { margin-bottom: 0; }
+
+/* =====================================================================
+   Модерація за розділами (DEV-0 … DEV-04): пакет без SKILL.md, модератор і
+   заступник, погодження правок з автором, журнал модерації
+   ===================================================================== */
+.wiz-drop.bad { border-color: var(--danger); background: var(--danger-soft); }
+.wiz-pkg-err {
+  margin: -2px 0 12px; padding: 10px 12px; border-radius: var(--r-md);
+  font-size: var(--fs-foot); line-height: 1.45;
+  color: var(--danger); background: var(--danger-soft);
+}
+.wiz-who:empty { display: none; }
+.wiz-who { margin-top: -4px; }
+.agree-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+a.ghost-act { text-decoration: none; }
+.agree-dlg .agree-links { margin: 0 0 14px; }
+.agree-dlg .ind-toggle { margin-bottom: 14px; }
+.sm-agree b { color: inherit; }
+.sm-modinfo { margin: 0 0 14px; font-size: var(--fs-foot); color: var(--muted); line-height: 1.5; }
+.sm-modinfo b { color: var(--text); font-weight: 560; }
+.sm-history { margin: 0 0 14px; font-size: var(--fs-foot); }
+.sm-history summary { cursor: pointer; color: var(--muted); }
+.sm-history ul { margin: 8px 0 0; padding-left: 18px; line-height: 1.5; }
+.sm-history li { margin: 4px 0; }
+.ue-sec-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.ue-sec-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 0; border-bottom: 1px solid var(--border);
+}
+.ue-sec-row:last-child { border-bottom: 0; }
+.ue-sec-name { display: flex; flex-direction: column; min-width: 0; }
+.ue-sec-row select { width: auto; min-width: 140px; flex: 0 0 auto; }
+.agree-links .ghost-act {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px;
+  border-radius: 999px; background: var(--panel); border: 1px solid var(--border);
+  color: var(--text); font-size: var(--fs-foot); font-weight: 520; cursor: pointer;
+}
+.agree-links .ghost-act:hover { background: var(--fill); }
+.agree-links .ghost-act svg { width: 14px; height: 14px; }

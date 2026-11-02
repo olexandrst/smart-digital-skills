@@ -465,7 +465,18 @@ def list_sections():
                           .filter(Skill.status.in_(skill_statuses))
                           .group_by(Skill.section_id).all()):
         counts[section_id] = counts.get(section_id, 0) + n
-    return jsonify([s.to_dict(counts) for s in sections])
+    # Хто розгляне подане в розділ — видно в майстрі подання й у структурі.
+    staff = access.section_staff([s.id for s in sections])
+    out = []
+    for section in sections:
+        row = section.to_dict(counts)
+        slot = staff.get(section.id, {})
+        for key in ("moderator", "deputy"):
+            person = slot.get(key)
+            row[key] = ({"id": person.id, "name": person.full_name or person.username}
+                        if person else None)
+        out.append(row)
+    return jsonify(out)
 
 
 @bp.post("/sections")
@@ -1101,6 +1112,7 @@ def _payload(res, user):
     out = dict(res.to_dict(), **ratings.get(res.id, _EMPTY_RATING))
     out["pending"] = moderation_service.pending_payload(res, user)
     out["can_moderate"] = access.can_moderate(user, res)
+    out.update(moderation_service.detail_payload("resource", res, user))
     return out
 
 
@@ -1205,6 +1217,7 @@ def update_resource(resource_id):
     old_section = res.section_id
     require_stays_moderated(user, res, data)
     _apply_changes(res, data, user)
+    moderation_service.mark_moderator_edit(res, user)
     if "body" in data:
         file_service.sync_inline_images(res, user)
     # Поданий матеріал переїхав в інший розділ — розглядати його тепер іншим.
@@ -1250,16 +1263,22 @@ def change_resource_status(resource_id):
     elif new_status == "review":
         moderation_service.submit("resource", res, user, "review", lambda item: None)
     elif new_status == "published":
+        agreed = moderation_service.require_author_agreement(res, user, data)
         _publish_resource(res, user)
-        moderation_service.log("resource", res, user, old_status, "published", note)
+        moderation_service.clear_moderator_edit(res)
+        moderation_service.log("resource", res, user, old_status, "published",
+                               "; ".join(x for x in (agreed, note) if x) or None)
         if not author:
-            action = "approved" if old_status == "review" else "published"
+            action = ("approved" if old_status == "review"
+                      else "restored" if old_status == "archived" else "published")
             review_service.notify_moderated("resource", res, user, action, note)
     else:
         if new_status == "draft" and old_status in PUBLIC_STATUSES:
             _merge_pending(res, user)
         if new_status == "archived":
             _drop_pending(res, user)
+        if new_status in ("draft", "archived"):
+            moderation_service.clear_moderator_edit(res)
         res.status = new_status
         if moderator and not author:
             # Причина лишається в картці: автор побачить її, відкривши матеріал.
@@ -2663,15 +2682,28 @@ def recommendations():
     available = [r for r in pool if r.id not in seen and r.id not in hidden]
 
     # Причини в порядку переконливості: рівень → колеги → інтерес → популярне.
+    # Рівень доступ не обмежує (DEV-07): усі бачать усе опубліковане, а рівень
+    # лише піднімає вгору матеріали для поточного рівня й переходу на наступний.
     reasons = {}
+    tier = {}
 
     if user.maturity_level_id:
-        level_ids = {row.resource_id for row in CatalogResourceMaturity.query
-                     .filter_by(term_id=user.maturity_level_id)}
-        level = CatalogTerm.query.get(user.maturity_level_id)
-        for r in available:
-            if r.id in level_ids:
-                reasons.setdefault(r.id, f"Відповідає вашому рівню «{level.name}»")
+        ladder = _maturity_ladder()
+        level = next((t for t in ladder if t.id == user.maturity_level_id), None)
+        if level is None:
+            level = CatalogTerm.query.get(user.maturity_level_id)
+        nxt = (ladder[ladder.index(level) + 1]
+               if level in ladder and ladder.index(level) + 1 < len(ladder) else None)
+        for term, rank, text in ((level, 0, "Відповідає вашому рівню «{}»"),
+                                 (nxt, 1, "Допоможе перейти на рівень «{}»")):
+            if term is None:
+                continue
+            ids = {row.resource_id for row in CatalogResourceMaturity.query
+                   .filter_by(term_id=term.id)}
+            for r in available:
+                if r.id in ids and r.id not in reasons:
+                    reasons[r.id] = text.format(term.name)
+                    tier[r.id] = rank
 
     if user.department:
         peers = [u.id for u in User.query.filter_by(department=user.department)
@@ -2709,7 +2741,8 @@ def recommendations():
 
     ratings = _rating_map("resource")
     ranked = sorted(available,
-                    key=lambda r: (not r.is_featured, -(r.opens_count or 0), -r.id))
+                    key=lambda r: (tier.get(r.id, 2), not r.is_featured,
+                                   -(r.opens_count or 0), -r.id))
     items = [dict(r.to_dict(), **ratings.get(r.id, _EMPTY_RATING),
                   recommend_reason=reasons[r.id])
              for r in ranked[:RECOMMEND_LIMIT]]

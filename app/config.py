@@ -76,7 +76,13 @@ class BaseConfig:
     ENTRA_CLIENT_SECRET = os.getenv("ENTRA_CLIENT_SECRET", "")
     # URI повернення; має збігатися із зареєстрованим у застосунку Entra.
     ENTRA_REDIRECT_URI = os.getenv("ENTRA_REDIRECT_URI", "")
-    # Ролі з груп каталогу не беруться: їх призначає адміністратор вручну.
+    # Ролі з груп корпоративного входу (DEV-05): ідентифікатори груп Entra
+    # (Object ID) або значення ролей застосунку (App roles) через кому.
+    # Порожня змінна — роль призначає лише адміністратор у «Користувачах».
+    # Розділи модератора й заступника адміністратор призначає вручну завжди.
+    ENTRA_GROUP_ADMIN = os.getenv("ENTRA_GROUP_ADMIN", "")
+    ENTRA_GROUP_SECTION_MANAGER = os.getenv("ENTRA_GROUP_SECTION_MANAGER", "")
+    ENTRA_GROUP_EXPERT = os.getenv("ENTRA_GROUP_EXPERT", "")
     # Парольний вхід лишається для сервісних облікових записів; вимикається
     # ENTRA_ALLOW_PASSWORD_LOGIN=0, коли всі входять через каталог.
     ENTRA_ALLOW_PASSWORD_LOGIN = os.getenv("ENTRA_ALLOW_PASSWORD_LOGIN", "1") == "1"

@@ -405,6 +405,10 @@ class CatalogResource(db.Model):
     pending_data = db.Column(db.Text)
     pending_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     pending_at = db.Column(db.DateTime)
+    # Модератор (не автор) змінив подане на розгляд: перед публікацією він
+    # має погодити правки з автором (DEV-03). Публікація знімає позначку.
+    mod_edit_by = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
+    mod_edit_at = db.Column(db.DateTime)
     version = db.Column(db.String, nullable=False, default="1.0.0")
     opens_count = db.Column(db.Integer, nullable=False, default=0)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
@@ -516,6 +520,9 @@ class ReviewLog(db.Model):
     item_name = db.Column(db.String)          # знімок назви на момент запису
     actor_user_id = db.Column(db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"))
     actor_name = db.Column(db.String)
+    # У якій ролі діяла людина: moderator / deputy (заступник модератора
+    # розділу), admin чи author. Фіксує, хто виконав функції модератора.
+    actor_role = db.Column(db.String)
     from_status = db.Column(db.String)
     to_status = db.Column(db.String, nullable=False)
     note = db.Column(db.Text)
@@ -528,6 +535,7 @@ class ReviewLog(db.Model):
             "item_id": self.item_id,
             "item_name": self.item_name,
             "actor_name": self.actor_name,
+            "actor_role": self.actor_role,
             "from_status": self.from_status,
             "to_status": self.to_status,
             "note": self.note,

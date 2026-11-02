@@ -111,7 +111,8 @@ def entra_callback():
 
     tokens = entra_service.exchange_code(code, _redirect_uri(), verifier)
     claims = entra_service.verify_id_token(tokens["id_token"])
-    user = upsert_entra_user(claims)
+    user = upsert_entra_user(
+        claims, entra_service.member_of(claims, tokens.get("access_token")))
 
     identity = str(user.id)
     # Токени передаються фрагментом URL: так вони не потрапляють ні в логи
@@ -124,11 +125,13 @@ def entra_callback():
     return redirect("/#" + fragment)
 
 
-def upsert_entra_user(claims):
+def upsert_entra_user(claims, membership=None):
     """Створює або оновлює користувача за даними каталогу.
 
-    Ролі вхід не змінює: їх призначає адміністратор вручну в «Користувачах»
-    (фідбек тестування, п. 11). Новий співробітник отримує роль «Користувач».
+    Новий співробітник отримує роль «Користувач». Якщо налаштовано групи
+    (ENTRA_GROUP_*), ролі «Адміністратор», «Менеджер розділу» й ознака
+    «Експерт» зводяться з членством у них при кожному вході (DEV-05);
+    розділи менеджера призначає адміністратор.
     """
     profile = entra_service.profile_from_claims(claims)
     if not profile["external_id"]:
@@ -155,6 +158,7 @@ def upsert_entra_user(claims):
     user.is_active = True
     user.last_login_at = datetime.utcnow()
     db.session.flush()
+    entra_service.sync_roles(user, membership)
 
     db.session.commit()
     return user

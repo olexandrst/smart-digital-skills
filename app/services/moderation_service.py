@@ -13,6 +13,10 @@
 `pending_data` («пропозиція змін») і замінюють опубліковану версію, лише
 коли менеджер розділу їх схвалить. Тут — спільне для матеріалів і навичок;
 як саме застосувати зміни, знає ендпоінт свого типу.
+
+Модератор може правити подане на розгляд. Якщо він змінив чужий матеріал,
+перед публікацією має погодити правки з автором (email чи Teams) і
+підтвердити це — так записано в журналі (DEV-03).
 """
 import json
 from datetime import datetime
@@ -61,13 +65,79 @@ def snapshot_expert(item):
 
 
 def log(item_type, item, user, from_status, to_status, note=None):
-    """Запис у журнал життєвого циклу (FR-08)."""
+    """Запис у журнал життєвого циклу (FR-08): хто, у якій ролі й коли."""
     db.session.add(ReviewLog(
         item_type=item_type, item_id=item.id, item_name=item.name,
         actor_user_id=user.id if user else None,
         actor_name=(user.full_name or user.username) if user else None,
+        actor_role=access.actor_role(user, item),
         from_status=from_status, to_status=to_status, note=note,
     ))
+
+
+MODERATOR_ROLES = ("moderator", "deputy", "admin")
+
+
+def last_decision(item_type, item):
+    """Останнє рішення модератора щодо матеріалу: хто, у якій ролі, коли."""
+    row = (ReviewLog.query
+           .filter_by(item_type=item_type, item_id=item.id)
+           .filter(ReviewLog.actor_role.in_(MODERATOR_ROLES))
+           .order_by(ReviewLog.created_at.desc(), ReviewLog.id.desc()).first())
+    if row is None:
+        return None
+    return {"by": row.actor_name, "role": row.actor_role, "at": row.created_at.isoformat(),
+            "to_status": row.to_status, "note": row.note}
+
+
+# --- Правки модератора й погодження з автором ---
+
+def mark_moderator_edit(item, user):
+    """Модератор змінив чужий матеріал, що чекає розгляду, — правки треба
+    погодити з автором до публікації."""
+    if item.status == "review" and not is_author(item, user) and access.can_moderate(user, item):
+        item.mod_edit_by = user.id
+        item.mod_edit_at = datetime.utcnow()
+
+
+def clear_moderator_edit(item):
+    item.mod_edit_by = None
+    item.mod_edit_at = None
+
+
+AGREED_NOTE = "Правки модератора погоджено з автором"
+
+
+def require_author_agreement(item, user, data):
+    """Перед публікацією чужого матеріалу зі своїми правками модератор
+    підтверджує, що погодив їх з автором. Повертає примітку для журналу."""
+    if item.mod_edit_at is None or is_author(item, user):
+        return None
+    if not (data or {}).get("author_agreed"):
+        raise ApiError("Ви змінили матеріал автора. Погодьте правки з автором (email чи "
+                       "Teams) і підтвердьте це перед публікацією",
+                       409, "author_agreement_required")
+    return AGREED_NOTE
+
+
+def detail_payload(item_type, item, user):
+    """Поля картки, що потрібні лише у відкритому матеріалі: останнє рішення
+    модератора (автору й модераторам), правки модератора й контакт автора
+    (модераторам)."""
+    out = {}
+    moderator = access.can_moderate(user, item)
+    if moderator or is_author(item, user):
+        out["last_moderation"] = last_decision(item_type, item)
+    if moderator:
+        editor = db.session.get(User, item.mod_edit_by) if item.mod_edit_by else None
+        out["moderator_edit"] = ({"by": (editor.full_name or editor.username) if editor else None,
+                                  "at": item.mod_edit_at.isoformat()}
+                                 if item.mod_edit_at else None)
+        author = db.session.get(User, item.created_by) if item.created_by else None
+        out["author_contact"] = ({"name": author.full_name or author.username,
+                                  "email": author.email}
+                                 if author is not None and author.id != user.id else None)
+    return out
 
 
 def submit(item_type, item, user, requested, publish):
