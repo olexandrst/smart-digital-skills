@@ -110,7 +110,8 @@ def test_expert_label_on_published_material(page, live_url):
         _relogin(page, live_url, "tester")
         page.click('#sidebar [data-dest="hub:all"]')
         card = page.locator("#cat-grid article.mdc", has_text="Реєстр ризиків")
-        expect(card.locator(".exp-tag")).to_have_text("Експерт")
+        # На плитці — підпис «Експерт:» над ім'ям автора (макет дизайнерки).
+        expect(card.locator(".exp-tag")).to_have_text("Експерт:")
         expect(card.locator(".mdc-meta")).to_contain_text("Автор Матеріалів")
         # Інші матеріали того самого автора опубліковано до галочки — без позначки.
         expect(page.locator("#cat-grid article.mdc", has_text="Регламент закупівель")

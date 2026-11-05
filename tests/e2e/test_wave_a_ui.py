@@ -109,16 +109,19 @@ def test_tag_opens_all_materials_with_it(page, live_url):
     login(page, live_url)
     page.click('#sidebar [data-dest="hub:all"]')
     card = page.locator("#cat-grid article.mdc", has_text="Регламент закупівель")
-    tags = card.locator("button.mdc-tag-link")
+    # Теги на плитці прибрано за макетом («очищення від шуму») — вони в картці.
+    expect(card.locator("button.mdc-tag-link")).to_have_count(0)
+    card.click()
+    tags = page.locator(".md-modal button.mdc-tag-link")
     expect(tags).to_have_text(["закупівлі", "регламент"])
     tags.first.click()
-    expect(page.locator(".md-modal")).to_have_count(0)        # картка не відкрилась
+    expect(page.locator(".md-modal")).to_have_count(0)        # картку закрито
     expect(page.locator("#cat-active")).to_contain_text("Тег: закупівлі")
     names = page.locator("#cat-grid .mdc-title")
     expect(names).to_have_count(2)
     assert set(names.all_text_contents()) == {"Регламент закупівель", "Промпт для звіту"}
 
-    # Тег у відкритій картці робить те саме, а картку закриває.
+    # Те саме з іншої картки й іншим тегом.
     page.click("#cat-reset")
     page.locator("#cat-grid article.mdc", has_text="Питання та відповіді").click()
     page.locator('.md-modal button.mdc-tag-link:has-text("довідка")').click()
@@ -131,13 +134,16 @@ def test_tag_opens_all_materials_with_it(page, live_url):
 def test_card_colour_follows_kind(page, live_url):
     login(page, live_url, "manager")
     page.click('#sidebar [data-dest="hub:all"]')
-    tiles = page.locator("#cat-grid article.mdc", has_text="Опис для тесту").locator(".mdc-top .mdc-tile")
+    # Колір — лише за видом: бейдж виду має клас кольору навігації брендбуку.
+    badges = page.locator("#cat-grid article.mdc", has_text="Опис для тесту").locator(".kind-badge")
+    expect(badges.first).to_be_visible()
     classes = {}
-    for i in range(tiles.count()):
-        card = page.locator("#cat-grid article.mdc", has_text="Опис для тесту").nth(i)
-        kind = card.locator(".mdc-tag").first.text_content()
-        classes.setdefault(kind, set()).add(tiles.nth(i).get_attribute("class"))
-    assert all(len(v) == 1 for v in classes.values()), classes
+    for i in range(badges.count()):
+        badge = badges.nth(i)
+        classes.setdefault(badge.text_content(), set()).add(badge.get_attribute("class"))
+    assert classes and all(len(v) == 1 for v in classes.values()), classes
+    assert classes["Інструкція"] == {"kind-badge k-instruction"}
+    assert classes["Посилання"] == {"kind-badge k-link"}
     # У редакторі матеріалу поля «Колір плитки» більше немає.
     rid = page.evaluate("() => catalogState.items.find(i => i.kind === 'instruction').id")
     page.evaluate("(id) => openResourceEditor(id)", rid)

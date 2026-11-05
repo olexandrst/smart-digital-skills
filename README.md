@@ -38,6 +38,14 @@ ChatGPT, корпоративний агент, локальне середов�
 | Паролі | Werkzeug (PBKDF2) |
 | Фонові задачі | APScheduler (щоденні нагадування про перегляд матеріалів) |
 | Frontend | Vanilla JS SPA (без збірки), сервиться Flask |
+| Вигляд | Фірмовий стиль Metinvest Digital: одна темна тема, кольори брендбуку (див. `docs/DESIGN.md`) |
+
+**Фірмові файли, які треба замінити оригіналами** (зараз — тимчасові):
+шрифт — вільний Geologica замість корпоративного (`app/static/fonts/`,
+`--font-sans` у `style.css`); логотип `app/static/brand/metinvest-digital.png`
+і зображення входу `app/static/brand/hero-cube.webp` вирізано з макета.
+Імена файлів зберегти — розмітка не зміниться; для шрифту — додати
+`@font-face` і назву в `--font-sans`.
 
 ---
 

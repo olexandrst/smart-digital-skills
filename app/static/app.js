@@ -313,33 +313,8 @@ $("#login-form").addEventListener("submit", async (e) => {
 });
 $("#logout-btn").addEventListener("click", () => logoutWithSurvey());
 
-// ---------- Тема (Темна glass / Світла / Material), лише всередині застосунку ----------
-const T_MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
-const T_SUN = '<path d="M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0-13v2m0 16v2M4 12H2m20 0h-2M5.6 5.6 4.2 4.2m15.6 1.4 1.4-1.4M5.6 18.4l-1.4 1.4m15.6-1.4 1.4 1.4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>';
-const THEMES = [
-  { id: "light", label: "Світла", icon: T_SUN },
-  { id: "dark", label: "Темна", icon: T_MOON },
-];
-function themePref() {
-  const t = localStorage.getItem("theme");
-  // Раніше було 3 теми — "material" і "light" зводимо до світлої.
-  return t === "dark" ? "dark" : "light";
-}
-function applyTheme() {
-  const t = themePref();
-  document.body.classList.toggle("theme-dark", t === "dark");
-  document.querySelectorAll("#theme-seg button").forEach(b =>
-    b.classList.toggle("active", b.dataset.theme === t));
-}
-function buildThemeSeg() {
-  const seg = $("#theme-seg");
-  if (!seg) return;
-  seg.innerHTML = THEMES.map(t =>
-    `<button data-theme="${t.id}" title="${t.label} тема"><svg viewBox="0 0 24 24" aria-hidden="true">${t.icon}</svg></button>`).join("");
-  seg.querySelectorAll("button").forEach(b =>
-    b.addEventListener("click", () => { localStorage.setItem("theme", b.dataset.theme); applyTheme(); }));
-}
-buildThemeSeg();
+// Тема одна — фірмова темна (брендбук Metinvest Digital), тож перемикача
+// теми немає. Колишній вибір у localStorage («theme») більше не читається.
 
 // Перемикач показу пароля.
 const pwToggle = $("#pw-toggle");
@@ -401,61 +376,13 @@ function consumeAuthFragment() {
 
 function showLogin() {
   paintAuthOptions();
-  document.body.classList.remove("theme-dark");  // логін має власний вигляд
   $("#login-screen").classList.remove("hidden");
   $("#app").classList.add("hidden");
-  placeAuthBadges();
 }
-
-// Бейджі на екрані входу стають у смугу між текстом ліворуч і фото праворуч.
-// Фото — фон із cover і прив'язкою праворуч, тож його масштаб і зсув рахуємо
-// так само, як браузер. Бракує місця — спершу компактний вигляд без підписів,
-// а якщо й так тісно, бейджі ховаємо.
-const HERO_W = 1672, HERO_H = 941;
-const HERO_PERSON_X = 1130;   // де на фото починається волосся
-const HERO_BADGES_X = 636, HERO_BADGES_Y = 251;   // місце бейджів у макеті
-function placeAuthBadges() {
-  const box = $("#auth-badges"), auth = $("#login-screen");
-  if (!box || auth.classList.contains("hidden")) return;
-  const W = auth.clientWidth, H = auth.clientHeight;
-  const s = Math.max(W / HERO_W, H / HERO_H);
-  const offX = W - HERO_W * s, offY = (H - HERO_H * s) / 2;
-  const base = auth.getBoundingClientRect();
-  const range = document.createRange();
-  let left = 0;
-  auth.querySelectorAll(".auth-brand, .auth-headline, .auth-sub, .login-card").forEach(el => {
-    range.selectNodeContents(el);
-    const r = el.classList.contains("login-card") ? el.getBoundingClientRect() : range.getBoundingClientRect();
-    left = Math.max(left, r.right - base.left);
-  });
-  left += 28;
-  const right = HERO_PERSON_X * s + offX - 16;
-  box.style.transform = "none";
-  box.classList.add("on");
-  const fit = (compact) => {
-    box.classList.toggle("compact", compact);
-    const w = Math.max(...[...box.children].map(li => li.offsetLeft + li.offsetWidth));
-    return { w, h: box.offsetHeight, k: Math.min(1, s * 1.05, (right - left) / w) };
-  };
-  let f = fit(false);
-  if (f.k < 0.9) f = fit(true);
-  const { w, h, k } = f;
-  if (W < 900 || k < 0.8) { box.classList.remove("on"); return; }
-  const x = Math.min(Math.max(left, HERO_BADGES_X * s + offX), right - w * k);
-  const y = Math.min(Math.max(16, HERO_BADGES_Y * s + offY), H - h * k - 16);
-  box.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px) scale(${k.toFixed(3)})`;
-}
-window.addEventListener("resize", placeAuthBadges);
-document.addEventListener("DOMContentLoaded", () => {
-  const help = $("#login-help");
-  if (help) help.addEventListener("toggle", placeAuthBadges);
-  if (document.fonts) document.fonts.ready.then(placeAuthBadges);
-});
 
 async function showApp() {
   $("#login-screen").classList.add("hidden");
   $("#app").classList.remove("hidden");
-  applyTheme();  // застосовуємо тему користувача (лише в застосунку)
   const display = state.user.full_name || state.user.username;
   $("#user-name").textContent = display;
   $("#user-roles").textContent = roleLabel(state.user);
@@ -498,19 +425,42 @@ const GLYPH = {
   upload: '<path d="M12 16V4.5M7.5 9 12 4.5 16.5 9"/><path d="M4.5 15.5v2.6c0 .8.7 1.4 1.4 1.4h12.2c.8 0 1.4-.6 1.4-1.4v-2.6"/>',
   chat: '<path d="M5 5h14a1.5 1.5 0 0 1 1.5 1.5V15a1.5 1.5 0 0 1-1.5 1.5h-8.5L6 20v-3.5H5A1.5 1.5 0 0 1 3.5 15V6.5A1.5 1.5 0 0 1 5 5Z"/><path d="M8 10.8h.01M12 10.8h.01M16 10.8h.01"/>',
   mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4.5 7 7.5 6 7.5-6"/>',
+  link: '<path d="M10.2 13.4a4.2 4.2 0 0 0 6 .4l2.6-2.6a4.2 4.2 0 1 0-6-6l-1.5 1.5"/><path d="M13.8 10.6a4.2 4.2 0 0 0-6-.4l-2.6 2.6a4.2 4.2 0 1 0 6 6l1.5-1.5"/>',
   help: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><circle cx="12" cy="16.9" r=".4"/>',
+  // Значки бічної панелі з макета: тонкі контурні.
+  sparkles: '<path d="M9.5 6.5l1.4 3.6 3.6 1.4-3.6 1.4-1.4 3.6-1.4-3.6-3.6-1.4 3.6-1.4 1.4-3.6Z"/><path d="M17.5 3.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8ZM16.5 15.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6.6-1.4ZM4.5 18.5l.5 1 1 .5-1 .5-.5 1-.5-1-1-.5 1-.5.5-1Z"/>',
+  layers: '<path d="M12 4 3.5 8.3 12 12.6l8.5-4.3L12 4Z"/><path d="M3.5 12 12 16.3l8.5-4.3M3.5 15.7 12 20l8.5-4.3"/>',
+  cube: '<path d="M12 3.5 4 7.5v9l8 4 8-4v-9l-8-4Z"/><path d="M4 7.5l8 4 8-4M12 11.5v9M8 5.5l8 4"/>',
+  idea: '<path d="M9.8 17.6h4.4M10.6 20.4h2.8M12 6.6a4.8 4.8 0 0 1 2.9 8.6v1.2H9.1v-1.2A4.8 4.8 0 0 1 12 6.6Z"/><path d="M12 2.6v1.6M5.4 5.4l1.1 1.1M18.6 5.4l-1.1 1.1M3 11.4h1.6M19.4 11.4H21"/>',
+  book: '<path d="M3.5 6.5c2.8-.9 5.6-.6 8.5 1 2.9-1.6 5.7-1.9 8.5-1v12c-2.8-.9-5.6-.6-8.5 1-2.9-1.6-5.7-1.9-8.5-1v-12Z"/><path d="M12 7.5v12M6 10h3.5M6 13h3.5M14.5 10H18M14.5 13H18"/>',
+  policy: '<path d="M14 20.5H6V3.5h8l4 4v4"/><path d="M14 3.5V7.5h4M8.5 9h4M8.5 12h5M8.5 15h3"/><circle cx="16.8" cy="17" r="3.4"/><path d="m15.4 17 1 1 1.9-2"/>',
+  people: '<circle cx="12" cy="8" r="2.6"/><circle cx="5.8" cy="9.6" r="2.1"/><circle cx="18.2" cy="9.6" r="2.1"/><path d="M7.3 18.5c0-2.8 2.1-4.8 4.7-4.8s4.7 2 4.7 4.8M2.5 17.5c0-2.2 1.4-3.7 3.4-3.7 .8 0 1.5.2 2.1.6M21.5 17.5c0-2.2-1.4-3.7-3.4-3.7-.8 0-1.5.2-2.1.6"/>',
+  tap: '<path d="M9.5 11.2V5.8a1.6 1.6 0 0 1 3.2 0v5.4l4.1.9a2.2 2.2 0 0 1 1.7 2.4l-.6 4.6a2.4 2.4 0 0 1-2.4 2.1h-4.4a2.4 2.4 0 0 1-1.9-.9l-3.2-4.2a1.5 1.5 0 0 1 2.3-1.9l1.2 1.3"/><path d="M6 6.3a4.8 4.8 0 0 1 4.4-3.4M16 6.3a4.8 4.8 0 0 0-1.8-2.6"/>',
+  mailai: '<path d="M15.5 18.5H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5h10"/><path d="m4.3 6.5 6.7 5.3 3.9-3.1"/><circle cx="18" cy="17" r="3.3"/><path d="M16.9 18.1l.8-2.3h.2l.8 2.3M17.1 17.5h1.2M19.4 15.8v2.3"/><path d="M19.2 3.2l.5 1.3 1.3.5-1.3.5-.5 1.3-.5-1.3-1.3-.5 1.3-.5.5-1.3Z"/>',
+  chats: '<path d="M4.5 4.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H8.6L5.5 16v-2.5h-1A1.5 1.5 0 0 1 3 12V6a1.5 1.5 0 0 1 1.5-1.5Z"/><path d="M6.5 8h6M6.5 10.5h4.5M16 9h3.5A1.5 1.5 0 0 1 21 10.5v5.5a1.5 1.5 0 0 1-1.5 1.5h-1V20l-3.1-2.5H11A1.5 1.5 0 0 1 9.5 16v-2.5"/>',
+  guide: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5V8h4M9 11h6M9 14h6M9 17h3.5"/>',
 };
+
+// Значок розділу в бічній панелі: розділи — дані адміністратора, тож значок
+// добираємо за назвою (як у макеті: Toolbox — коробка, Power Links — ланка…);
+// невідома назва — коробка.
+const SECTION_GLYPHS = [
+  [/link|посилан/i, "link"],
+  [/insight|аналіт|кейс|ідеї/i, "idea"],
+  [/learn|навч|курс|academy/i, "book"],
+  [/policy|safety|правил|політик|безпек/i, "policy"],
+  [/community|спільнот|партнер/i, "people"],
+  [/tool|інструмент/i, "cube"],
+];
+function sectionGlyph(sec) {
+  const hit = SECTION_GLYPHS.find(([re]) => re.test(sec.name || ""));
+  return hit ? hit[1] : "cube";
+}
 const gsvg = (name, cls = "") =>
   `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none"
         stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
         stroke-linejoin="round">${GLYPH[name] || ""}</svg>`;
 
-// Акценти розділів із довідника → відтінки візуальної мови.
-const ACCENT_TONE = { red: "red", green: "green", amber: "orange", steel: "teal",
-                      ink: "ink", blue: "blue", purple: "purple", pink: "pink" };
-function sectionTone(sec) {
-  return ACCENT_TONE[sec && sec.accent] || "ink";
-}
 
 const MODES = [
   { id: "hub", label: "База знань", glyph: "hub", home: "hub:home" },
@@ -935,14 +885,14 @@ function sbGuideHtml() {
   return `<div class="sb-spacer"></div>
     ${agent ? `<a class="sb-item sb-guide" href="${esc(agent)}" target="_blank" rel="noopener"
        title="${AGENT_HINT}" data-support="agent">
-      ${gsvg("chat")}<span class="sb-label">AI SD агент</span>${gsvg("ext", "sb-ext")}
+      ${gsvg("mailai")}<span class="sb-label">AI SD агент</span>${gsvg("ext", "sb-ext")}
     </a>` : ""}
     <button class="sb-item" data-contact title="${CONTACT_HINT}">
-      ${gsvg("mail")}<span class="sb-label">Зворотний зв'язок</span>
+      ${gsvg("chats")}<span class="sb-label">Зворотний зв'язок</span>
     </button>
     <a class="sb-item sb-guide" href="${GUIDE_URL}" target="_blank" rel="noopener"
        title="Інструкція відкриється в новій вкладці">
-      ${gsvg("help")}<span class="sb-label">Інструкція</span>${gsvg("ext", "sb-ext")}
+      ${gsvg("guide")}<span class="sb-label">Інструкція</span>${gsvg("ext", "sb-ext")}
     </a>`;
 }
 
@@ -976,12 +926,11 @@ function adminSidebarHtml() {
 function hubSidebarHtml() {
   const favCount = catalogState.favorites.skill.size + catalogState.favorites.resource.size;
   const recent = recentItems().length;
-  let html = sbItem("hub:home", "Для вас", "spark")
+  let html = sbItem("hub:home", "Для вас", "sparkles")
     + sbItem("hub:fav", "Обране", "star", favCount || "")
     + (recent ? sbItem("hub:recent", "Нещодавні", "clock", recent) : "");
-  // «Матеріали» — увесь каталог із фільтрами. Головний вхід у базу знань,
-  // тому виділений і стоїть над розділами, а не губиться серед них.
-  html += sbItem("hub:all", "Матеріали", "list", catalogState.items.length || "", "sb-feature");
+  // «Матеріали» — увесь каталог із фільтрами; стоїть над розділами.
+  html += sbItem("hub:all", "Матеріали", "layers", catalogState.items.length || "");
 
   const sections = catalogState.sections
     .filter(s => s.is_active !== false && (s.items_count > 0 || s.url));
@@ -990,7 +939,7 @@ function hubSidebarHtml() {
     for (const sec of sections) {
       if (sec.url) {
         html += `<button class="sb-item" data-ext="${esc(sec.url)}" title="${esc(sec.description || sec.name)}">
-            <span class="sb-dot ${sectionTone(sec)}">${gsvg("box")}</span>
+            ${gsvg(sectionGlyph(sec))}
             <span class="sb-label">${esc(sec.name)}</span>
             ${gsvg("ext", "sb-ext")}
           </button>`;
@@ -1000,7 +949,7 @@ function hubSidebarHtml() {
         || catalogState.folders.some(f => f.section_id === sec.id
                                           && nav.dest === `hub:fol:${f.id}`);
       html += `<button class="sb-item" data-dest="hub:sec:${sec.id}" title="${esc(sec.description || sec.name)}">
-          <span class="sb-dot ${sectionTone(sec)}">${gsvg("box")}</span>
+          ${gsvg(sectionGlyph(sec))}
           <span class="sb-label">${esc(sec.name)}</span>
           <span class="sb-count">${sec.items_count}</span>
         </button>`;
@@ -1024,7 +973,7 @@ function hubSidebarHtml() {
   // й навички. Черга модерації менеджера — у «Керуванні».
   const mine = (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
   html += `<div class="sb-group">Контент</div>`
-    + sbItem("hub:contrib", "Наповнення каталогу", "pen", mine || "");
+    + sbItem("hub:contrib", "Наповнення каталогу", "tap", mine || "");
   return html;
 }
 
@@ -1092,38 +1041,42 @@ const DEFAULT_SKILL_ICON =
 const DESC_PREVIEW_LEN = 120;  // скільки символів опису показувати на плитці
 
 // Види наповнення каталогу. Порядок = порядок фільтрів-пігулок.
-// Види матеріалів. Гліф — один стиль, одна товщина; відтінок робить тип
-// упізнаваним периферійним зором, ще до читання підпису.
+// Колір виду — «кольори навігації» брендбуку (класи .k-<код> у style.css),
+// значки — як у брендбуку: робот, ланка, графік, код, документ, чип «AI»,
+// шестерня. Один стиль, одна товщина лінії.
 const CAT_KINDS = {
   skill: {
     label: "Навички", one: "Навичка", accent: "red",
-    icon: '<path d="M13.2 3 5 13.4h5.2L9.8 21l8.2-10.4h-5.2L13.2 3Z"/>',
+    icon: '<path d="M10.3 3.5h3.4l.5 2.4 1.8.8 2.1-1.4 2.4 2.4-1.4 2.1.8 1.8 2.4.5v3.4l-2.4.5-.8 1.8 1.4 2.1-2.4 2.4-2.1-1.4-1.8.8-.5 2.4h-3.4l-.5-2.4-1.8-.8-2.1 1.4-2.4-2.4 1.4-2.1-.8-1.8-2.4-.5v-3.4l2.4-.5.8-1.8-1.4-2.1 2.4-2.4 2.1 1.4 1.8-.8.5-2.4Z"/><circle cx="12" cy="12" r="3.1"/>',
   },
   prompt: {
     label: "Промпти", one: "Промпт", accent: "blue",
-    icon: '<path d="M12 3.4l1.9 5.2 5.2 1.9-5.2 1.9-1.9 5.2-1.9-5.2-5.2-1.9 5.2-1.9L12 3.4Z"/><path d="M18.6 16.4l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7.7-1.9Z"/>',
+    icon: '<rect x="6" y="6" width="12" height="12" rx="1.8"/><path d="M9 3.5V6M12 3.5V6M15 3.5V6M9 18v2.5M12 18v2.5M15 18v2.5M3.5 9H6M3.5 12H6M3.5 15H6M18 9h2.5M18 12h2.5M18 15h2.5"/><path d="M8.9 14.7l1.3-5.4h.6l1.3 5.4M9.3 13.1h2.3M14.6 9.3v5.4"/>',
   },
   instruction: {
     label: "Інструкції", one: "Інструкція", accent: "purple",
-    icon: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5V8h4"/><path d="M9 12.5h6M9 16h4"/>',
+    icon: '<path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5V8h4"/><path d="M9 11.5h6M9 14.5h6M9 17.5h4"/>',
   },
   case: {
     label: "Кейси", one: "Кейс", accent: "green",
-    icon: '<path d="M4 19.5h16"/><path d="M7.5 16.5V10M12 16.5V5.5M16.5 16.5v-4"/>',
+    icon: '<rect x="4" y="14.5" width="3.6" height="6" rx=".9"/><rect x="10.2" y="11.5" width="3.6" height="9" rx=".9"/><rect x="16.4" y="8.5" width="3.6" height="12" rx=".9"/><path d="M4.5 10.2 9.6 5.8l3 2.4 5.9-4.7M15.6 3.5h2.9v2.9"/>',
   },
   agent: {
     label: "Агенти", one: "Агент", accent: "orange",
-    icon: '<rect x="4" y="8" width="16" height="11" rx="3.2"/><path d="M12 4.2V8M9.2 13h.01M14.8 13h.01M9.8 16.4h4.4"/>',
+    icon: '<rect x="5.5" y="6.5" width="13" height="10" rx="3"/><path d="M12 3.6v2.9M9.6 10.8v1.2M14.4 10.8v1.2M3.2 10.2v2.6M20.8 10.2v2.6M10.6 16.5 12 19.5l1.4-3"/>',
   },
   mcp: {
     label: "MCP-сервери", one: "MCP-сервер", accent: "teal",
-    icon: '<path d="M9 3.2v4.6M15 3.2v4.6"/><path d="M6.2 7.8h11.6v3.4a5.8 5.8 0 0 1-11.6 0V7.8Z"/><path d="M12 17v3.8"/>',
+    icon: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M10.6 6.9 9.2 8.4l1.4 1.5M13.4 6.9l1.4 1.5-1.4 1.5M9 14.2l2 2 4-4.2"/>',
   },
   link: {
     label: "Корисні посилання", one: "Посилання", accent: "pink",
     icon: '<path d="M10.2 13.4a4.2 4.2 0 0 0 6 .4l2.6-2.6a4.2 4.2 0 1 0-6-6l-1.5 1.5"/><path d="M13.8 10.6a4.2 4.2 0 0 0-6-.4l-2.6 2.6a4.2 4.2 0 1 0 6 6l1.5-1.5"/>',
   },
 };
+// Клас кольору виду: відомі види — свій колір навігації, доданий
+// адміністратором вид — нейтральний GRAY брендбуку.
+function kindClass(code) { return CAT_KINDS[code] ? `k-${code}` : "k-other"; }
 const CAT_ORDER = ["skill", "prompt", "instruction", "case", "agent", "mcp", "link"];
 const CAT_ALL_ICON = '<path d="M4 4h7v7H4V4Zm9 0h7v7h-7V4ZM4 13h7v7H4v-7Zm9 0h7v7h-7v-7Z"/>';
 
@@ -1351,8 +1304,8 @@ function hubHead() {
              sub: sec.description || nMaterials(sec.items_count) };
   }
   const hour = new Date().getHours();
-  const part = hour < 5 ? "Доброї ночі" : hour < 12 ? "Доброго ранку"
-             : hour < 18 ? "Доброго дня" : "Доброго вечора";
+  const part = hour >= 5 && hour < 12 ? "Добрий ранок"
+             : hour >= 12 && hour < 18 ? "Добрий день" : "Добрий вечір";
   const full = (state.user && (state.user.full_name || state.user.username)) || "";
   const name = full.split(" ").filter(Boolean).slice(-1)[0] || "";
   const n = catalogState.items.length;
@@ -1420,12 +1373,12 @@ function paintHomeSupport() {
       <div class="support-row">
         ${agent ? `<a class="support-card" href="${esc(agent)}" target="_blank" rel="noopener"
              title="${AGENT_HINT}" data-support="agent">
-          <span class="support-ic">${gsvg("chat")}</span>
-          <span class="support-txt"><b>AI SD агент${gsvg("ext", "btn-ext")}</b>
+          <span class="support-ic">${gsvg("mailai")}</span>
+          <span class="support-txt"><b>AI SD агент</b>
             <i>${AGENT_HINT}: помилки, доступ до сервісів, налаштування. Відкриється в Teams.</i></span>
         </a>` : ""}
         <button class="support-card" id="home-contact" title="${CONTACT_HINT}">
-          <span class="support-ic">${gsvg("mail")}</span>
+          <span class="support-ic">${gsvg("chats")}</span>
           <span class="support-txt"><b>Зворотний зв'язок</b>
             <i>${CONTACT_HINT}: ролі й розділи, зміст каталогу, пропозиції.</i></span>
         </button>
@@ -1797,28 +1750,11 @@ function renderPersonal() {
     </section>`;
 
   if (recs.length) {
+    // Чому матеріал порадили — підказка під курсором: окремий рядок під
+    // кожною плиткою макет прибрав як зайвий текст.
     const row = box.querySelector("#rec-row");
-    recs.forEach(r => {
-      const card = catalogCard(normResource(r));
-      card.appendChild(el(`<div class="rec-why">
-          <span>${esc(r.recommend_reason || "")}</span>
-          <button class="rec-hide" data-hide="${r.id}" title="Більше не показувати"
-                  aria-label="Приховати">×</button>
-        </div>`));
-      row.appendChild(card);
-    });
-    row.querySelectorAll("[data-hide]").forEach(b =>
-      b.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        const id = Number(b.dataset.hide);
-        try {
-          await api("/catalog/recommendations/hide", { method: "POST",
-            body: { item_id: id } });
-          catalogState.recommendations =
-            catalogState.recommendations.filter(x => x.id !== id);
-          renderPersonal();
-        } catch (err) { toast(err.message, "err"); }
-      }));
+    recs.forEach(r => row.appendChild(catalogCard(normResource(r),
+                                                  { hint: r.recommend_reason || "" })));
   }
   const freshRow = box.querySelector("#fresh-row");
   if (freshRow) fresh.forEach(i => freshRow.appendChild(catalogCard(i)));
@@ -2025,7 +1961,17 @@ function catTile(it, cls = "mdc-tile") {
         : (it.emoji ? `<span class="mdc-emoji">${esc(it.emoji)}</span>`
                     : `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor"
                             stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${GLYPH.box}</svg>`));
-  return `<span class="${cls} a-${esc(it.accent)}${it.iconUrl ? " has-img" : ""}">${inner}</span>`;
+  return `<span class="${cls} ${kindClass(it.kind)}${it.iconUrl ? " has-img" : ""}">${inner}</span>`;
+}
+
+// Бейдж виду на плитці: назва й значок на кольорі навігації (брендбук).
+function kindBadge(it) {
+  const kind = kindMeta(it.kind);
+  const known = CAT_KINDS[it.kind];
+  const glyph = known
+    ? `<svg viewBox="0 0 24 24" aria-hidden="true">${known.icon}</svg>`
+    : (kind.emoji ? `<span class="mdc-emoji">${esc(kind.emoji)}</span>` : "");
+  return `<span class="kind-badge ${kindClass(it.kind)}">${esc(kind.one)}${glyph}</span>`;
 }
 
 async function toggleFavorite(it) {
@@ -2064,16 +2010,11 @@ function openExternal(it) {
 
 // Дія на плитці: залежить від виду наповнення.
 function cardAction(it) {
-  // Навичку з пакетом завантажують одразу з плитки; без пакета — читають.
+  // Навичку відкривають (макет): пакет завантажують із картки, де видно,
+  // що саме в ньому.
   if (it.kind === "skill") {
-    if (!it.raw.has_package) {
-      return { cls: "mdc-act", html: "Детальніше",
-               run: async () => { markSearchOpened(it); openSkillModal(it.id); } };
-    }
-    return { cls: "mdc-act", html: `${ICO_DOWNLOAD}Завантажити`, run: async () => {
-      markSearchOpened(it);
-      await downloadSkillPackage(it.raw);
-    } };
+    return { cls: "mdc-act", html: "Відкрити",
+             run: async () => { markSearchOpened(it); pushRecent(it); openSkillModal(it.id); } };
   }
   if (it.kind === "prompt") {
     return { cls: "mdc-act", html: "Копіювати", run: async () => {
@@ -2088,7 +2029,7 @@ function cardAction(it) {
   }
   // Адресу MCP-сервера вставляють у конфіг клієнта, а не відкривають у браузері.
   if (it.kind === "mcp") {
-    return { cls: "mdc-act", html: "Копіювати endpoint", run: async () => {
+    return { cls: "mdc-act", html: "Копіювати", run: async () => {
       const ok = await copyText(it.url || "");
       toast(ok ? "Endpoint скопійовано" : "Не вдалося скопіювати", ok ? "ok" : "err");
       if (ok) {
@@ -2097,15 +2038,8 @@ function cardAction(it) {
       }
     } };
   }
-  return { cls: "mdc-act", html: it.kind === "agent" ? "Відкрити агента" : "Перейти",
+  return { cls: "mdc-act", html: it.kind === "agent" ? "Відкрити" : "Перейти",
            run: async () => { markSearchOpened(it); openExternal(it); } };
-}
-
-// Компактний показ середньої оцінки на картці.
-function ratingHtml(it) {
-  if (!it.ratingCount) return "";
-  return `<span class="mdc-rate" title="Середня оцінка ${it.ratingAvg} з 5 (${it.ratingCount})">
-    ${ICO_STAR}<b>${it.ratingAvg}</b><i>(${it.ratingCount})</i></span>`;
 }
 
 // Тег — кнопка: клік показує всі матеріали з цим тегом (фідбек, п. 8.4).
@@ -2139,42 +2073,38 @@ function authorHtml(name, expert) {
     esc(name)}`;
 }
 
-function catalogCard(it) {
-  const kind = kindMeta(it.kind);
+// Плитка матеріалу за макетом дизайнерки: назва, опис, а внизу — автор із
+// позначкою «Експерт», бейдж виду й дія. Теги, власник, рейтинг і версія —
+// у картці матеріалу, а не на плитці («очищення від шуму»). `hint` —
+// підказка під курсором, напр. чому матеріал рекомендовано.
+function catalogCard(it, { hint = "" } = {}) {
   const desc = it.description || "";
   const shortDesc = desc.length > DESC_PREVIEW_LEN
     ? desc.slice(0, DESC_PREVIEW_LEN).trimEnd() + "…" : desc;
   const fav = catalogState.favorites[it.item_type].has(it.id);
 
-  const tags = [`<span class="mdc-tag t-${esc(it.accent)}">${esc(kind.one)}</span>`];
-  if (it.status === "needs_update") {
-    tags.push(`<span class="mdc-tag stale" title="Матеріал очікує актуалізації">Потребує оновлення</span>`);
+  // Ліворуч унизу — лише те, що допомагає вибрати: автор-Експерт (DEV-06)
+  // і попередження, що матеріал застарів.
+  const meta = [];
+  if (it.authorExpert && it.author) {
+    meta.push(`<span class="exp-tag">Експерт:</span><span class="mdc-author">${esc(it.author)}</span>`);
   }
-  if (it.linkScope === "internal") tags.push(`<span class="mdc-tag">Внутрішній</span>`);
-  // Три теги матеріалу; клік відкриває всі матеріали з тим самим тегом (фідбек, п. 8).
-  (it.tags || []).slice(0, 3).forEach(t => tags.push(tagButton(t)));
-
-  const meta = it.kind === "skill"
-    ? `Версія ${esc(it.version)} · ${it.author ? authorHtml(it.author, it.authorExpert) : "—"}`
-    : (it.author ? authorHtml(it.author, it.authorExpert) : "&nbsp;");
+  if (it.status === "needs_update") {
+    meta.push(`<span class="mdc-stale" title="Матеріал очікує актуалізації">Потребує оновлення</span>`);
+  }
 
   const act = cardAction(it);
-  const card = el(`<article class="mdc${it.featured ? " featured" : ""}" tabindex="0" role="button" title="Детальніше">
-    <div class="mdc-top">
-      ${catTile(it)}
-      <button class="mdc-fav${fav ? " on" : ""}" title="${fav ? "Прибрати з обраного" : "Додати в обране"}" aria-label="Обране">${ICO_STAR}</button>
-    </div>
+  const card = el(`<article class="mdc${it.featured ? " featured" : ""}" data-kind="${esc(it.kind)}" tabindex="0" role="button" title="${esc(hint || "Детальніше")}">
+    <button class="mdc-fav${fav ? " on" : ""}" title="${fav ? "Прибрати з обраного" : "Додати в обране"}" aria-label="Обране">${ICO_STAR}</button>
     <h3 class="mdc-title">${esc(it.name)}</h3>
     <p class="mdc-desc">${esc(shortDesc)}</p>
-    <div class="mdc-div"></div>
-    <div class="mdc-tags">${tags.join("")}</div>
     <div class="mdc-foot">
-      <span class="mdc-meta">${ratingHtml(it)}${meta}</span>
+      <span class="mdc-meta">${meta.join("")}</span>
+      ${kindBadge(it)}
       ${act ? `<button class="${act.cls}">${act.html}</button>` : ""}
     </div>
   </article>`);
 
-  bindTagButtons(card);
   const favBtn = card.querySelector(".mdc-fav");
   // Enter на кнопці всередині картки не має відкривати саму картку.
   favBtn.addEventListener("keydown", (e) => e.stopPropagation());

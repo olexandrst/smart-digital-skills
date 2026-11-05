@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="uk" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -7,19 +7,30 @@
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="icon" href="../favicon.ico" sizes="any">
 <link rel="apple-touch-icon" href="../apple-touch-icon.png">
-<script>
-  // Тема та сама, що в хабі: вибір користувача лежить у localStorage("theme").
-  try {
-    document.documentElement.setAttribute("data-theme",
-      localStorage.getItem("theme") === "dark" ? "dark" : "light");
-  } catch (e) { /* без сховища — світла тема */ }
-</script>
 <style>
-/* Шрифт хабу з його ж сервера: у контурі компанії зовнішні CDN можуть бути закриті. */
+/* Шрифт хабу з його ж сервера: у контурі компанії зовнішні CDN можуть бути закриті.
+   Geologica — тимчасова заміна корпоративного шрифту (див. style.css хабу). */
 @font-face {
-  font-family: "Inter var";
-  src: url("../fonts/inter-var.woff2?v=1") format("woff2");
-  font-weight: 100 900; font-style: normal; font-display: swap;
+  font-family: "Geologica"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("../fonts/geologica-cyrillic.woff2?v=1") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Geologica"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("../fonts/geologica-cyrillic-ext.woff2?v=1") format("woff2");
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: "Geologica"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("../fonts/geologica-latin-ext.woff2?v=1") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1E00-1E9F,
+                 U+20A0-20AB, U+20AD-20C0, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Geologica"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("../fonts/geologica-latin.woff2?v=1") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+                 U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 /* Макет: вузька колонка читання з липким змістом ліворуч; знімки екрана —
    у рамці, як вікно застосунку. Кольори й шрифт — з дизайн-системи хабу. */
@@ -39,7 +50,7 @@
   --blue: #0071e3; --purple: #7b4fd1; --green: #2a9d57;
   --orange: #c86a00; --teal: #0f8fa8; --pink: #c2317c;
   --shot-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.08);
-  --font: "Inter var", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  --font: "Geologica", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
   --fs-cap: 11px; --fs-foot: 13px; --fs-call: 14px; --fs-body: 16px;
   --fs-head: 19px; --fs-title: 26px; --fs-hero: 40px;
@@ -57,15 +68,16 @@
     color-scheme: dark;
   }
 }
+/* Як і хаб — фірмова темна тема брендбуку Metinvest Digital */
 :root[data-theme="dark"] {
-  --bg: #000000; --panel: #1c1c1e; --panel-2: #2c2c2e;
-  --text: #f5f5f7; --muted: #98989d; --faint: #6e6e73;
-  --border: rgba(255,255,255,.13); --border-strong: rgba(255,255,255,.22);
-  --fill: rgba(120,120,128,.24);
-  --accent: #ff453a; --accent-ink: #ff6961; --accent-soft: rgba(255,69,58,.14);
-  --blue: #0a84ff; --purple: #bf5af2; --green: #30d158;
-  --orange: #ff9f0a; --teal: #40c8e0; --pink: #ff6482;
-  --shot-shadow: 0 0 0 1px rgba(255,255,255,.08);
+  --bg: #202C38; --panel: #263544; --panel-2: #2D3D4E;
+  --text: #FFFFFF; --muted: #B2CFF9; --faint: #8A9FB8;
+  --border: rgba(179,194,208,.22); --border-strong: rgba(179,194,208,.45);
+  --fill: rgba(178,207,249,.09);
+  --accent: #E50000; --accent-ink: #B2CFF9; --accent-soft: rgba(229,0,0,.18);
+  --blue: #7DB8FF; --purple: #C9A2F5; --green: #5FD68F;
+  --orange: #F2A93B; --teal: #5CCFD6; --pink: #FF8FB1;
+  --shot-shadow: 0 0 0 1px rgba(179,194,208,.25);
   color-scheme: dark;
 }
 
@@ -278,7 +290,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
       <a href="#mine">Керувати своїм</a>
       <b>Бути в курсі</b>
       <a href="#notify">Сповіщення</a>
-      <a href="#profile">Профіль і тема</a>
+      <a href="#profile">Профіль</a>
       <a href="#phone">На телефоні</a>
       <a href="#help">Отримати допомогу</a>
       <b>Інше</b>
@@ -332,7 +344,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         <p>На плитці під описом — до трьох тегів. <b>Клацніть тег</b>, щоб побачити всі матеріали з ним; так само працюють теги в картці.</p>
         <figure class="shot">
           <button class="zoom" type="button" data-full="img/02-filters.jpg" aria-label="Збільшити знімок фільтрів">
-            <img src="img/02-filters.jpg" width="1524" height="716" loading="lazy" alt="Види матеріалів угорі й відкрита панель фільтрів">
+            <img src="img/02-filters.jpg" width="1506" height="720" loading="lazy" alt="Види матеріалів угорі й відкрита панель фільтрів">
           </button>
           <figcaption>Види матеріалів з лічильниками і панель «Фільтри».</figcaption>
         </figure>
@@ -345,7 +357,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         </ol>
         <figure class="shot narrow">
           <button class="zoom" type="button" data-full="img/03-assistant.jpg" aria-label="Збільшити знімок помічника">
-            <img src="img/03-assistant.jpg" width="930" height="636" loading="lazy" alt="Помічник пошуку знайшов промпт «Протокол наради за стенограмою»">
+            <img src="img/03-assistant.jpg" width="930" height="642" loading="lazy" alt="Помічник пошуку знайшов промпт «Протокол наради за стенограмою»">
           </button>
         </figure>
       </section>
@@ -392,7 +404,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         </ol>
         <figure class="shot">
           <button class="zoom" type="button" data-full="img/04b-discussion.jpg" aria-label="Збільшити знімок обговорення">
-            <img src="img/04b-discussion.jpg" width="975" height="237" loading="lazy" alt="Блок «Обговорення» із зірками оцінки, коментарем колеги й полем для нового коментаря">
+            <img src="img/04b-discussion.jpg" width="975" height="333" loading="lazy" alt="Блок «Обговорення» із зірками оцінки, коментарем колеги й полем для нового коментаря">
           </button>
         </figure>
       </section>
@@ -415,13 +427,13 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         </div>
         <figure class="shot narrow">
           <button class="zoom" type="button" data-full="img/06-wizard-kind.jpg" aria-label="Збільшити знімок кроку «Вид»">
-            <img src="img/06-wizard-kind.jpg" width="1140" height="765" loading="lazy" alt="Майстер «Додати матеріал», крок 1: вибір виду">
+            <img src="img/06-wizard-kind.jpg" width="1140" height="777" loading="lazy" alt="Майстер «Додати матеріал», крок 1: вибір виду">
           </button>
           <figcaption>Крок 1. Вид матеріалу.</figcaption>
         </figure>
         <figure class="shot narrow">
           <button class="zoom" type="button" data-full="img/07-wizard-content.jpg" aria-label="Збільшити знімок кроку «Зміст»">
-            <img src="img/07-wizard-content.jpg" width="1140" height="1089" loading="lazy" alt="Майстер, крок 2: редактор тексту з панеллю оформлення (зокрема маркер і колір), зона для файлу й кнопка «Додати файл»">
+            <img src="img/07-wizard-content.jpg" width="1140" height="1092" loading="lazy" alt="Майстер, крок 2: редактор тексту з панеллю оформлення (зокрема маркер і колір), зона для файлу й кнопка «Додати файл»">
           </button>
           <figcaption>Крок 2. Текст у редакторі або з файлу, вкладення до картки.</figcaption>
         </figure>
@@ -432,7 +444,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         </div>
         <figure class="shot narrow">
           <button class="zoom" type="button" data-full="img/08-wizard-describe.jpg" aria-label="Збільшити знімок кроку «Опис»">
-            <img src="img/08-wizard-describe.jpg" width="1140" height="828" loading="lazy" alt="Майстер, крок 3: назва, опис, розділ, теги й кнопки «Зберегти чернетку» та «Подати на розгляд»">
+            <img src="img/08-wizard-describe.jpg" width="1140" height="858" loading="lazy" alt="Майстер, крок 3: назва, опис, розділ, теги й кнопки «Зберегти чернетку» та «Подати на розгляд»">
           </button>
           <figcaption>Крок 3. Назва, опис, розділ і подання на розгляд.</figcaption>
         </figure>
@@ -489,25 +501,24 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         <p class="muted">Сповіщення приходять, коли хтось прокоментував ваш матеріал, менеджер зняв його з публікації, позначив «Потребує оновлення» чи видалив, або настав час перевірити актуальність.</p>
         <figure class="shot narrow">
           <button class="zoom" type="button" data-full="img/10-notifications.jpg" aria-label="Збільшити знімок сповіщень">
-            <img src="img/10-notifications.jpg" width="558" height="314" loading="lazy" alt="Сповіщення про новий коментар до матеріалу">
+            <img src="img/10-notifications.jpg" width="510" height="662" loading="lazy" alt="Сповіщення про новий коментар до матеріалу">
           </button>
         </figure>
       </section>
 
 
       <section id="profile">
-        <h2>Профіль і тема</h2>
+        <h2>Профіль</h2>
         <div class="split">
           <ul class="dots">
             <li>Натисніть <b>аватар</b> у правому верхньому куті.</li>
             <li><b>Обране</b> й <b>Мій контент</b> (якщо ви відповідаєте за матеріали): особисті списки.</li>
             <li><b>Знайомство з інтерфейсом</b>: ще раз пройти підказки по екрану.</li>
-            <li><b>Тема</b>: світла або темна.</li>
             <li><b>Вийти</b>: завершити роботу. Інколи, не частіше разу на місяць, хаб попросить перед виходом оцінити його одним кліком; це можна пропустити. Якщо закрити вкладку без «Вийти», це питання з’явиться на початку наступного сеансу.</li>
           </ul>
           <figure class="shot phone">
             <button class="zoom" type="button" data-full="img/11-profile.jpg" aria-label="Збільшити знімок меню профілю">
-              <img src="img/11-profile.jpg" width="423" height="404" loading="lazy" alt="Меню профілю: Обране, Мій контент, знайомство з інтерфейсом, тема, Вийти">
+              <img src="img/11-profile.jpg" width="423" height="347" loading="lazy" alt="Меню профілю: Обране, Мій контент, знайомство з інтерфейсом, Вийти">
             </button>
           </figure>
         </div>
@@ -538,7 +549,7 @@ footer { margin-top: 56px; font-size: var(--fs-foot); color: var(--faint); }
         </ul>
         <figure class="shot">
           <button class="zoom" type="button" data-full="img/15-support.jpg" aria-label="Збільшити знімок блоку «Потрібна допомога?»">
-            <img src="img/15-support.jpg" width="1536" height="264" loading="lazy" alt="Блок «Потрібна допомога?» на сторінці «Для вас»: плитки «AI SD агент» і «Зворотний зв’язок»">
+            <img src="img/15-support.jpg" width="1464" height="293" loading="lazy" alt="Блок «Потрібна допомога?» на сторінці «Для вас»: плитки «AI SD агент» і «Зворотний зв’язок»">
           </button>
         </figure>
       </section>

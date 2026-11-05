@@ -188,22 +188,22 @@ def test_prompt_keeps_angle_brackets_and_copies_raw_text(page, live_url):
 
 # ---- П. 9: замість прибраних написів на екрані входу — «Знання · Співпраця · Розвиток» ----
 
-def test_login_badges_fit_between_text_and_photo(page, live_url):
-    badges = page.locator("#auth-badges")
-    titles = badges.locator(".ab b")
-    for width, height, compact in ((1920, 1080, False), (1280, 720, True)):
+def test_login_page_follows_brand_design(page, live_url):
+    """Екран входу за макетом: Metinvest Digital | AI Knowledge Hub, другий
+    рядок заголовка — GRAY BLUE, зображення праворуч не заходить на форму."""
+    page.goto(live_url)
+    expect(page.locator(".auth-brand img.auth-logo")).to_have_attribute("alt", "Metinvest Digital")
+    expect(page.locator(".auth-brand .brand-name")).to_have_text("AI Knowledge Hub")
+    second = page.evaluate("getComputedStyle(document.querySelector('.auth-headline .grad')).color")
+    assert second == "rgb(178, 207, 249)", second
+    expect(page.locator("#auth-badges")).to_have_count(0)
+    for width, height in ((1920, 1080), (1280, 720)):
         page.set_viewport_size({"width": width, "height": height})
         page.goto(live_url)
-        expect(badges).to_be_visible()
-        expect(titles).to_have_text(["Знання", "Співпраця", "Розвиток"])
-        assert ("compact" in badges.get_attribute("class")) is compact
-        # Не наїжджають на форму входу й тексти ліворуч.
         card = page.locator(".login-card").bounding_box()
         sub = page.evaluate("""() => { const r = document.createRange();
             r.selectNodeContents(document.querySelector('.auth-sub'));
             return r.getBoundingClientRect().right; }""")
-        first = min(badges.locator(".ab").nth(i).bounding_box()["x"] for i in range(3))
-        assert first > max(card["x"] + card["width"], sub), (width, first)
-    page.set_viewport_size({"width": 390, "height": 844})
-    page.goto(live_url)
-    expect(badges).to_be_hidden()
+        hero_left = page.evaluate("""() => window.innerWidth
+            - parseFloat(getComputedStyle(document.querySelector('.auth'), '::after').width)""")
+        assert hero_left > max(card["x"] + card["width"], sub), (width, hero_left)
