@@ -195,6 +195,33 @@ def test_support_agent_link_default_and_change(client):
     assert client.get("/api/catalog/settings", headers=user).get_json()["support_agent_url"] == ""
 
 
+# ---------------------- Пошта адміністратора хабу ----------------------
+
+def test_admin_contact_email_default_change_and_login_screen(client):
+    """Фідбек колег, п. 1 і 8: конкретна адреса адміністратора — і в хабі, і
+    на екрані входу, де людина ще не автентифікована."""
+    default = "olga.starodubtseva@metinvest.digital"
+    assert client.get("/api/auth/config").get_json()["admin_contact_email"] == default
+    user = _login(client, "u1")
+    assert client.get("/api/catalog/settings", headers=user).get_json()[
+        "admin_contact_email"] == default
+
+    admin = _admin(client)
+    assert client.post("/api/catalog/settings", json={"admin_contact_email": "hub@example.org"},
+                       headers=user).status_code == 403
+    for bad in ("не пошта", "a@b", "@example.org", "x@" + "e" * 260 + ".org"):
+        res = client.post("/api/catalog/settings", json={"admin_contact_email": bad},
+                          headers=admin)
+        assert res.status_code == 400, bad
+    res = client.post("/api/catalog/settings", json={"admin_contact_email": " hub@example.org "},
+                      headers=admin)
+    assert res.get_json()["admin_contact_email"] == "hub@example.org"
+    assert client.get("/api/auth/config").get_json()["admin_contact_email"] == "hub@example.org"
+    # Порожнє значення ховає адресу.
+    client.post("/api/catalog/settings", json={"admin_contact_email": ""}, headers=admin)
+    assert client.get("/api/auth/config").get_json()["admin_contact_email"] == ""
+
+
 # --------------------------- Зворотний зв'язок ---------------------------
 
 def test_contact_message_saved_with_author_and_page(client, caplog):

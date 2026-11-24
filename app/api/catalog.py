@@ -29,7 +29,7 @@ from app.models import (
     Skill, SkillFeedback, AppSetting, SurveyResponse, SurveyPrompt, ResourceView,
     Notification,
     User, SectionManager,
-    RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS,
+    RESOURCE_TYPES, LINK_TYPES, BODY_TYPES, LINK_SCOPES, ACCENTS, SECTION_SCENARIOS,
     RESOURCE_STATUSES, AUTHOR_STATUSES, PUBLIC_STATUSES, REUSE_LEVELS,
     TERM_KINDS, MULTI_VALUE_TERM_KINDS,
     CODE_BOUND_TERM_KINDS, VIEW_TARGETS,
@@ -54,6 +54,17 @@ SUPPORT_AGENT_KEY = "support_agent_url"
 SUPPORT_AGENT_DEFAULT = ("https://teams.microsoft.com/l/app/"
                          "8c837748-c270-4056-bee7-d481b370943d"
                          "?source=app-bar-share-entrypoint")
+# Пошта адміністратора хабу (фідбек колег, 24.11.2026): видно на екрані входу,
+# на головній і у формі «Зв'язатися з адміністратором». Адміністратор змінює її
+# в «Керування → Звернення»; порожнє значення ховає адресу.
+ADMIN_CONTACT_KEY = "admin_contact_email"
+ADMIN_CONTACT_DEFAULT = "olga.starodubtseva@metinvest.digital"
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def admin_contact_email():
+    """Адреса адміністратора хабу для користувачів (може бути порожньою)."""
+    return AppSetting.get(ADMIN_CONTACT_KEY, ADMIN_CONTACT_DEFAULT) or ""
 # Поля, без яких матеріал не публікується при увімкненій суворій публікації.
 REQUIRED_ON_PUBLISH = (
     ("description", "короткий опис"),
@@ -513,6 +524,12 @@ def _apply_section_fields(section, data):
             raise ApiError("Позиція має бути числом", 400, "validation_error")
     if "is_active" in data:
         section.is_active = bool(data.get("is_active"))
+    if "scenario" in data:
+        scenario = (data.get("scenario") or "").strip() or None
+        if scenario is not None and scenario not in SECTION_SCENARIOS:
+            raise ApiError("Сценарій має бути одним із: " + ", ".join(SECTION_SCENARIOS),
+                           400, "validation_error")
+        section.scenario = scenario
 
 
 @bp.patch("/sections/<int:section_id>")
@@ -1763,7 +1780,8 @@ def catalog_settings():
     """Налаштування каталогу для UI (разом із частотою опитувань)."""
     out = {"strict_publish": strict_publish_enabled(),
            MATURITY_TEST_KEY: AppSetting.get(MATURITY_TEST_KEY, "") or "",
-           SUPPORT_AGENT_KEY: AppSetting.get(SUPPORT_AGENT_KEY, SUPPORT_AGENT_DEFAULT) or ""}
+           SUPPORT_AGENT_KEY: AppSetting.get(SUPPORT_AGENT_KEY, SUPPORT_AGENT_DEFAULT) or "",
+           ADMIN_CONTACT_KEY: admin_contact_email()}
     out.update({key: _survey_setting(key) for key in SURVEY_SETTINGS})
     return jsonify(out)
 
@@ -1773,7 +1791,8 @@ def catalog_settings():
 def set_catalog_settings():
     """Зміна налаштувань. Частота опитувань керується звідси, а не з коду."""
     data = request.get_json(silent=True) or {}
-    known = {"strict_publish", MATURITY_TEST_KEY, SUPPORT_AGENT_KEY, *SURVEY_SETTINGS}
+    known = {"strict_publish", MATURITY_TEST_KEY, SUPPORT_AGENT_KEY, ADMIN_CONTACT_KEY,
+             *SURVEY_SETTINGS}
     if not known & set(data):
         raise ApiError("Вкажіть щонайменше одне налаштування: "
                        + ", ".join(sorted(known)), 400, "validation_error")
@@ -1794,6 +1813,12 @@ def set_catalog_settings():
         if len(url) > 2000:
             raise ApiError("Посилання завелике", 400, "validation_error")
         AppSetting.set(SUPPORT_AGENT_KEY, url)
+    if ADMIN_CONTACT_KEY in data:
+        email = (data.get(ADMIN_CONTACT_KEY) or "").strip()
+        if email and (len(email) > 254 or not _EMAIL_RE.match(email)):
+            raise ApiError("Вкажіть адресу пошти адміністратора у вигляді name@example.com",
+                           400, "validation_error")
+        AppSetting.set(ADMIN_CONTACT_KEY, email)
     for key in SURVEY_SETTINGS:
         if key not in data:
             continue

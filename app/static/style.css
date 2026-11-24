@@ -281,6 +281,12 @@ table td, table th {
 .login-help ol { margin: 10px 0 8px; padding-left: 20px; display: grid; gap: 6px; color: #fff; }
 .login-help p { margin: 0; color: var(--brand-gray-blue); }
 @media (prefers-reduced-motion: reduce) { .login-help summary::before { transition: none; } }
+/* Після «Невірний логін або пароль» — які саме дані тут потрібні (фідбек колег) */
+.login-hint { margin: -6px 0 0; font-size: var(--fs-foot); line-height: 1.45; color: #fff; }
+/* «Не вдається увійти?» з поштою адміністратора — видно завжди (п. 8) */
+.login-contact { margin: 0; font-size: var(--fs-foot); line-height: 1.5; color: var(--brand-gray-blue); }
+.login-contact a { color: #fff; text-decoration: underline; text-underline-offset: 2px;
+  overflow-wrap: anywhere; }
 .card-sub { margin: -4px 0 6px; color: var(--brand-gray-blue); font-size: var(--fs-call); }
 .hint { color: var(--muted); font-size: var(--fs-foot); }
 .hint b { color: var(--text); }
@@ -389,7 +395,7 @@ button {
 button:hover { background: var(--primary-fill-hover); }
 button:active { opacity: .82; }
 
-/* Другорядна дія — контурна, як «Мій контент» і «Додати матеріал» у макеті:
+/* Другорядна дія — контурна, як «Додати матеріал» у макеті:
    темна підкладка й світла рамка, не сперечається з червоною головною */
 button.ghost {
   background: rgba(17, 26, 35, 0.35); color: var(--text);
@@ -871,6 +877,110 @@ td.actions > button + button { margin-left: 6px; }
 }
 .show-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 
+/* ===== Головна: спочатку цінність і вибір маршруту (фідбек колег, 24.11.2026) =====
+   Привітання дрібно, під ним — що таке хаб (заголовок, пояснення, шлях
+   «Навчайтеся → …») і пошта адміністратора; далі три плитки-сценарії й
+   компактна плитка «Нещодавно додані». Плитка — одне посилання з однією дією:
+   кнопка всередині лише підписує, куди вона веде. */
+.home-head { align-items: flex-start; }
+.home-greet { margin: 0 0 8px; font-size: var(--fs-head); font-weight: 500; color: var(--brand-gray-blue); }
+.home-title { max-width: 860px; }
+.home-lead { margin: 12px 0 0; max-width: 760px; font-size: 17px; line-height: 1.5; color: var(--text); }
+.home-path {
+  margin: 14px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+  font-size: var(--fs-body); font-weight: 600; color: var(--brand-gray-blue);
+}
+.home-path i { font-style: normal; font-weight: 400; color: var(--faint); }
+.home-admin { margin: 12px 0 0; font-size: var(--fs-body); color: var(--text); }
+.home-admin a { overflow-wrap: anywhere; }
+/* Дії головної — рядком під поясненням, а не окремо праворуч */
+.home-head .page-acts { margin: 22px 0 0; }
+
+.scn-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.scn-tile, .scn-new {
+  display: flex; color: var(--text); text-decoration: none;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card);
+  transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+}
+.scn-tile { flex-direction: column; padding: 22px 22px 20px; min-width: 0; }
+.scn-tile:hover, .scn-tile:focus-visible, .scn-new:hover, .scn-new:focus-visible {
+  transform: translateY(-2px); box-shadow: var(--lift); text-decoration: none;
+  border-color: rgba(179, 194, 208, 0.8);
+}
+.scn-tile:focus-visible, .scn-new:focus-visible { outline: 2px solid var(--brand-gray-blue); outline-offset: 2px; }
+.scn-ic {
+  flex: 0 0 auto; width: 46px; height: 46px; border-radius: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--fill-2); color: var(--brand-gray-blue);
+}
+.scn-ic svg { width: 26px; height: 26px; }
+.scn-title { margin: 16px 0 0; font-size: 21px; font-weight: 700; line-height: 1.3; letter-spacing: -0.005em; }
+.scn-sub { margin: 6px 0 0; font-size: var(--fs-body); line-height: 1.45; color: var(--text); }
+.scn-k {
+  margin: 16px 0 8px; font-size: var(--fs-cap); font-weight: 600; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--faint);
+}
+.scn-inside {
+  margin: 0 0 20px; padding: 0; list-style: none; display: grid; gap: 5px;
+  font-size: var(--fs-body); line-height: 1.4; color: var(--brand-gray-blue);
+}
+.scn-inside li { position: relative; padding-left: 14px; }
+.scn-inside li::before {
+  content: ""; position: absolute; left: 0; top: .6em; width: 5px; height: 5px;
+  border-radius: 50%; background: currentColor; opacity: .7;
+}
+.scn-cta {
+  margin-top: auto; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 14px; border-radius: 8px; white-space: nowrap;
+  background: var(--brand-gray-blue); color: var(--brand-bg);
+  font-size: var(--fs-body); font-weight: 700;
+}
+.scn-cta svg { width: 18px; height: 18px; stroke-width: 2.2; }
+.scn-tile:hover .scn-cta, .scn-new:hover .scn-cta { background: #fff; }
+/* «Нещодавно додані» — компактна плитка на всю ширину (п. 6) */
+.scn-new { align-items: center; gap: 16px; margin-top: 14px; padding: 14px 20px; }
+.scn-new .scn-ic { width: 40px; height: 40px; border-radius: 10px; }
+.scn-new .scn-ic svg { width: 22px; height: 22px; }
+.scn-new-txt { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.scn-new-txt b { font-size: var(--fs-head); font-weight: 700; }
+.scn-new-txt i { font-style: normal; font-size: var(--fs-body); color: var(--brand-gray-blue); }
+.scn-new .scn-cta { margin-top: 0; align-self: center; }
+.home .cat-personal { margin-top: 34px; }
+.home #home-support { margin-top: 34px; }
+/* Вузька область вмісту — плитки одна під одною; на ноутбуці плитка лягає
+   у два стовпці (назва й дія ліворуч, «Усередині» праворуч), щоб не
+   розтягуватися у висоту */
+@media (max-width: 1100px) {
+  .scn-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1100px) and (min-width: 761px) {
+  .scn-tile {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto 1fr auto; column-gap: 28px;
+  }
+  .scn-ic { grid-column: 1; grid-row: 1; }
+  .scn-title { grid-column: 1; grid-row: 2; }
+  .scn-sub { grid-column: 1; grid-row: 3; }
+  .scn-cta { grid-column: 1; grid-row: 5; margin-top: 18px; }
+  .scn-k { grid-column: 2; grid-row: 1; align-self: end; margin: 0 0 8px; }
+  .scn-inside { grid-column: 2; grid-row: 2 / 6; margin: 0; align-content: start; }
+}
+@media (max-width: 560px) {
+  .scn-new { flex-wrap: wrap; }
+  .scn-new .scn-cta { margin-left: 56px; }
+}
+
+/* Сторінка сценарію: розділи, з яких зібрано матеріали */
+.scn-secs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -12px 0 20px; }
+.scn-secs-k { margin-right: 2px; font-size: var(--fs-foot); color: var(--brand-gray-blue); }
+button.scn-sec {
+  width: auto; height: 32px; padding: 0 12px 0 9px; gap: 7px; border-radius: 8px;
+  background: rgba(17, 26, 35, 0.35); border: 1px solid var(--line); color: var(--text);
+  font-size: var(--fs-call); font-weight: 500;
+}
+button.scn-sec:hover { background: var(--fill); border-color: rgba(179, 194, 208, 0.75); }
+button.scn-sec svg { width: 17px; height: 17px; color: var(--brand-light-gray); }
+
 /* ===== Воронка ідей (BR-15, FR-10) ===== */
 .idea-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
 .idea-row {
@@ -902,11 +1012,12 @@ td.actions > button + button { margin-left: 6px; }
 }
 
 /* ----- Сітка карток -----
-   Плитка за макетом: назва, опис, а внизу — автор-Експерт, бейдж виду й
-   дія. Без іконки-плитки, тегів, підпису власника, рейтингу й причини
+   Плитка за макетом: назва, опис із двома тегами, а внизу — автор-Експерт,
+   бейдж виду й дія. Без іконки-плитки, підпису власника, рейтингу й причини
    рекомендації (дизайнерка: «очищення від шуму»); усе це — у картці
-   матеріалу. Рядки сітки спільні для плиток одного ряду (subgrid), тож
-   назви, описи й низ вирівнюються по горизонталі, як у макеті. */
+   матеріалу. Теги колеги попросили повернути (24.11.2026): клік по тегу
+   відкриває добірку. Рядки сітки спільні для плиток одного ряду (subgrid),
+   тож назви, описи й низ вирівнюються по горизонталі, як у макеті. */
 .cat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .cat-grid, .show-row { row-gap: 14px; }
 .cat-empty { grid-column: 1 / -1; text-align: center; padding: 28px 0; }
@@ -982,10 +1093,17 @@ td.actions > button + button { margin-left: 6px; }
   margin: 0; padding-right: 22px; font-size: 20px; font-weight: 700;
   letter-spacing: -0.005em; line-height: 1.4; overflow-wrap: anywhere;
 }
+.mdc-body { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .mdc-desc {
   margin: 0; font-size: var(--fs-body); line-height: 1.4; color: var(--text);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+.mdc-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.mdc-tags button.mdc-tag-link {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--brand-gray-blue);
+}
+.mdc-tag-more { font-size: var(--fs-cap); color: var(--faint); }
 .mdc-tag {
   display: inline-flex; align-items: center;
   padding: 3px 8px; border-radius: 6px;
@@ -1677,6 +1795,9 @@ button.link-btn {
   color: var(--primary); font-size: inherit; font-weight: 560; letter-spacing: 0;
 }
 button.link-btn:hover { background: none; color: var(--primary-strong); text-decoration: underline; }
+/* «Зв'язатися з адміністратором» поруч із текстом — звичайне посилання */
+button.link-btn[data-contact-admin] { color: var(--link); }
+button.link-btn[data-contact-admin]:hover { color: #fff; }
 
 /* «Мій розвиток»: рівень, наступний крок, маршрути (фідбек, п. 5 і 8) */
 .dev { display: flex; flex-direction: column; gap: 28px; }
@@ -1750,6 +1871,8 @@ button.link-btn:hover { background: none; color: var(--primary-strong); text-dec
 .support-txt i { font-size: var(--fs-body); font-style: normal; color: var(--text); line-height: 1.35; }
 
 /* «Зворотний зв'язок»: вікно повідомлення й список у «Керуванні» */
+.contact-mail { margin: 10px 0 0; font-size: var(--fs-call); color: var(--muted); }
+.contact-mail a { overflow-wrap: anywhere; }
 .contact-field { display: flex; flex-direction: column; gap: 6px; margin-top: 14px;
   font-size: var(--fs-foot); font-weight: 560; }
 .contact-field textarea { font-weight: 400; resize: vertical; min-height: 120px; }

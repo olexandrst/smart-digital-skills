@@ -17,10 +17,13 @@ bp = Blueprint("auth", __name__)
 
 @bp.get("/config")
 def auth_config():
-    """Які способи входу доступні — щоб екран входу не вгадував."""
+    """Які способи входу доступні — щоб екран входу не вгадував. Тут же пошта
+    адміністратора хабу: до входу людині більше нікуди звернутися."""
+    from app.api.catalog import admin_contact_email
     return jsonify({
         "entra_enabled": entra_service.is_enabled(),
         "password_enabled": entra_service.password_login_enabled(),
+        "admin_contact_email": admin_contact_email(),
     })
 
 

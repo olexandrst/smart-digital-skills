@@ -180,28 +180,33 @@ def _seed_package_skill(admin):
 # плитка веде туди. Коли контент переїде до нас — посилання прибирається.
 # Три зовнішні розділи колеги вирішили поки не показувати (30.10.2026):
 # вони приховані, а повернути їх можна в «Керування → Структура каталогу».
+# Порядок і сценарії головної — за фідбеком колег від 24.11.2026: спершу
+# AI Use Policy & Safety, Learning Space, Toolbox, Insight Center, Power Links
+# і FAQ; `scenario` — плитка головної, що збирає матеріали розділу.
 CATALOG_SECTIONS = [
-    {"name": "Про проєкт «AI Culture Acceleration»", "icon_emoji": "🚀", "accent": "red",
-     "description": "Мета, етапи та команда програми розвитку AI-культури.",
-     "url": "/portal/ai-culture-acceleration", "is_active": False},
+    {"name": "AI Use Policy & Safety", "icon_emoji": "🔐", "accent": "red",
+     "description": "Політики, правила та безпека використання ШІ.", "scenario": "learn"},
+    {"name": "Learning Space", "icon_emoji": "🎓", "accent": "steel",
+     "description": "Навчальні матеріали, самостійне навчання та вебінари.",
+     "scenario": "learn"},
     {"name": "Toolbox", "icon_emoji": "🧰", "accent": "ink",
      "description": "Доступні ШІ-інструменти компанії та умови їх використання."},
-    {"name": "FAQ", "icon_emoji": "❓", "accent": "steel",
-     "description": "Часті питання та відповіді про роботу зі штучним інтелектом."},
-    {"name": "Power Links", "icon_emoji": "🔗", "accent": "green",
-     "description": "Корисні зовнішні сервіси та внутрішні ресурси."},
     {"name": "Insight Center", "icon_emoji": "💡", "accent": "amber",
-     "description": "Лайфхаки та практики від AI-партнерів."},
-    {"name": "Learning Space", "icon_emoji": "🎓", "accent": "steel",
-     "description": "Навчальні матеріали, самостійне навчання та вебінари."},
-    {"name": "AI Use Policy & Safety", "icon_emoji": "🔐", "accent": "red",
-     "description": "Політики, правила та безпека використання ШІ."},
-    {"name": "AI Partners Network", "icon_emoji": "🤝", "accent": "ink",
-     "description": "Спільнота AI-партнерів у Viva Engage.",
-     "url": "https://web.yammer.com/main/groups/ai-partners-network", "is_active": False},
+     "description": "Лайфхаки та практики від AI-партнерів.", "scenario": "ideas"},
+    {"name": "Power Links", "icon_emoji": "🔗", "accent": "green",
+     "description": "Корисні зовнішні сервіси та внутрішні ресурси.", "scenario": "ideas"},
+    {"name": "FAQ", "icon_emoji": "❓", "accent": "steel",
+     "description": "Часті питання та відповіді про роботу зі штучним інтелектом.",
+     "scenario": "learn"},
     {"name": "AI Community", "icon_emoji": "☕", "accent": "green",
      "description": "AI Hub Weekly та зустрічі спільноти: "
                     "розклад, записи та матеріали заходів."},
+    {"name": "Про проєкт «AI Culture Acceleration»", "icon_emoji": "🚀", "accent": "red",
+     "description": "Мета, етапи та команда програми розвитку AI-культури.",
+     "url": "/portal/ai-culture-acceleration", "is_active": False},
+    {"name": "AI Partners Network", "icon_emoji": "🤝", "accent": "ink",
+     "description": "Спільнота AI-партнерів у Viva Engage.",
+     "url": "https://web.yammer.com/main/groups/ai-partners-network", "is_active": False},
     {"name": "Help & Feedback", "icon_emoji": "🆘", "accent": "amber",
      "description": "Технічна підтримка та зворотний зв'язок щодо хабу.",
      "url": "/portal/ai-help-feedback", "is_active": False},

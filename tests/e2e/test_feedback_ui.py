@@ -45,7 +45,7 @@ def test_wizard_finishes_with_two_explicit_buttons(page, live_url):
     expect(page.locator("#wiz-next")).to_have_text("Подати на розгляд")
 
     page.click("#wiz-draft")
-    # Після збереження хаб відкриває «Наповнення каталогу» й картку чернетки.
+    # Після збереження хаб відкриває «Мої матеріали» й картку чернетки.
     page.wait_for_selector(".md-modal")
     expect(page.locator(".md-modal .sm-draft")).to_be_visible()
     page.keyboard.press("Escape")

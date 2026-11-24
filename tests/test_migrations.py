@@ -295,3 +295,41 @@ def test_external_sections_hidden(tmp_path):
     with engine.connect() as conn:
         assert conn.execute(text(
             "SELECT COUNT(*) FROM catalog_sections WHERE is_active = 1")).scalar() == 4
+
+
+def test_home_scenarios_migration(tmp_path):
+    """Фідбек колег від 24.11.2026: розділи отримують сценарій головної й
+    порядок із фідбеку, решта йде після них; у довідник тегів додаються
+    «курси», «добірки», «практичні шаблони» й «рекомендації щодо використання
+    AI» (наявний тег не дублюється). Відкат прибирає колонку й невикористані
+    теги."""
+    from sqlalchemy import text
+    path = tmp_path / "scenarios.db"
+    _alembic(path, "upgrade", "b1d3f5a7c9e2", tmp_path=tmp_path)
+    engine = create_engine(f"sqlite:///{path}")
+    old_order = ("Про проєкт «AI Culture Acceleration»", "Toolbox", "FAQ", "Power Links",
+                 "Insight Center", "Learning Space", "AI Use Policy & Safety", "AI Community")
+    with engine.begin() as conn:
+        for position, name in enumerate(old_order):
+            _insert(conn, "catalog_sections", id=position + 1, name=name, position=position)
+        _insert(conn, "catalog_terms", kind="tag", name="Курси", name_norm="курси", position=3)
+    _alembic(path, "upgrade", "c3e5a7b9d1f3", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT name, scenario FROM catalog_sections ORDER BY position")).all()
+        assert [r[0] for r in rows] == [
+            "AI Use Policy & Safety", "Learning Space", "Toolbox", "Insight Center",
+            "Power Links", "FAQ", "Про проєкт «AI Culture Acceleration»", "AI Community"]
+        assert dict(rows) == {
+            "AI Use Policy & Safety": "learn", "Learning Space": "learn", "FAQ": "learn",
+            "Insight Center": "ideas", "Power Links": "ideas", "Toolbox": None,
+            "Про проєкт «AI Culture Acceleration»": None, "AI Community": None}
+        tags = [r[0] for r in conn.execute(text(
+            "SELECT name FROM catalog_terms WHERE kind = 'tag' ORDER BY position"))]
+        assert tags == ["Курси", "добірки", "практичні шаблони",
+                        "рекомендації щодо використання AI"]
+    _alembic(path, "downgrade", "b1d3f5a7c9e2", tmp_path=tmp_path)
+    with engine.connect() as conn:
+        assert "scenario" not in {c["name"] for c in inspect(conn).get_columns("catalog_sections")}
+        assert [r[0] for r in conn.execute(text(
+            "SELECT name FROM catalog_terms WHERE kind = 'tag'"))] == ["Курси"]

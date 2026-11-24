@@ -309,6 +309,11 @@ $("#login-form").addEventListener("submit", async (e) => {
     showApp();
   } catch (err) {
     $("#login-error").textContent = err.message;
+    // Частий випадок — пароль від корпоративної пошти (фідбек колег, 24.11.2026):
+    // поки корпоративного входу немає, підказуємо, які дані тут потрібні.
+    const hint = $("#login-hint");
+    if (hint) hint.classList.toggle("hidden",
+      err.code !== "invalid_credentials" || !!(authCfg && authCfg.entra_enabled));
   }
 });
 $("#logout-btn").addEventListener("click", () => logoutWithSurvey());
@@ -326,10 +331,12 @@ if (pwToggle) pwToggle.addEventListener("click", () => {
 });
 
 // Які способи входу доступні — питаємо сервер, а не вгадуємо.
+let authCfg = null;
 async function paintAuthOptions() {
   let cfg;
   try { cfg = await api("/auth/config", { auth: false }); }
   catch (e) { return; }
+  authCfg = cfg;
   const entra = $("#entra-btn"), or = $("#login-or"), form = $("#login-form");
   if (cfg.entra_enabled) {
     entra.classList.remove("hidden");
@@ -340,6 +347,18 @@ async function paintAuthOptions() {
     form.querySelectorAll(".input-wrap, .btn-primary").forEach(el => el.classList.add("hidden"));
   }
   paintLoginHelp(cfg);
+  paintLoginContact(cfg.admin_contact_email || "");
+}
+
+// «Не вдається увійти?» — з конкретною адресою адміністратора хабу (фідбек
+// колег, п. 8): форма звернення в хабі доступна лише після входу.
+function paintLoginContact(email) {
+  const box = $("#login-contact");
+  if (!box) return;
+  box.innerHTML = email
+    ? `Не вдається увійти? Напишіть адміністратору хабу:
+       <a href="mailto:${esc(email)}">${esc(email)}</a>`
+    : "Не вдається увійти? Зверніться до адміністратора хабу.";
 }
 
 // «Як увійти до «AI Knowledge Hub»» — кроки саме для тих способів входу,
@@ -355,7 +374,8 @@ function paintLoginHelp(cfg) {
   if (cfg.password_enabled) {
     steps.push((cfg.entra_enabled ? "Якщо адміністратор хабу видав вам окремі логін і пароль, "
       + "введіть їх у поля нижче й натисніть «Увійти»." : "Введіть логін і пароль, які видав "
-      + "адміністратор хабу, і натисніть «Увійти».")
+      + "адміністратор хабу, і натисніть «Увійти». Пароль від корпоративної пошти тут не "
+      + "підходить.")
       + " Логіном може бути робоча пошта або ім'я користувача; великі й малі літери не важливі.");
   }
   steps.push("Після входу відкриється сторінка «Для вас» з рекомендаціями.");
@@ -409,6 +429,8 @@ const GLYPH = {
   spark: '<path d="M12 3.4l1.9 5.2 5.2 1.9-5.2 1.9-1.9 5.2-1.9-5.2-5.2-1.9 5.2-1.9L12 3.4Z"/><path d="M18.6 16.4l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7.7-1.9Z"/>',
   star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8L12 3.6Z"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/>',
+  arrow: '<path d="M5 12h13.5M13 6.5l5.5 5.5-5.5 5.5"/>',
+  faq: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.7"/><path d="M12 16.9h.01"/>',
   path: '<circle cx="5.5" cy="6" r="2.2"/><circle cx="18.5" cy="18" r="2.2"/><path d="M7.7 6h5.6a3.2 3.2 0 0 1 0 6.4h-2.6a3.2 3.2 0 0 0 0 6.4h5.6"/>',
   box: '<path d="M3.6 8.4 12 4.2l8.4 4.2-8.4 4.2L3.6 8.4Z"/><path d="M3.6 12 12 16.2 20.4 12M3.6 15.6 12 19.8l8.4-4.2"/>',
   file: '<path d="M3.5 7.2c0-1 .8-1.8 1.8-1.8h3.4l1.8 2.2h8.2c1 0 1.8.8 1.8 1.8v8.4c0 1-.8 1.8-1.8 1.8H5.3c-1 0-1.8-.8-1.8-1.8V7.2Z"/>',
@@ -445,6 +467,7 @@ const GLYPH = {
 // добираємо за назвою (як у макеті: Toolbox — коробка, Power Links — ланка…);
 // невідома назва — коробка.
 const SECTION_GLYPHS = [
+  [/faq|питання/i, "faq"],
   [/link|посилан/i, "link"],
   [/insight|аналіт|кейс|ідеї/i, "idea"],
   [/learn|навч|курс|academy/i, "book"],
@@ -491,7 +514,7 @@ const ADMIN_SECTIONS = [
   { group: "Система", items: [
     { id: "users", label: "Користувачі", glyph: "person", panel: viewUsers,
       show: () => isAdmin() },
-    { id: "contact", label: "Зворотний зв'язок", glyph: "mail", panel: renderContactManage,
+    { id: "contact", label: "Звернення", glyph: "mail", panel: renderContactManage,
       show: () => isAdmin() },
   ]},
 ];
@@ -859,17 +882,25 @@ function sbItem(dest, label, glyph, count, extra = "") {
     </button>`;
 }
 
-// Низ панелі в обох режимах (фідбек тестування, п. 21): підтримка —
-// AI SD агент для технічних питань і «Зворотний зв'язок» адміністратору, —
-// а останнім пунктом інструкція. Посилання відкриваються в новій вкладці,
-// як і значок «?» угорі.
+// Низ панелі (фідбек тестування, п. 21; фідбек колег, п. 7): у базі знань —
+// «Мої матеріали», далі в обох режимах підтримка — AI SD агент для технічних
+// питань і «Зв'язатися з адміністратором», — а останнім пунктом інструкція.
+// Посилання відкриваються в новій вкладці, як і значок «?» угорі.
 const GUIDE_URL = "guide/";
 const AGENT_HINT = "Для вирішення технічних питань";
+const CONTACT_LABEL = "Зв'язатися з адміністратором";
 const CONTACT_HINT = "Нетехнічні питання адміністратору хабу";
 
 // Адресу агента змінює адміністратор у «Керуванні»; порожня ховає посилання.
 function supportAgentUrl() {
   return (catalogState.settings && catalogState.settings.support_agent_url) || "";
+}
+// Пошта адміністратора хабу (фідбек колег, п. 1 і 8) — теж із налаштувань.
+function adminEmail() {
+  return (catalogState.settings && catalogState.settings.admin_contact_email) || "";
+}
+function adminMailLink(email = adminEmail()) {
+  return email ? `<a href="mailto:${esc(email)}">${esc(email)}</a>` : "";
 }
 
 // Налаштування, потрібні на кожній сторінці (адреса агента), вантажимо одразу
@@ -882,13 +913,17 @@ async function refreshHubSettings() {
 
 function sbGuideHtml() {
   const agent = supportAgentUrl();
+  // «Мої матеріали» — особисте для кожного: лічильник — власні матеріали й
+  // навички. Черга модерації менеджера — у «Керуванні».
+  const mine = (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
   return `<div class="sb-spacer"></div>
+    ${nav.mode === "hub" ? sbItem("hub:contrib", "Мої матеріали", "tap", mine || "") : ""}
     ${agent ? `<a class="sb-item sb-guide" href="${esc(agent)}" target="_blank" rel="noopener"
        title="${AGENT_HINT}" data-support="agent">
       ${gsvg("mailai")}<span class="sb-label">AI SD агент</span>${gsvg("ext", "sb-ext")}
     </a>` : ""}
     <button class="sb-item" data-contact title="${CONTACT_HINT}">
-      ${gsvg("chats")}<span class="sb-label">Зворотний зв'язок</span>
+      ${gsvg("chats")}<span class="sb-label">${CONTACT_LABEL}</span>
     </button>
     <a class="sb-item sb-guide" href="${GUIDE_URL}" target="_blank" rel="noopener"
        title="Інструкція відкриється в новій вкладці">
@@ -923,6 +958,9 @@ function adminSidebarHtml() {
   }).join("");
 }
 
+// Панель бази знань (фідбек колег, п. 7): угорі особисте й увесь каталог,
+// далі розділи в порядку, який задає адміністратор (позиція розділу), а
+// «Мої матеріали» й підтримка — унизу (sbGuideHtml).
 function hubSidebarHtml() {
   const favCount = catalogState.favorites.skill.size + catalogState.favorites.resource.size;
   const recent = recentItems().length;
@@ -969,11 +1007,6 @@ function hubSidebarHtml() {
     html += `<div class="sb-group">Навчання</div>`
       + sbItem("hub:dev", "Мій розвиток", "grow");
   }
-  // Наповнення каталогу — особисте для кожного: лічильник — власні матеріали
-  // й навички. Черга модерації менеджера — у «Керуванні».
-  const mine = (catalogState.mine || []).length + (catalogState.mineSkills || []).length;
-  html += `<div class="sb-group">Контент</div>`
-    + sbItem("hub:contrib", "Наповнення каталогу", "tap", mine || "");
   return html;
 }
 
@@ -1091,6 +1124,8 @@ let catalogState = {
   settings: {},
   favorites: { skill: new Set(), resource: new Set() },
   query: "", kind: "all", sectionId: null, folderId: null, favOnly: false,
+  // Код сценарію головної на сторінці сценарію (hub:scn:<код>), інакше null.
+  scenario: null,
   // Фільтри за атрибутами картки (BR-06). Порожній рядок = фільтр не активний.
   filters: { category: "", complexity: "", businessValue: "", tool: "",
              owner: "", reuse: "", tag: "", status: "" },
@@ -1195,7 +1230,7 @@ async function ensureHubData(force = false) {
     api("/skills?mine=1").catch(() => []),
   ]);
   catalogState.paths = paths || [];
-  // Власні матеріали й навички — для лічильника «Наповнення каталогу».
+  // Власні матеріали й навички — для лічильника «Мої матеріали».
   catalogState.mine = mineRes || [];
   catalogState.mineSkills = mineSkills || [];
   catalogState.recommendations = (recs && recs.items) || [];
@@ -1230,7 +1265,8 @@ async function ensureHubData(force = false) {
 
 // Куди саме дивиться користувач у базі знань.
 function applyHubScope(dest) {
-  const parts = String(dest).split(":");   // hub : (home|all|fav|recent|sec|fol) : id
+  // hub : (home|all|fav|recent|new|scn|sec|fol) : id або код сценарію
+  const parts = String(dest).split(":");
   const what = parts[1] || "home";
   // Скидання — першим, ще за старим зрізом; позначку «лише обране» далі
   // ставимо явно за новим.
@@ -1238,6 +1274,7 @@ function applyHubScope(dest) {
   catalogState.scope = (what === "sec" || what === "fol") ? "catalog" : what;
   catalogState.favOnly = what === "fav";
   catalogState.query = "";
+  catalogState.scenario = what === "scn" ? (parts[2] || "") : null;
   if (what === "sec") {
     catalogState.sectionId = Number(parts[2]);
     catalogState.folderId = null;
@@ -1290,6 +1327,14 @@ function hubHead() {
     return { crumb: "", title: "Нещодавні",
              sub: "Матеріали, які ви відкривали останніми." };
   }
+  if (catalogState.scope === "new") {
+    return { crumb: "База знань", title: HOME_NEW.title, sub: HOME_NEW.sub };
+  }
+  if (catalogState.scope === "scn") {
+    const t = scenarioMeta(catalogState.scenario);
+    return { crumb: "База знань", title: esc(t ? t.title : "Сценарій"),
+             sub: t ? t.sub : "" };
+  }
   if (catalogState.scope === "all") {
     return { crumb: "База знань", title: "Матеріали",
              sub: `${nMaterials(catalogState.items.length)} — увесь каталог. Звужуйте видом, фільтрами чи пошуком.` };
@@ -1317,9 +1362,11 @@ function hubHead() {
   };
 }
 
+// Кнопки сторінок бази знань. «Мій контент» прибрано (фідбек колег, п. 5):
+// свої матеріали — у «Моїх матеріалах» бічної панелі, а перевірка
+// актуальності — у меню профілю.
 const PAGE_ACTS_HTML = `
   <div class="page-acts">
-    <button class="ghost hidden" id="cat-my-content">Мій контент</button>
     ${FEATURES.ideas ? `<button class="ghost" id="cat-idea">Поділитися ідеєю</button>` : ""}
     <button class="ghost" id="cat-add">${gsvg("plus")}Додати матеріал</button>
     <button id="cat-assistant">Опишіть задачу</button>
@@ -1330,29 +1377,102 @@ function bindPageActs() {
   const idea = $("#cat-idea");
   if (idea) idea.addEventListener("click", () => openIdeaForm());
   $("#cat-add").addEventListener("click", () => openContentWizard());
-  paintMyContentButton();
+  paintMyContentMenu();
 }
 
-// Головна (фідбек тестування, п. 5 і 8): привітання з рівнем під ним і два
-// блоки — «Рекомендовано вам» і «Нещодавно додані». Каталог із фільтрами живе
-// в «Матеріалах», рівень і маршрути — на сторінці «Мій розвиток». Пошук із
-// головної веде в «Матеріали»: сітки, яку він звужував би, тут немає.
-const RECENT_ADDED_LIMIT = 8;
+// Головна за принципом «спочатку цінність і вибір маршруту, потім
+// деталізація» (фідбек колег, 24.11.2026): пояснення цінності хабу з
+// контактом адміністратора (п. 1), три плитки-сценарії й компактна плитка
+// «Нещодавно додані» (п. 2 і 6), під ними «Рекомендовано вам» і підтримка.
+// Каталог із фільтрами живе в «Матеріалах», конкретні види — усередині
+// сценаріїв. Пошук із головної веде в «Матеріали».
+const HOME_PATH = ["Навчайтеся", "Надихайтеся досвідом колег", "Застосовуйте AI у своїх задачах"];
+
+// Плитки-сценарії. `scenario` — код розділів, які плитка збирає (поле
+// «Сценарій на головній» у «Структурі каталогу»); `search` — плитка веде в
+// загальний пошук (рішення колег: «Знайти рішення» відкриває пошук загалом).
+const HOME_SCENARIOS = [
+  { scenario: "learn", glyph: "book", title: "Навчатися та розвиватися",
+    sub: "Розвивайте свої знання та AI-навички",
+    inside: ["навчальні матеріали", "курси", "інструкції та гайди",
+             "добірки для розвитку AI-навичок"],
+    cta: "Перейти до навчання" },
+  { scenario: "ideas", glyph: "idea", title: "Знайти ідеї та практичний досвід",
+    sub: "Дізнавайтеся, як AI допомагає вирішувати реальні робочі задачі",
+    inside: ["практичні кейси", "досвід колег", "статті та корисні матеріали",
+             "приклади застосування AI", "нові та рекомендовані матеріали"],
+    cta: "Переглянути матеріали" },
+  { search: true, glyph: "cube", title: "Застосувати AI у роботі",
+    sub: "Використовуйте готові інструменти та рішення для своїх задач",
+    inside: ["готові промпти", "AI-рішення та AI-інструменти", "AI-агенти",
+             "практичні шаблони", "рекомендації щодо використання AI"],
+    cta: "Знайти рішення" },
+];
+const HOME_NEW = { title: "Нещодавно додані",
+                   sub: "Нові матеріали каталогу — найсвіжіші першими." };
+function scenarioMeta(code) { return HOME_SCENARIOS.find(x => x.scenario === code) || null; }
+// Видимі розділи сценарію в порядку бічної панелі.
+function scenarioSections(code) {
+  return catalogState.sections.filter(x => x.scenario === code && x.is_active !== false && !x.url);
+}
+
+// «Знайти рішення» — загальний пошук: увесь каталог і курсор у полі пошуку.
+async function openSearch() {
+  await go("hub:all");
+  const inp = $("#global-q");
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+function scenarioTileHtml(t, i) {
+  return `<a class="scn-tile" href="#" data-scn="${i}" aria-label="${esc(t.title)}: ${esc(t.cta)}">
+      <span class="scn-ic">${gsvg(t.glyph)}</span>
+      <h2 class="scn-title">${esc(t.title)}</h2>
+      <p class="scn-sub">${esc(t.sub)}</p>
+      <span class="scn-k">Усередині</span>
+      <ul class="scn-inside">${t.inside.map(x => `<li>${esc(x)}</li>`).join("")}</ul>
+      <span class="scn-cta">${esc(t.cta)}${gsvg("arrow")}</span>
+    </a>`;
+}
 
 async function viewHome() {
   const head = hubHead();
+  const email = adminEmail();
   $("#view").innerHTML = `
     <div class="catalog home">
-      <div class="page-head">
+      <div class="page-head home-head">
         <div class="page-head-txt">
-          <h1 class="page-h1 page-h1-lg">${head.title}</h1>
+          <p class="home-greet">${head.title}</p>
+          <h1 class="page-h1 page-h1-lg home-title">Усе необхідне для роботи з AI в одному просторі</h1>
+          <p class="home-lead">Навчайтеся, знаходьте практичні приклади використання AI та
+            застосовуйте перевірені рішення у своїй роботі.</p>
+          <p class="home-path">${HOME_PATH.map(x => `<span>${esc(x)}</span>`)
+            .join(`<i aria-hidden="true">→</i>`)}</p>
+          <p class="home-admin" id="home-admin">${email
+            ? `Є питання? Адміністратор хабу: ${adminMailLink(email)}` : ""}</p>
           <p class="page-sub home-level hidden" id="home-level"></p>
+          ${PAGE_ACTS_HTML}
         </div>
-        ${PAGE_ACTS_HTML}
       </div>
+      <div class="scn-grid" id="home-scenarios">
+        ${HOME_SCENARIOS.map(scenarioTileHtml).join("")}
+      </div>
+      <a class="scn-new" href="#" id="home-new">
+        <span class="scn-ic">${gsvg("clock")}</span>
+        <span class="scn-new-txt"><b>${esc(HOME_NEW.title)}</b>
+          <i>${esc(HOME_NEW.sub)}</i></span>
+        <span class="scn-cta">Переглянути${gsvg("arrow")}</span>
+      </a>
       <div class="cat-personal" id="cat-personal"></div>
       <div id="home-support"></div>
     </div>`;
+  $("#home-admin").classList.toggle("hidden", !email);
+  document.querySelectorAll("#home-scenarios [data-scn]").forEach(a =>
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const t = HOME_SCENARIOS[Number(a.dataset.scn)];
+      if (t.search) openSearch(); else go(`hub:scn:${t.scenario}`);
+    }));
+  $("#home-new").addEventListener("click", (e) => { e.preventDefault(); go("hub:new"); });
   paintCatalog();
   paintHomeSupport();
   bindPageActs();
@@ -1379,7 +1499,7 @@ function paintHomeSupport() {
         </a>` : ""}
         <button class="support-card" id="home-contact" title="${CONTACT_HINT}">
           <span class="support-ic">${gsvg("chats")}</span>
-          <span class="support-txt"><b>Зворотний зв'язок</b>
+          <span class="support-txt"><b>${CONTACT_LABEL}</b>
             <i>${CONTACT_HINT}: ролі й розділи, зміст каталогу, пропозиції.</i></span>
         </button>
       </div>
@@ -1387,13 +1507,24 @@ function paintHomeSupport() {
   box.querySelector("#home-contact").addEventListener("click", () => openContactForm());
 }
 
-// «Зворотний зв'язок»: повідомлення адміністратору хабу. Автор, дата й
-// сторінка підставляються самі — людині лишається лише написати.
+// «Зв'язатися з адміністратором»: повідомлення адміністратору хабу. Автор,
+// дата й сторінка підставляються самі — людині лишається лише написати.
+// Поруч — пошта адміністратора для тих, кому зручніше листом.
 function contactPageLabel() {
   const h1 = document.querySelector("#view .page-h1");
   const title = h1 ? h1.textContent.trim() : "";
   return title ? `${title} (${nav.dest})` : nav.dest;
 }
+
+// Кнопка «Зв'язатися з адміністратором» поруч із текстом «зверніться до
+// адміністратора» (фідбек колег, п. 8) — де б вона не з'явилася.
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-contact-admin]");
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openContactForm();
+});
 
 function openContactForm() {
   const page = contactPageLabel();
@@ -1402,12 +1533,13 @@ function openContactForm() {
   const { overlay, close } = catalogModal(`
     <div class="modal res-editor contact-modal">
       <div class="modal-head">
-        <h2>Зворотний зв'язок</h2>
+        <h2>${CONTACT_LABEL}</h2>
         <button class="modal-x" aria-label="Закрити">×</button>
       </div>
       <p class="muted">Питання й пропозиції адміністратору хабу: ролі, розділи, зміст
       каталогу${agent ? `. З технічними питаннями швидше допоможе
         <a href="${esc(agent)}" target="_blank" rel="noopener">AI SD агент</a>` : ""}.</p>
+      ${adminEmail() ? `<p class="contact-mail">Або напишіть на пошту: ${adminMailLink()}</p>` : ""}
       <label class="contact-field">Повідомлення
         <textarea id="ct-msg" rows="6" maxlength="5000"
           placeholder="Ваше питання чи пропозиція"></textarea></label>
@@ -1471,6 +1603,19 @@ async function viewCatalog() {
       <div class="cat-grid" id="cat-grid"></div>
     </div>`;
 
+  // Сторінка сценарію: з яких розділів зібрано матеріали — кожен відкривається
+  // окремо (фідбек колег, п. 2).
+  if (catalogState.scope === "scn") {
+    const secs = scenarioSections(catalogState.scenario);
+    if (secs.length) {
+      view.querySelector(".page-head").insertAdjacentHTML("afterend", `
+        <div class="scn-secs"><span class="scn-secs-k">Розділи:</span>${secs.map(x =>
+          `<button class="scn-sec" data-dest="hub:sec:${x.id}">${gsvg(sectionGlyph(x))}${
+            esc(x.name)}</button>`).join("")}</div>`);
+      view.querySelectorAll(".scn-sec").forEach(b =>
+        b.addEventListener("click", () => go(b.dataset.dest)));
+    }
+  }
   paintCatalog();
   bindPageActs();
   bindFilterPopover();
@@ -1589,6 +1734,13 @@ function trackView(targetType, targetId, targetName) {
 function sectionScope() {
   if (catalogState.scope === "recent") return recentItems();
   let items = catalogState.items;
+  // «Нещодавно додані» — увесь каталог, найсвіжіші першими (фідбек колег, п. 6).
+  if (catalogState.scope === "new") return [...items].sort((a, b) => b.when - a.when);
+  // Сценарій головної — матеріали розділів, прив'язаних до нього (п. 2).
+  if (catalogState.scope === "scn") {
+    const ids = new Set(scenarioSections(catalogState.scenario).map(x => x.id));
+    return items.filter(i => ids.has(i.sectionId));
+  }
   if (catalogState.favOnly) {
     items = items.filter(i => catalogState.favorites[i.item_type].has(i.id));
   }
@@ -1717,38 +1869,21 @@ function renderHomeLevel() {
   box.querySelector("#home-dev").addEventListener("click", () => go("hub:dev"));
 }
 
-// Блоки головної: «Рекомендовано вам» і «Нещодавно додані». Те, що вже є
-// серед рекомендацій, у новинках не повторюємо.
+// «Рекомендовано вам» під плитками-сценаріями. «Нещодавно додані» — уже не
+// розгорнутий список, а компактна плитка з переходом до повного (фідбек
+// колег, п. 6).
 function renderPersonal() {
   const box = $("#cat-personal");
   if (!box) return;
   const recs = catalogState.recommendations;
-  const recIds = new Set(recs.map(r => r.id));
-  const fresh = catalogState.items
-    .filter(i => !(i.item_type === "resource" && recIds.has(i.id)))
-    .sort((a, b) => b.when - a.when)
-    .slice(0, RECENT_ADDED_LIMIT);
-
-  box.innerHTML = (recs.length ? `
+  box.innerHTML = recs.length ? `
     <section class="show-block">
       <div class="show-head">
         <div><h2>Рекомендовано вам</h2>
           <p class="muted">Дібрано за вашим рівнем, підрозділом та тим, що ви вже дивилися.</p></div>
       </div>
       <div class="show-row" id="rec-row"></div>
-    </section>` : "") + `
-    <section class="show-block">
-      <div class="show-head">
-        <div><h2>Нещодавно додані</h2>
-          <p class="muted">Нові матеріали каталогу — найсвіжіші першими.</p></div>
-        <button class="ghost-act" id="home-all">Усі матеріали</button>
-      </div>
-      ${fresh.length ? `<div class="show-row" id="fresh-row"></div>`
-        : catalogState.items.length
-        ? `<p class="muted">Усі нові матеріали вже серед рекомендованих вище.</p>`
-        : `<p class="muted">Каталог поки що порожній.</p>`}
-    </section>`;
-
+    </section>` : "";
   if (recs.length) {
     // Чому матеріал порадили — підказка під курсором: окремий рядок під
     // кожною плиткою макет прибрав як зайвий текст.
@@ -1756,9 +1891,6 @@ function renderPersonal() {
     recs.forEach(r => row.appendChild(catalogCard(normResource(r),
                                                   { hint: r.recommend_reason || "" })));
   }
-  const freshRow = box.querySelector("#fresh-row");
-  if (freshRow) fresh.forEach(i => freshRow.appendChild(catalogCard(i)));
-  box.querySelector("#home-all").addEventListener("click", () => go("hub:all"));
 }
 
 function resetCatFilters() {
@@ -1909,6 +2041,13 @@ function renderCatalogGrid() {
   if (!list.length && catalogState.scope === "fav" && !query) {
     return;   // підзаголовок сторінки вже пояснює, як наповнити «Обране»
   }
+  if (!list.length && catalogState.scope === "scn" && !query) {
+    grid.innerHTML = `<div class="cat-empty">
+        <p class="cat-empty-title">Тут поки немає матеріалів</p>
+        <p class="muted">Матеріали з'являться, щойно їх опублікують у розділах цього сценарію.</p>
+      </div>`;
+    return;
+  }
   if (!list.length && catalogState.scope === "recent" && !query) {
     // Пояснення замість «Нічого не знайдено» (перелік екранів, E13b).
     grid.innerHTML = `<div class="cat-empty">
@@ -2008,13 +2147,21 @@ function openExternal(it) {
   window.open(it.url, "_blank", "noopener");
 }
 
-// Дія на плитці: залежить від виду наповнення.
+// Дія на плитці: залежить від виду наповнення. Вона завжди інша, ніж клік по
+// самій плитці (той відкриває картку): дві дороги до одного місця колег
+// плутали (фідбек колег, 24.11.2026).
 function cardAction(it) {
-  // Навичку відкривають (макет): пакет завантажують із картки, де видно,
-  // що саме в ньому.
+  // Навичка: кнопка одразу завантажує пакет; що в ньому — видно в картці.
+  // Без пакета завантажувати нічого, тож кнопки немає.
   if (it.kind === "skill") {
-    return { cls: "mdc-act", html: "Відкрити",
-             run: async () => { markSearchOpened(it); pushRecent(it); openSkillModal(it.id); } };
+    if (!(it.raw && it.raw.has_package)) return null;
+    return { cls: "mdc-act", html: "Завантажити", run: async (btn) => {
+      markSearchOpened(it);
+      if (btn) btn.disabled = true;
+      try {
+        if (await downloadSkillPackage(it.raw)) toast("Пакет навички завантажено");
+      } finally { if (btn) btn.disabled = false; }
+    } };
   }
   if (it.kind === "prompt") {
     return { cls: "mdc-act", html: "Копіювати", run: async () => {
@@ -2023,10 +2170,9 @@ function cardAction(it) {
       if (ok) api(`/catalog/resources/${it.id}/open`, { method: "POST" }).catch(() => {});
     } };
   }
-  if (it.kind === "instruction" || it.kind === "case") {
-    return { cls: "mdc-act", html: "Читати",
-             run: async () => { markSearchOpened(it); openResourceModal(it.id); } };
-  }
+  // Інструкцію й кейс читають у картці — туди й так веде клік по плитці,
+  // тож окремої кнопки «Читати» немає.
+  if (it.kind === "instruction" || it.kind === "case") return null;
   // Адресу MCP-сервера вставляють у конфіг клієнта, а не відкривають у браузері.
   if (it.kind === "mcp") {
     return { cls: "mdc-act", html: "Копіювати", run: async () => {
@@ -2073,10 +2219,12 @@ function authorHtml(name, expert) {
     esc(name)}`;
 }
 
-// Плитка матеріалу за макетом дизайнерки: назва, опис, а внизу — автор із
-// позначкою «Експерт», бейдж виду й дія. Теги, власник, рейтинг і версія —
-// у картці матеріалу, а не на плитці («очищення від шуму»). `hint` —
+// Плитка матеріалу за макетом дизайнерки: назва, опис, до двох тегів, а
+// внизу — автор із позначкою «Експерт», бейдж виду й дія. Теги повернуто на
+// прохання колег (24.11.2026): клік по тегу відкриває добірку матеріалів із
+// ним; решта тегів, власник, рейтинг і версія — у картці матеріалу. `hint` —
 // підказка під курсором, напр. чому матеріал рекомендовано.
+const CARD_TAGS = 2;
 function catalogCard(it, { hint = "" } = {}) {
   const desc = it.description || "";
   const shortDesc = desc.length > DESC_PREVIEW_LEN
@@ -2097,7 +2245,12 @@ function catalogCard(it, { hint = "" } = {}) {
   const card = el(`<article class="mdc${it.featured ? " featured" : ""}" data-kind="${esc(it.kind)}" tabindex="0" role="button" title="${esc(hint || "Детальніше")}">
     <button class="mdc-fav${fav ? " on" : ""}" title="${fav ? "Прибрати з обраного" : "Додати в обране"}" aria-label="Обране">${ICO_STAR}</button>
     <h3 class="mdc-title">${esc(it.name)}</h3>
-    <p class="mdc-desc">${esc(shortDesc)}</p>
+    <div class="mdc-body">
+      <p class="mdc-desc">${esc(shortDesc)}</p>
+      ${(it.tags || []).length ? `<div class="mdc-tags">${it.tags.slice(0, CARD_TAGS).map(tagButton).join("")}${
+        it.tags.length > CARD_TAGS ? `<span class="mdc-tag-more" title="${esc(it.tags.slice(CARD_TAGS).join(", "))}">+${
+          it.tags.length - CARD_TAGS}</span>` : ""}</div>` : ""}
+    </div>
     <div class="mdc-foot">
       <span class="mdc-meta">${meta.join("")}</span>
       ${kindBadge(it)}
@@ -2120,6 +2273,7 @@ function catalogCard(it, { hint = "" } = {}) {
     } catch (err) { toast(err.message, "err"); }
   });
 
+  bindTagButtons(card);
   const actBtn = card.querySelector(".mdc-act");
   if (actBtn && act) {
     actBtn.addEventListener("click", async (e) => {
@@ -2222,7 +2376,7 @@ function bindComments(overlay, base, { onRated } = {}) {
 // Блок керування в картці: автор бачить «Ваш матеріал», менеджер розділу
 // чужого — «Модерація». Стоїть першим у картці: менеджер, що прийшов зі
 // сповіщення, має одразу бачити дії, а не гортати до них. Ті самі дії, що й
-// у списках «Наповнення каталогу» та «Модерація».
+// у списках «Мої матеріали» та «Модерація».
 function manageBarHtml(ref) {
   const own = isOwnItem(ref), mod = canModerate(ref.raw);
   if (!(own || mod)) return "";
@@ -2355,25 +2509,21 @@ function catalogModal(innerHtml, { beforeClose } = {}) {
 }
 
 // Детальна картка ресурсу: промпт/інструкція — з текстом, агент/посилання — з URL.
-// ------- Мій контент і нагадування про перегляд (AKH-18) -------
+// ------- Перевірка актуальності й нагадування про перегляд (AKH-18) -------
 
-// Кнопку показуємо лише тим, у кого справді є свій контент: інакше вона
-// займає місце в кожного, нікуди не ведучи.
-async function paintMyContentButton() {
-  const btn = $("#cat-my-content");
-  if (!btn) return;
+// Пункт меню профілю «Перевірка актуальності» (до 24.11.2026 — кнопка «Мій
+// контент» на сторінках) показуємо лише тим, хто відповідає за матеріали;
+// скільки з них час переглянути — числом поруч.
+async function paintMyContentMenu() {
+  const item = document.querySelector('#me-menu [data-act="my-content"]');
+  if (!item) return;
   let data;
   try { data = await api("/catalog/my-content"); }
   catch (e) { return; }
-  if (!data.items.length) return;
+  item.hidden = !data.items.length;
   const pending = data.overdue + data.soon;
-  btn.textContent = pending ? `Мій контент · ${pending}` : "Мій контент";
-  btn.classList.toggle("warn", data.overdue > 0);
-  btn.classList.remove("hidden");
-  btn.addEventListener("click", () => openMyContent());
-  // Пункт меню профілю — теж лише тим, хто має свій контент.
-  const item = document.querySelector('#me-menu [data-act="my-content"]');
-  if (item) item.hidden = false;
+  const badge = item.querySelector(".me-right");
+  if (badge) badge.textContent = pending || "";
 }
 
 async function openMyContent() {
@@ -2405,7 +2555,7 @@ async function openMyContent() {
   const { overlay, close } = catalogModal(`
     <div class="modal sm-modal">
       <div class="modal-head">
-        <h2>Мій контент</h2>
+        <h2>Перевірка актуальності</h2>
         <button class="modal-x" aria-label="Закрити">×</button>
       </div>
       ${notes.items.length ? `<div class="note-list">${notes.items.slice(0, 5).map(n => `
@@ -2544,11 +2694,14 @@ function sameNameMaterial(name, exceptId) {
 
 async function openContentWizard(opts = {}) {
   const existing = opts.resource || null;
-  let terms = [], sections = [], folders = [], cats = [];
+  let terms = [], sections = [], folders = [], cats = [], tagTerms = [];
   try {
-    [terms, sections, folders, cats] = await Promise.all([
+    [terms, sections, folders, cats, tagTerms] = await Promise.all([
       api("/catalog/terms?kind=material_type"), api("/catalog/sections"),
       api("/catalog/folders"), api("/categories"),
+      // Підказки тегів: зокрема «курси», «добірки», «практичні шаблони»
+      // (фідбек колег, 24.11.2026 — ці види живуть як теги).
+      api("/catalog/terms?kind=tag").catch(() => []),
     ]);
   } catch (e) { /* довідники не обов'язкові — майстер працює і без них */ }
   const typeTerms = terms.filter(t => t.is_active);
@@ -2951,7 +3104,10 @@ async function openContentWizard(opts = {}) {
           <input id="wiz-cat" type="text" list="wiz-cats" value="${esc(st.category)}" placeholder="Напр. Аналітика">
           <datalist id="wiz-cats">${cats.map(c => `<option value="${esc(c.name)}">`).join("")}</datalist></label>
         <label class="wiz-label">Теги <i>через кому</i>
-          <input id="wiz-tags" type="text" value="${esc(st.tags)}" placeholder="RAG, закупівлі"></label>
+          <input id="wiz-tags" type="text" value="${esc(st.tags)}" placeholder="RAG, закупівлі"
+                 list="wiz-taglist">
+          <datalist id="wiz-taglist">${(tagTerms || []).filter(t => t.is_active)
+            .map(t => `<option value="${esc(t.name)}">`).join("")}</datalist></label>
       </div>`;
 
     bindPlacement();
@@ -3123,7 +3279,7 @@ async function openContentWizard(opts = {}) {
   paint();
 }
 
-// ---------- «Наповнення каталогу»: усе, що додають у базу знань ----------
+// ---------- «Мої матеріали»: усе, що людина додає в базу знань ----------
 //
 // Дві сторінки. У базі знань — особисте для кожного: усе, що людина
 // опублікувала, з діями над ним. У «Керуванні» — консоль менеджера: черга
@@ -3544,9 +3700,10 @@ function bindContribRows(root, refOf, reload, rerender) {
 
 const byUpdated = (a, b) => String(b.raw.updated_at || "").localeCompare(String(a.raw.updated_at || ""));
 
-// «Наповнення каталогу» в базі знань — особисте для кожного: усе, що людина
-// опублікувала сама, з діями над ним. Модерацію чужого менеджер веде в
-// «Керуванні», а тут бачить лише підказку, скільки публікацій чекає.
+// «Мої матеріали» (до 24.11.2026 — «Наповнення каталогу») — особисте для
+// кожного: усе, що людина опублікувала сама, з діями над ним. Модерацію
+// чужого менеджер веде в «Керуванні», а тут бачить лише підказку, скільки
+// публікацій чекає.
 async function viewContributions() {
   let resources = [], skills = [];
   try {
@@ -3570,7 +3727,7 @@ async function viewContributions() {
   view.innerHTML = `
     <div class="page-head">
       <div class="page-head-txt">
-        <h1 class="page-h1">Наповнення каталогу</h1>
+        <h1 class="page-h1">Мої матеріали</h1>
         <p class="page-sub">${esc(refs.length
           ? `опубліковано: ${published} · на розгляді: ${inReview} · чернеток: ${refs.length - published - inReview}`
           : "Усе, що ви додаєте в базу знань.")}</p>
@@ -3790,8 +3947,8 @@ async function openPath(pathId) {
       <div class="step-body">
         <div class="step-title">${esc(s.title || "Крок " + (i + 1))}</div>
         ${s.note ? `<div class="step-note">${esc(s.note)}</div>` : ""}
-        ${!s.available ? `<div class="step-note step-gone">Матеріал вилучено з каталогу —
-          зверніться до команди хабу.</div>` : ""}
+        ${!s.available ? `<div class="step-note step-gone">Матеріал вилучено з каталогу.
+          <button type="button" class="link-btn" data-contact-admin>${CONTACT_LABEL}</button></div>` : ""}
       </div>
       ${s.available ? `<button class="small" data-go="${s.id}">Відкрити</button>` : ""}
     </div>`;
@@ -4246,7 +4403,8 @@ function reuseBlockHtml(r) {
     const who = r.owner || "власник матеріалу";
     inner = `<p class="reuse-empty">Покрокового сценарію ще немає.
       ${r.owner ? `Щоб повторити рішення, зверніться до відповідального: <b>${esc(who)}</b>.`
-                : "Щоб повторити рішення, зверніться до команди хабу."}</p>`
+                : `Щоб повторити рішення, зверніться до адміністратора хабу:
+                   <button type="button" class="link-btn" data-contact-admin>${CONTACT_LABEL}</button>.`}</p>`
       + (href ? `<a class="mdc-act reuse-contact" href="${esc(href)}"
            target="_blank" rel="noopener">Зв'язатися з власником</a>` : "");
   }
@@ -5334,9 +5492,10 @@ async function renderIdeasManage() {
       ideas.find(x => x.id === Number(b.dataset.ideaRoute)), resources)));
 }
 
-// «Зворотний зв'язок» (фідбек тестування, п. 21): повідомлення адміністратору
-// зі статусами «нове» й «опрацьовано» і адреса AI SD агента, яку видно внизу
-// бічної панелі й на головній.
+// «Звернення» (фідбек тестування, п. 21; фідбек колег, п. 8): повідомлення
+// з форми «Зв'язатися з адміністратором» зі статусами «нове» й «опрацьовано»,
+// пошта адміністратора хабу (екран входу, головна, форма) і адреса AI SD
+// агента, яку видно внизу бічної панелі й на головній.
 let contactFilter = "new";
 
 async function renderContactManage() {
@@ -5396,6 +5555,16 @@ async function renderContactManage() {
             ? "Нових повідомлень немає." : "Повідомлень немає."}</p>`}</div>
     </div>
     <div class="card">
+      <h2>Пошта адміністратора хабу</h2>
+      <p class="muted">Видно на екрані входу («Не вдається увійти?»), на головній і у формі
+      «${CONTACT_LABEL}». Порожнє поле ховає адресу.</p>
+      <div class="test-url-row">
+        <input id="admin-email" type="email" value="${esc(adminEmail())}"
+               placeholder="name@metinvest.digital" aria-label="Пошта адміністратора хабу">
+        <button class="mdc-act" id="admin-email-save">Зберегти</button>
+      </div>
+    </div>
+    <div class="card">
       <h2>AI SD агент</h2>
       <p class="muted">Канал технічної підтримки в Teams. Посилання видно внизу бічної
       панелі й на головній, підказка: «${AGENT_HINT}». Порожнє поле ховає його.</p>
@@ -5417,6 +5586,15 @@ async function renderContactManage() {
         renderContactManage();
       } catch (err) { toast(err.message, "err"); }
     }));
+  panel.querySelector("#admin-email-save").addEventListener("click", async () => {
+    try {
+      const res = await api("/catalog/settings", { method: "POST",
+        body: { admin_contact_email: panel.querySelector("#admin-email").value } });
+      catalogState.settings = res;
+      toast(res.admin_contact_email ? "Пошту адміністратора збережено"
+                                    : "Пошту адміністратора приховано");
+    } catch (err) { toast(err.message, "err"); }
+  });
   panel.querySelector("#agent-url-save").addEventListener("click", async () => {
     try {
       const res = await api("/catalog/settings", { method: "POST",
@@ -5542,6 +5720,7 @@ function renderSectionRows(sections) {
           s.url ? ` · <span class="res-url">${esc(s.url)}</span>` : ""}</div>
         ${s.url ? "" : `<div class="res-sub">Модератор: ${esc(s.moderator ? s.moderator.name : "не призначено")}
           · заступник: ${esc(s.deputy ? s.deputy.name : "не призначено")}</div>`}
+        ${scenarioMeta(s.scenario) ? `<div class="res-sub">На головній: «${esc(scenarioMeta(s.scenario).title)}»</div>` : ""}
       </div>
       <span class="badge ${s.url ? "draft" : "published"}">${s.url ? "Зовнішній" : `${s.items_count} матеріалів`}</span>
       <div class="res-acts">
@@ -6161,9 +6340,13 @@ function openSynonymEditor(row) {
 // Редактор розділу каталогу.
 function openSectionEditor(section) {
   const s = section || { name: "", description: "", icon_emoji: "", accent: "",
-                         url: "", position: 0, is_active: true };
+                         url: "", position: 0, is_active: true, scenario: null };
   const accentOpts = ACCENT_OPTIONS
     .map(([v, l]) => `<option value="${esc(v)}"${v === (s.accent || "") ? " selected" : ""}>${esc(l)}</option>`).join("");
+  // Плитка-сценарій головної, що збирає матеріали розділу (фідбек колег, п. 2).
+  const scenarioOpts = [["", "Не входить у плитки головної"],
+    ...HOME_SCENARIOS.filter(t => t.scenario).map(t => [t.scenario, t.title])]
+    .map(([v, l]) => `<option value="${esc(v)}"${v === (s.scenario || "") ? " selected" : ""}>${esc(l)}</option>`).join("");
 
   const { overlay, close } = catalogModal(`
     <div class="modal res-editor">
@@ -6178,7 +6361,8 @@ function openSectionEditor(section) {
         <label>Колір плитки<select id="se-accent">${accentOpts}</select></label>
         <label class="wide">Посилання на зовнішній портал (необов'язково)
           <input id="se-url" type="text" value="${esc(s.url || "")}" placeholder="https://… — плитка вестиме туди замість фільтра"></label>
-        <label>Позиція<input id="se-pos" type="number" value="${Number(s.position) || 0}"></label>
+        <label class="wide">Сценарій на головній<select id="se-scenario">${scenarioOpts}</select></label>
+        <label>Позиція в бічній панелі<input id="se-pos" type="number" value="${Number(s.position) || 0}"></label>
         <label class="check"><input type="checkbox" id="se-active"${s.is_active ? " checked" : ""}>
           <span>Показувати в каталозі</span></label>
       </div>
@@ -6200,6 +6384,7 @@ function openSectionEditor(section) {
       url: overlay.querySelector("#se-url").value,
       position: Number(overlay.querySelector("#se-pos").value) || 0,
       is_active: overlay.querySelector("#se-active").checked,
+      scenario: overlay.querySelector("#se-scenario").value,
     };
     saveBtn.disabled = true;
     try {
@@ -6427,7 +6612,7 @@ async function openResourceEditor(resourceId, { onSaved } = {}) {
       }
       toast("Збережено");
       close();
-      // Редактор відкривають і з «Керування», і з «Наповнення каталогу» —
+      // Редактор відкривають і з «Керування», і з «Моїх матеріалів» —
       // повертатися треба туди, звідки прийшли.
       (onSaved || renderResourcesManage)();
     } catch (err) {
@@ -6453,7 +6638,7 @@ async function uploadSkillIcon(file, skillId) {
 
 // Редактор навички: атрибути, інструкція, іконка, нова версія пакета.
 // Відкривається у вікні поверх сторінки — з картки навички чи з рядка в
-// «Наповненні каталогу».
+// «Моїх матеріалах».
 async function openSkillEditor(skillId, { onSaved } = {}) {
   const [loaded, cats] = await Promise.all([
     api(`/skills/${skillId}`), api("/categories").catch(() => []),
@@ -6886,7 +7071,7 @@ function tourSections() {
   return out;
 }
 
-// «Підтримка» — агент і «Зворотний зв'язок» унизу бічної панелі.
+// «Підтримка» — агент і «Зв'язатися з адміністратором» унизу бічної панелі.
 function tourSupport() {
   const items = [...document.querySelectorAll('#sidebar [data-support="agent"], #sidebar [data-contact]')]
     .filter(tourVisible);
@@ -6896,6 +7081,9 @@ function tourSupport() {
 function tourSteps() {
   const phone = window.matchMedia("(max-width: 760px)").matches;
   return [
+    { at: () => tourPick("#home-scenarios"), title: "З чого почати",
+      text: "Оберіть, що потрібно зараз: навчитися, подивитися досвід колег чи знайти готове "
+        + "рішення для задачі. Нижче — нещодавно додані матеріали й рекомендовані вам." },
     { at: () => tourPick(".spotlight"), title: "Пошук",
       text: "Пишіть звичайними словами: «протокол наради», «тендер». Каталог звузиться одразу, "
         + "а Enter запустить помічника, який підбере матеріали під задачу."
@@ -6914,12 +7102,12 @@ function tourSteps() {
         + "крок і навчальні маршрути. Рівень видно й на головній — під привітанням." },
     { at: () => tourPick("#view article.mdc"), title: "Картка матеріалу",
       text: "Клацніть картку, щоб відкрити опис. Кнопка внизу копіює промпт чи завантажує "
-        + "навичку, а зірочка зберігає матеріал в «Обране»." },
+        + "навичку, тег показує схожі матеріали, а зірочка зберігає матеріал в «Обране»." },
     { at: () => tourPick("#cat-add"), title: "Додати матеріал",
       text: "Додайте свій промпт, інструкцію чи навичку за три кроки. Власником матеріалу "
         + "стаєте ви." },
     { at: () => tourPick('#sidebar [data-dest="hub:contrib"]'), side: "right",
-      title: "Наповнення каталогу",
+      title: "Мої матеріали",
       text: "Усе, що ви додали: чернетки, подане на розгляд і опубліковане. Матеріал "
         + "з'являється в каталозі після схвалення менеджером розділу." },
     { when: () => hasConsole(),
@@ -6932,12 +7120,12 @@ function tourSteps() {
       text: "Коментарі до ваших матеріалів, рішення менеджера й нагадування про перевірку. "
         + "Клік відкриває потрібну картку." },
     { at: () => tourPick("#me-btn"), title: "Профіль",
-      text: (FEATURES.ideas ? "Обране, ваші ідеї й контент" : "Обране й ваш контент")
-        + ", світла чи темна тема. Тут же можна ще раз пройти "
-        + "це знайомство." },
+      text: (FEATURES.ideas ? "Обране, ваші ідеї й перевірка актуальності ваших матеріалів"
+                            : "Обране й перевірка актуальності ваших матеріалів")
+        + ". Тут же можна ще раз пройти це знайомство." },
     { at: () => tourSupport(), side: "right", title: "Підтримка",
-      text: "AI SD агент у Teams допоможе з технічними питаннями. «Зворотний зв'язок» — "
-        + "для нетехнічних питань адміністратору хабу: ролі, розділи, зміст каталогу." },
+      text: "AI SD агент у Teams допоможе з технічними питаннями. «Зв'язатися з "
+        + "адміністратором» — для нетехнічних питань: ролі, розділи, зміст каталогу." },
     { at: () => tourPick("#help-btn"), title: "Інструкція", guide: true,
       text: "Детальна інструкція з кроками й знімками екрана. Відкривається в новій вкладці; "
         + "посилання на неї є й останнім пунктом бічної панелі." },

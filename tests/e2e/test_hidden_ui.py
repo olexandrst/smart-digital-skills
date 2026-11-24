@@ -17,14 +17,14 @@ def test_ideas_and_development_are_hidden(page, live_url):
     expect(page.locator("#home-level")).to_be_hidden()
     # Пряма адреса «Мого розвитку» веде на головну.
     page.evaluate("() => go('hub:dev')")
-    expect(page.locator("#cat-personal")).to_be_visible()
+    expect(page.locator("#home-scenarios")).to_be_visible()
     # Меню профілю — без «Мої ідеї».
     page.click("#me-btn")
     expect(page.locator('#me-menu [data-act="my-ideas"]')).to_be_hidden()
     page.keyboard.press("Escape")
     # Картка матеріалу — без «Поділитися ідеєю».
     page.click('#sidebar [data-dest="hub:all"]')
-    page.locator("#cat-grid article.mdc").first.click()
+    page.locator("#cat-grid article.mdc .mdc-title").first.click()
     expect(page.locator(".md-modal")).to_be_visible()
     expect(page.locator("#res-idea")).to_have_count(0)
 

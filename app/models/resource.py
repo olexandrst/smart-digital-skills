@@ -83,6 +83,12 @@ REUSE_LEVELS = ("ready", "adaptable", "reference")
 # Акцент кольорової плитки-іконки у стилі Metinvest Digital.
 ACCENTS = ("red", "ink", "steel", "amber", "green")
 
+# Плитки-сценарії головної (фідбек колег, 24.11.2026), до яких розділ може
+# належати: learn — «Навчатися та розвиватися», ideas — «Знайти ідеї та
+# практичний досвід». Третя плитка, «Застосувати AI у роботі», веде в
+# загальний пошук, тож розділів не збирає.
+SECTION_SCENARIOS = ("learn", "ideas")
+
 # Види керованих довідників метаданих (FR-04).
 # tag            — теги матеріалів (багато на картку);
 # complexity     — рівень складності (один на картку);
@@ -157,6 +163,9 @@ class CatalogSection(db.Model):
     url = db.Column(db.String)           # зовнішній розділ (гібридний режим)
     position = db.Column(db.Integer, nullable=False, default=0)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
+    # Плитка-сценарій головної, що збирає матеріали розділу (SECTION_SCENARIOS);
+    # None — розділ живе лише в бічній панелі.
+    scenario = db.Column(db.String)
     created_at = db.Column(db.DateTime, nullable=False, default=_now)
 
     def to_dict(self, counts=None):
@@ -169,6 +178,7 @@ class CatalogSection(db.Model):
             "url": self.url,
             "position": self.position,
             "is_active": self.is_active,
+            "scenario": self.scenario,
         }
         if counts is not None:
             data["items_count"] = counts.get(self.id, 0)

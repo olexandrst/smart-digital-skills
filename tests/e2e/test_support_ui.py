@@ -1,5 +1,5 @@
 """Хвилі 3 і 4 фідбеку тестування в браузері: позначка «Експерт», AI SD агент
-і «Зворотний зв'язок» адміністратору."""
+і «Зв'язатися з адміністратором» (до 24.11.2026 — «Зворотний зв'язок»)."""
 from tests.e2e.helpers import expect, login, open_wizard_at_describe
 
 AGENT_PREFIX = "https://teams.microsoft.com/l/app/"
@@ -19,10 +19,12 @@ def _set_expert(page, username, value):
 
 def test_support_links_and_contact_message(page, live_url):
     login(page, live_url, "tester")
-    # Низ бічної панелі: агент, «Зворотний зв'язок», інструкція.
+    # Низ бічної панелі (фідбек колег, п. 7): «Мої матеріали», агент,
+    # «Зв'язатися з адміністратором», інструкція.
     bottom = page.locator("#sidebar .sb-item .sb-label")
-    labels = bottom.all_text_contents()[-3:]
-    assert labels == ["AI SD агент", "Зворотний зв'язок", "Інструкція"]
+    labels = bottom.all_text_contents()[-4:]
+    assert labels == ["Мої матеріали", "AI SD агент", "Зв'язатися з адміністратором",
+                      "Інструкція"]
     agent = page.locator('#sidebar [data-support="agent"]')
     expect(agent).to_have_attribute("title", "Для вирішення технічних питань")
     expect(agent).to_have_attribute("target", "_blank")
@@ -39,6 +41,10 @@ def test_support_links_and_contact_message(page, live_url):
     # Повідомлення: автор і сторінка підставляються самі.
     page.click('#sidebar [data-dest="hub:fav"]')
     page.click("#sidebar [data-contact]")
+    expect(page.locator(".contact-modal h2")).to_have_text("Зв'язатися з адміністратором")
+    # Поруч із формою — пошта адміністратора хабу (фідбек колег, п. 8).
+    expect(page.locator(".contact-mail a")).to_have_attribute(
+        "href", "mailto:olga.starodubtseva@metinvest.digital")
     expect(page.locator(".contact-meta")).to_contain_text("Тестувальник")
     expect(page.locator(".contact-meta")).to_contain_text("Обране")
     page.click("#ct-send")
@@ -47,11 +53,11 @@ def test_support_links_and_contact_message(page, live_url):
     page.click("#ct-send")
     expect(page.locator(".contact-modal")).to_have_count(0)
 
-    # Адміністратор: сповіщення веде в «Керування → Зворотний зв'язок».
+    # Адміністратор: сповіщення веде в «Керування → Звернення».
     _relogin(page, live_url, "admin")
     page.click("#notif-btn")
     page.locator(".notif-item", has_text="Хочу стати менеджером розділу").click()
-    expect(page.locator(".page-h1")).to_have_text("Зворотний зв'язок")
+    expect(page.locator(".page-h1")).to_have_text("Звернення")
     row = page.locator(".contact-row", has_text="Хочу стати менеджером розділу")
     expect(row).to_contain_text("Тестувальник")
     expect(row).to_contain_text("Обране (hub:fav)")
@@ -116,7 +122,7 @@ def test_expert_label_on_published_material(page, live_url):
         # Інші матеріали того самого автора опубліковано до галочки — без позначки.
         expect(page.locator("#cat-grid article.mdc", has_text="Регламент закупівель")
                .locator(".exp-tag")).to_have_count(0)
-        card.click()
+        card.locator(".mdc-title").click()
         expect(page.locator(".md-modal .sm-meta .exp-tag")).to_have_text("Експерт")
     finally:
         _relogin(page, live_url, "admin")

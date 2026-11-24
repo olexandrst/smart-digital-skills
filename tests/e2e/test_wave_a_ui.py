@@ -21,9 +21,11 @@ def _show_development(page):
     page.evaluate("() => { FEATURES.development = true; buildSidebar(); paintCatalog(); }")
 
 
-# ---- П. 5 і 8: головна — привітання з рівнем і два блоки ----
+# ---- П. 5 і 8: головна — привітання з рівнем; новинки — окремою сторінкою ----
+# Блоки головної перебудовано за фідбеком колег 24.11.2026 — див.
+# test_home_scenarios_ui.py.
 
-def test_home_has_level_line_and_two_blocks(page, live_url):
+def test_home_has_level_line_and_fresh_materials(page, live_url):
     # Свіжий матеріал публікує адміністратор: у користувача він пройшов би розгляд.
     login(page, live_url, "admin")
     page.evaluate("""() => api('/catalog/resources', { method: 'POST', body: {
@@ -37,21 +39,13 @@ def test_home_has_level_line_and_two_blocks(page, live_url):
     expect(level).to_be_visible()
     expect(level).to_contain_text("Рівень роботи з AI ще не визначено")
     expect(level.locator("#home-dev")).to_have_text("Мій розвиток →")
-    titles = page.locator("#cat-personal h2")
-    expect(titles.last).to_have_text("Нещодавно додані")
-    assert set(titles.all_text_contents()) <= {"Рекомендовано вам", "Нещодавно додані"}
     # Каталогу з фільтрами на головній більше немає — він у «Матеріалах».
     expect(page.locator("#cat-grid")).to_have_count(0)
     expect(page.locator("#cat-kinds")).to_have_count(0)
-    fresh = page.locator("#fresh-row article.mdc")
-    assert fresh.count() <= 8
-    if not fresh.count():   # малий каталог: усе нове вже серед рекомендацій
-        expect(page.locator("#cat-personal")).to_contain_text("вже серед рекомендованих")
-    # Те, що вже є серед рекомендацій, у новинках не повторюється.
-    recs = set(page.locator("#rec-row .mdc-title").all_text_contents())
-    assert not recs & set(page.locator("#fresh-row .mdc-title").all_text_contents())
-    # Щойно опублікований матеріал одразу видно на головній.
-    expect(page.locator("#cat-personal")).to_contain_text("Свіжа інструкція")
+    # Щойно опублікований матеріал одразу видно в «Нещодавно доданих».
+    page.click("#home-new")
+    expect(page.locator("#cat-grid")).to_contain_text("Свіжа інструкція")
+    page.click('#sidebar [data-dest="hub:home"]')
 
     # Пошук із головної веде в «Матеріали» й одразу звужує каталог.
     page.fill("#global-q", "регламент")
@@ -60,7 +54,7 @@ def test_home_has_level_line_and_two_blocks(page, live_url):
     page.fill("#global-q", "")
 
     page.click('#sidebar [data-dest="hub:home"]')
-    page.click("#home-all")
+    page.click('#sidebar [data-dest="hub:all"]')
     expect(page.locator(".page-h1")).to_have_text("Матеріали")
 
 
@@ -109,13 +103,12 @@ def test_tag_opens_all_materials_with_it(page, live_url):
     login(page, live_url)
     page.click('#sidebar [data-dest="hub:all"]')
     card = page.locator("#cat-grid article.mdc", has_text="Регламент закупівель")
-    # Теги на плитці прибрано за макетом («очищення від шуму») — вони в картці.
-    expect(card.locator("button.mdc-tag-link")).to_have_count(0)
-    card.click()
-    tags = page.locator(".md-modal button.mdc-tag-link")
+    # Теги повернуто на плитку (фідбек колег, 24.11.2026): до двох, клік по
+    # тегу відкриває добірку, а не саму картку.
+    tags = card.locator("button.mdc-tag-link")
     expect(tags).to_have_text(["закупівлі", "регламент"])
     tags.first.click()
-    expect(page.locator(".md-modal")).to_have_count(0)        # картку закрито
+    expect(page.locator(".md-modal")).to_have_count(0)
     expect(page.locator("#cat-active")).to_contain_text("Тег: закупівлі")
     names = page.locator("#cat-grid .mdc-title")
     expect(names).to_have_count(2)
@@ -123,7 +116,7 @@ def test_tag_opens_all_materials_with_it(page, live_url):
 
     # Те саме з іншої картки й іншим тегом.
     page.click("#cat-reset")
-    page.locator("#cat-grid article.mdc", has_text="Питання та відповіді").click()
+    page.locator("#cat-grid article.mdc", has_text="Питання та відповіді").locator(".mdc-title").click()
     page.locator('.md-modal button.mdc-tag-link:has-text("довідка")').click()
     expect(page.locator(".md-modal")).to_have_count(0)
     expect(page.locator("#cat-grid .mdc-title")).to_have_text(["Питання та відповіді (FAQ)"])

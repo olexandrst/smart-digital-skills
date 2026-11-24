@@ -944,3 +944,31 @@ def test_showcase_skips_drafts(client):
     blocks = client.get("/api/catalog/showcase", headers=h).get_json()
     names = [i["name"] for b in blocks for i in b["items"]]
     assert "Чернетка" not in names
+
+
+# ---- Сценарії головної (фідбек колег, 24.11.2026) ----
+
+def test_section_scenario_set_changed_and_cleared(client):
+    """Розділ прив'язується до плитки-сценарію головної; невідомий код —
+    помилка, порожнє значення відв'язує."""
+    h = _admin(client)
+    created = _section(client, h, scenario="learn")
+    assert created.status_code == 201
+    sid = created.get_json()["id"]
+    assert created.get_json()["scenario"] == "learn"
+
+    res = client.patch(f"/api/catalog/sections/{sid}", json={"scenario": "apply"}, headers=h)
+    assert res.status_code == 400
+    assert "Сценарій" in res.get_json()["message"]
+
+    res = client.patch(f"/api/catalog/sections/{sid}", json={"scenario": "ideas"}, headers=h)
+    assert res.get_json()["scenario"] == "ideas"
+    listed = client.get("/api/catalog/sections", headers=_login(client, "u1")).get_json()
+    assert next(s for s in listed if s["id"] == sid)["scenario"] == "ideas"
+
+    res = client.patch(f"/api/catalog/sections/{sid}", json={"scenario": ""}, headers=h)
+    assert res.get_json()["scenario"] is None
+    # Сценарій змінює лише адміністратор.
+    res = client.patch(f"/api/catalog/sections/{sid}", json={"scenario": "learn"},
+                       headers=_login(client, "u1"))
+    assert res.status_code == 403

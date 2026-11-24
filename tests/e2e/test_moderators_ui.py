@@ -80,7 +80,7 @@ def test_archive_and_restore_from_card(page, live_url):
     page.evaluate("(id) => api(`/catalog/resources/${id}/status`, { method: 'POST', "
                   "body: { status: 'published' } })", rid)
     page.evaluate("() => ensureHubData(true).then(() => go('hub:all'))")
-    page.locator("#cat-grid article.mdc", has_text="Матеріал для архіву").click()
+    page.locator("#cat-grid article.mdc", has_text="Матеріал для архіву").locator(".mdc-title").click()
     modal = page.locator(".md-modal")
     expect(modal.locator(".sm-modinfo")).to_contain_text("Менеджер Розділу (модератор розділу)")
     modal.locator('[data-m="archive"]').click()

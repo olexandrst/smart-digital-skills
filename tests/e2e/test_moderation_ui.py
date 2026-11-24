@@ -31,7 +31,7 @@ def test_submission_approval_and_changes(page, live_url):
     expect(page.locator(".page-h1")).to_have_text("Модерація")
     sidebar = page.locator("#sidebar .sb-label")
     expect(sidebar).to_have_text(["Модерація", "KPI хабу", "Використання", "AI SD агент",
-                                  "Зворотний зв'язок", "Інструкція"])
+                                  "Зв'язатися з адміністратором", "Інструкція"])
     row = page.locator(f'.content-queue .res-row[data-id="{rid}"]')
     row.locator('[data-act="approve"]').click()
     expect(row).to_have_count(0)
